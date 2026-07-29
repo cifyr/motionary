@@ -41,6 +41,13 @@ enum ObservedGeometryStore {
     /// widget calls this on every render.
     static func record(size: CGSize, for option: WidgetSizeOption) {
         guard size.width > 1, size.height > 1, let store = try? DesignStore() else { return }
+        // Widgets are wide or tall, never square. A square reading means a
+        // preview or a mid-transition layout, not the real family.
+        let aspect = size.width / size.height
+        guard aspect < 0.95 || aspect > 1.05 else {
+            logger.info("ignoring square \(Int(size.width))x\(Int(size.height)) for \(option.rawValue, privacy: .public)")
+            return
+        }
 
         var observed = load()
         if let existing = observed.size(for: option),

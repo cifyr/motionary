@@ -17,16 +17,10 @@ struct DesignWidgetView: View {
         content
             .background {
                 GeometryReader { geometry in
-                    Color.clear.onAppear {
-                        Self.lastRenderedSize = geometry.size
-                        // Teach the app this device's real family size, so the
-                        // editor stops sizing crops from a table measured on
-                        // another OS.
-                        ObservedGeometryStore.record(
-                            size: geometry.size,
-                            for: WidgetFamilyCompatibility.sizeOption(for: family)
-                        )
-                    }
+                    // Reported, not learned: the provider records the size,
+                    // because only it can tell a real widget from a gallery
+                    // preview.
+                    Color.clear.onAppear { Self.lastRenderedSize = geometry.size }
                 }
             }
             .widgetAccentable(false)
@@ -171,6 +165,9 @@ struct DesignWidgetView: View {
         }
 
         status.memoryFootprintMB = MemoryFootprint.megabytes
+        status.learnedSizes = ObservedGeometryStore.load().sizes
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\(Int($0.value.width))x\(Int($0.value.height))" }
         WidgetStatusLog.write(status)
         return true
     }

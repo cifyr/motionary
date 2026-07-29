@@ -55,6 +55,8 @@ struct WidgetStatus: Codable, Equatable, Sendable {
     // Environment
     var memoryFootprintMB = 0
     var memoryLimitHintMB = 0
+    /// Family sizes learned from the system, as "large=359x548".
+    var learnedSizes: [String] = []
 
     var succeeded: Bool { outcome == "ok" }
 
@@ -114,6 +116,9 @@ struct WidgetStatus: Codable, Equatable, Sendable {
 
         MEMORY
         footprint     \(memoryFootprintMB)MB
+
+        LEARNED
+        sizes         \(learnedSizes.isEmpty ? "none yet" : learnedSizes.joined(separator: "  "))
         """
     }
 }

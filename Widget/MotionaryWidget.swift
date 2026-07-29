@@ -14,6 +14,7 @@ struct DesignProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (DesignEntry) -> Void) {
+        learn(from: context)
         completion(DesignEntry(date: .now, designID: resolvedID()))
     }
 
@@ -21,10 +22,22 @@ struct DesignProvider: TimelineProvider {
     /// text, so a reload policy would spend battery without changing anything.
     /// The app reloads timelines explicitly when the selection or build changes.
     func getTimeline(in context: Context, completion: @escaping (Timeline<DesignEntry>) -> Void) {
+        learn(from: context)
         completion(Timeline(
             entries: [DesignEntry(date: .now, designID: resolvedID())],
             policy: .never
         ))
+    }
+
+    /// `displaySize` is the size the system will draw at, stated rather than
+    /// inferred, and `isPreview` marks the widget gallery — whose smaller,
+    /// squarer preview would otherwise be learned as the real family size.
+    private func learn(from context: Context) {
+        guard !context.isPreview else { return }
+        ObservedGeometryStore.record(
+            size: context.displaySize,
+            for: WidgetFamilyCompatibility.sizeOption(for: context.family)
+        )
     }
 
     private func resolvedID() -> UUID? {
