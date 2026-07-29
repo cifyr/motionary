@@ -99,9 +99,12 @@ private struct TimerFontCanvas: View {
     var body: some View {
         let lanes = manifest.laneCount
         let frameDuration = 1 / CGFloat(manifest.framesPerSecond)
-        // A reference in the past guarantees the timer is counting up through
-        // the selections rather than waiting to start.
-        let reference = Date() - 60
+        // Anchored to a whole cycle rather than "now minus 60", so the visible
+        // frame is a pure function of wall-clock time. That is what lets the
+        // app resume the animation where the widget left it. It also keeps the
+        // lanes and the blink mask on one reference; two separate `Date()`
+        // reads could disagree by enough to select the wrong lane.
+        let reference = TimerFontSpec.cycleAlignedReference()
 
         ZStack {
             // Split into two halves masked against each other: the blink mask
@@ -119,7 +122,7 @@ private struct TimerFontCanvas: View {
                         .foregroundStyle(.white)
                         .centerAnimationGlyph(size: size)
                         .mask {
-                            BlinkMask(blinkOffset: CGFloat(-lane) * frameDuration)
+                            BlinkMask(reference: reference, blinkOffset: CGFloat(-lane) * frameDuration)
                                 .frame(width: size, height: size)
                         }
                 }
@@ -132,13 +135,13 @@ private struct TimerFontCanvas: View {
                         .foregroundStyle(.white)
                         .centerAnimationGlyph(size: size)
                         .mask {
-                            BlinkMask(blinkOffset: CGFloat(-lane) * frameDuration)
+                            BlinkMask(reference: reference, blinkOffset: CGFloat(-lane) * frameDuration)
                                 .frame(width: size, height: size)
                         }
                 }
             }
             .mask {
-                BlinkMask(blinkOffset: 1).frame(width: size, height: size)
+                BlinkMask(reference: reference, blinkOffset: 1).frame(width: size, height: size)
             }
         }
         .frame(width: size, height: size)
@@ -147,13 +150,14 @@ private struct TimerFontCanvas: View {
 }
 
 private struct BlinkMask: View {
-    static let referenceDate = Date() - 60
+    /// Shared with the lane texts so both sides of the mask agree on phase.
+    let reference: Date
     let blinkOffset: TimeInterval
 
     var body: some View {
         GeometryReader { geometry in
             let maxSize = max(geometry.size.width, geometry.size.height)
-            Text(Self.referenceDate - blinkOffset, style: .timer)
+            Text(reference - blinkOffset, style: .timer)
                 .font(.custom(FontSetGenerator.blinkFontResourceName, size: maxSize))
                 .centerAnimationGlyph(size: maxSize, isInGeometryReader: true)
         }

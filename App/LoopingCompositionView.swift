@@ -27,6 +27,8 @@ struct LoopingCompositionView<Tile: View>: View {
     let videoURL: URL?
     let wallpaper: Image?
     var scaleMode: ScaleMode = .fitWidth
+    /// Resumes the loop at the widget's current phase when supplied.
+    var startTime: (() -> TimeInterval)?
     @ViewBuilder let tileContent: (PlacedTile, CGFloat) -> Tile
 
     var body: some View {
@@ -55,7 +57,7 @@ struct LoopingCompositionView<Tile: View>: View {
                 }
 
                 if let videoURL {
-                    LoopingVideoView(url: videoURL)
+                    LoopingVideoView(url: videoURL, startTime: startTime)
                         .frame(width: screen.width, height: screen.height)
                         .offset(x: originX, y: originY)
                         .allowsHitTesting(false)
@@ -78,15 +80,18 @@ struct LoopingCompositionView<Tile: View>: View {
 
 struct LoopingVideoView: UIViewRepresentable {
     let url: URL
+    /// Where in the loop to begin, evaluated at the moment playback starts so
+    /// the app's launch time is already accounted for. Nil starts at zero.
+    var startTime: (() -> TimeInterval)?
 
     func makeUIView(context: Context) -> PlayerView {
         let view = PlayerView()
-        view.play(url: url)
+        view.play(url: url, startTime: startTime)
         return view
     }
 
     func updateUIView(_ view: PlayerView, context: Context) {
-        view.play(url: url)
+        view.play(url: url, startTime: startTime)
     }
 
     static func dismantleUIView(_ view: PlayerView, coordinator: ()) {
@@ -102,7 +107,7 @@ struct LoopingVideoView: UIViewRepresentable {
 
         private var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 
-        func play(url: URL) {
+        func play(url: URL, startTime: (() -> TimeInterval)?) {
             guard currentURL != url else { return }
             guard FileManager.default.fileExists(atPath: url.path) else { return }
             stop()
@@ -116,10 +121,37 @@ struct LoopingVideoView: UIViewRepresentable {
             playerLayer.videoGravity = .resize
             queuePlayer = player
             currentURL = url
-            player.play()
+
+            guard let startTime else {
+                player.play()
+                return
+            }
+            // Seek once the item is ready, and read the phase at that moment so
+            // the wait for readiness does not put the app behind the widget.
+            observe(player: player) {
+                let target = CMTime(seconds: startTime(), preferredTimescale: 600)
+                player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+                    player.play()
+                }
+            }
+        }
+
+        private var readinessObservation: NSKeyValueObservation?
+
+        private func observe(player: AVQueuePlayer, then start: @escaping () -> Void) {
+            if player.currentItem?.status == .readyToPlay {
+                start()
+                return
+            }
+            readinessObservation = player.observe(\.currentItem?.status, options: [.initial, .new]) { player, _ in
+                guard player.currentItem?.status == .readyToPlay else { return }
+                start()
+            }
         }
 
         func stop() {
+            readinessObservation?.invalidate()
+            readinessObservation = nil
             queuePlayer?.pause()
             looper?.disableLooping()
             looper = nil

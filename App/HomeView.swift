@@ -44,6 +44,11 @@ struct HomeView: View {
     private func composition(design: DesignDocument, store: DesignStore) -> some View {
         let videoURL = store.previewVideoURL(for: design.id)
         let wallpaperURL = store.wallpaperURL(for: design.id)
+        // Both the widget's glyph selection and this seek are pure functions of
+        // wall-clock time, so opening the app picks the animation up where the
+        // widget had it rather than restarting the loop.
+        let spec = design.spec
+        let loopFrames = design.loopFrameCount
 
         return LoopingCompositionView(
             screenSize: DeviceGeometry.screenPixelSize,
@@ -51,7 +56,8 @@ struct HomeView: View {
             tiles: design.tiles,
             videoURL: FileManager.default.fileExists(atPath: videoURL.path) ? videoURL : nil,
             wallpaper: UIImage(contentsOfFile: wallpaperURL.path).map { Image(uiImage: $0) },
-            scaleMode: .device
+            scaleMode: .device,
+            startTime: { spec.videoTime(loopFrameCount: loopFrames) }
         ) { tile, side in
             Button {
                 router.launch(appID: tile.appID)

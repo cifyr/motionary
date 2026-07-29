@@ -64,6 +64,38 @@ struct TimerFontSpec: Equatable, Sendable {
         glyphSequence * laneCount + lane
     }
 
+    /// Reference date for the timer text, anchored to a whole cycle.
+    ///
+    /// The ligature table keys on the timer's seconds field, mapping `s` and
+    /// `s + 30` to the same glyph, so the picture repeats every 30 seconds.
+    /// Anchoring to a multiple of that period does two things: the visible
+    /// frame becomes a pure function of wall-clock time, so the app can work
+    /// out what the widget is showing without being told; and the anchor can
+    /// advance a whole cycle without the picture moving.
+    ///
+    /// The 60-second lead keeps the elapsed value inside a stable `M:SS`
+    /// format. A far-past anchor would widen the string and shift which glyph
+    /// lands in the visible slot.
+    static func cycleAlignedReference(at date: Date = Date()) -> Date {
+        let seconds = date.timeIntervalSince1970
+        let aligned = (seconds / cycleDuration).rounded(.down) * cycleDuration
+        return Date(timeIntervalSince1970: aligned - 60)
+    }
+
+    /// Which frame of the cycle the widget intends to be showing.
+    func globalFrame(at date: Date = Date()) -> Int {
+        let phase = date.timeIntervalSince1970.truncatingRemainder(dividingBy: Self.cycleDuration)
+        return frame(at: phase < 0 ? phase + Self.cycleDuration : phase)
+    }
+
+    /// Where to start the app's preview video so it continues from whatever the
+    /// widget was showing, in seconds into the loop.
+    func videoTime(at date: Date = Date(), loopFrameCount: Int) -> TimeInterval {
+        guard loopFrameCount > 0 else { return 0 }
+        let index = globalFrame(at: date) % loopFrameCount
+        return Double(index) / Double(framesPerSecond)
+    }
+
     func frame(at elapsedTime: TimeInterval) -> Int {
         let raw = Int(floor(elapsedTime * Double(framesPerSecond)))
         return ((raw % totalFrames) + totalFrames) % totalFrames

@@ -145,6 +145,74 @@ final class GeometryAndSnapTests: XCTestCase {
         }
     }
 
+    // MARK: - Widget/app phase continuity
+
+    /// The reference must land on a whole cycle, otherwise the app cannot work
+    /// out what the widget is showing without being told.
+    func testCycleAlignedReferenceLandsOnACycleBoundary() {
+        for offset in [0.0, 7.3, 29.999, 30.0, 1_234_567.89] {
+            let reference = TimerFontSpec.cycleAlignedReference(at: Date(timeIntervalSince1970: offset))
+            let sinceEpoch = reference.timeIntervalSince1970 + 60
+            XCTAssertEqual(
+                sinceEpoch.truncatingRemainder(dividingBy: TimerFontSpec.cycleDuration), 0, accuracy: 0.0001,
+                "reference for offset \(offset) is not cycle aligned"
+            )
+        }
+    }
+
+    /// The reference jumps a whole cycle every 30 seconds. That must not move
+    /// the picture, or the animation would stutter every wrap.
+    func testCrossingACycleBoundaryDoesNotChangeTheFrame() {
+        let spec = TimerFontSpec(smoothness: .standard)
+        // 1_000_050 is a multiple of the 30-second cycle; 1_000_030 is not.
+        let boundary = 1_000_050.0
+        let justBefore = Date(timeIntervalSince1970: boundary - 0.001)
+        let justAfter = Date(timeIntervalSince1970: boundary + 0.001)
+
+        let before = TimerFontSpec.cycleAlignedReference(at: justBefore)
+        let after = TimerFontSpec.cycleAlignedReference(at: justAfter)
+        XCTAssertEqual(
+            after.timeIntervalSince1970 - before.timeIntervalSince1970,
+            TimerFontSpec.cycleDuration, accuracy: 0.0001,
+            "the anchor should advance exactly one cycle"
+        )
+
+        // The anchor jumped a whole cycle, so the frame must not jump with it:
+        // the last frame of the cycle is adjacent to frame 0.
+        XCTAssertEqual(spec.globalFrame(at: Date(timeIntervalSince1970: boundary)), 0)
+        XCTAssertEqual(spec.globalFrame(at: justBefore), spec.totalFrames - 1)
+    }
+
+    func testFrameIsAPureFunctionOfWallClockTimeWithACycleLongPeriod() {
+        let spec = TimerFontSpec(smoothness: .standard)
+        for offset in [0.0, 3.5, 17.25, 29.9] {
+            let now = Date(timeIntervalSince1970: 1_700_000_000 + offset)
+            let cycleLater = now.addingTimeInterval(TimerFontSpec.cycleDuration)
+            XCTAssertEqual(spec.globalFrame(at: now), spec.globalFrame(at: cycleLater), "offset \(offset)")
+        }
+    }
+
+    /// The seek target has to land inside the loop, whatever the loop length.
+    func testVideoTimeStaysWithinTheLoop() {
+        for smoothness in MotionSmoothness.allCases {
+            let spec = TimerFontSpec(smoothness: smoothness)
+            for loop in spec.seamlessLoopLengths(maximum: 64) {
+                let duration = Double(loop) / Double(spec.framesPerSecond)
+                for step in 0 ..< 60 {
+                    let now = Date(timeIntervalSince1970: Double(step) * 0.5)
+                    let time = spec.videoTime(at: now, loopFrameCount: loop)
+                    XCTAssertGreaterThanOrEqual(time, 0)
+                    XCTAssertLessThan(time, duration, "\(smoothness) loop \(loop) step \(step)")
+                }
+            }
+        }
+    }
+
+    func testVideoTimeIsZeroForAnEmptyLoop() {
+        let spec = TimerFontSpec(smoothness: .standard)
+        XCTAssertEqual(spec.videoTime(loopFrameCount: 0), 0)
+    }
+
     // MARK: - Snapping
 
     private func engine() -> SnapEngine {
