@@ -38,6 +38,22 @@ enum PrebuiltDesign {
         }
     }()
 
+    /// Whether a design's lane fonts shipped in this build.
+    ///
+    /// Only bundled fonts animate. Registering generated fonts at runtime —
+    /// `.process` and `.persistent` both — resolves every lane by name on iOS
+    /// 27 and then draws nothing, which is indistinguishable from a working
+    /// font until you look at the widget. So this is the test, rather than the
+    /// registry's own report: the registry cannot tell the difference, and
+    /// trusting it is what produced a black widget from a healthy-looking
+    /// 32/32.
+    static func fontsAreBundled(familyBase: String) -> Bool {
+        Bundle.main.url(
+            forResource: LaneFontBuilder.postScriptName(family: familyBase, lane: 0),
+            withExtension: "ttf"
+        ) != nil
+    }
+
     static var backdropURL: URL? {
         Bundle.main.url(forResource: backdropResource, withExtension: "jpg")
     }

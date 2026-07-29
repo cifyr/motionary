@@ -63,20 +63,22 @@ struct DesignWidgetView: View {
               let manifest = try? store.loadManifest(id: design.id)
         else { return nil }
 
-        let report = RuntimeFontRegistry.register(manifest: manifest, store: store)
-        guard report.isUsable else {
-            Self.logger.error("""
-            imported design \(design.name, privacy: .public) has \
-            \(report.resolvable)/\(report.requested) usable lanes; falling back to the bundled design
-            """)
-            return nil
+        // Animated only when the lane fonts shipped in this build. Runtime
+        // registration reports every lane usable on iOS 27 and then draws
+        // nothing, so an imported design is shown as a still picture rather
+        // than gambling the whole widget on fonts that resolve but do not
+        // render. A still upload is a poor outcome; a black one is a worse
+        // outcome that looks identical to broken.
+        let bundledFonts = PrebuiltDesign.fontsAreBundled(familyBase: manifest.fontFamilyBase)
+        if bundledFonts {
+            _ = RuntimeFontRegistry.register(manifest: manifest, store: store)
         }
         return Source(
             manifest: manifest,
             backdrop: backdrop(manifest: manifest, store: store, designID: design.id),
-            fontsUsable: true,
+            fontsUsable: bundledFonts,
             origin: "imported",
-            scope: RuntimeFontRegistry.lastScope,
+            scope: bundledFonts ? "bundled" : "still - fonts not in this build",
             name: design.name
         )
     }
