@@ -54,6 +54,10 @@ final class DesignLibrary: ObservableObject {
 
     private(set) var store: DesignStore?
 
+    /// What the widget was last told to show, so a reload is pushed on a change
+    /// of identity rather than on every save.
+    private var lastPublishedDesignID: UUID?
+
     /// Falls back to the most recently edited built design, so the app is never
     /// blank just because nothing was explicitly chosen.
     var activeDesign: DesignDocument? {
@@ -94,6 +98,16 @@ final class DesignLibrary: ObservableObject {
         let selection = activeDesignID?.uuidString ?? "none"
         let resolved = activeDesign?.name ?? "none"
         Self.logger.info("loaded \(self.designs.count) designs; selection=\(selection, privacy: .public) resolved=\(resolved, privacy: .public)")
+
+        // A widget added before the first design holds an entry that resolved
+        // to nothing, and nothing else would ever dislodge it. Pushed on a
+        // change of identity rather than on every save, because the editor
+        // saves on each tile drag.
+        if activeDesign?.id != lastPublishedDesignID {
+            lastPublishedDesignID = activeDesign?.id
+            WidgetCenterBridge.reloadAll()
+            Self.logger.info("pushed widget reload for \(resolved, privacy: .public)")
+        }
     }
 
     func save(_ design: DesignDocument) {

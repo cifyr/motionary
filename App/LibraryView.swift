@@ -16,6 +16,7 @@ struct LibraryView: View {
     @State private var importFailure: String?
     @State private var editing: DesignDocument?
     @State private var showingFileImporter = false
+    @State private var showingPhotosPicker = false
 
     var body: some View {
         NavigationStack {
@@ -36,11 +37,14 @@ struct LibraryView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
-                        PhotosPicker(
-                            selection: $pickerItem,
-                            matching: .any(of: [.videos, .images]),
-                            photoLibrary: .shared()
-                        ) {
+                        // A plain button and the `.photosPicker` modifier, not
+                        // a `PhotosPicker` in the menu: choosing a menu item
+                        // dismisses the menu, which tears down the picker's
+                        // presentation before it can appear, so the tap did
+                        // nothing at all.
+                        Button {
+                            showingPhotosPicker = true
+                        } label: {
                             Label("From Photos", systemImage: "photo.on.rectangle")
                         }
                         Button {
@@ -59,6 +63,14 @@ struct LibraryView: View {
                     ProgressOverlay(caption: "Importing")
                 }
             }
+            // No `photoLibrary:` argument, so the picker runs out of process
+            // and needs no library authorisation at all. Reading one chosen
+            // item never needed access to the whole library.
+            .photosPicker(
+                isPresented: $showingPhotosPicker,
+                selection: $pickerItem,
+                matching: .any(of: [.videos, .images])
+            )
             .fileImporter(
                 isPresented: $showingFileImporter,
                 allowedContentTypes: [.movie, .video, .gif],
@@ -343,7 +355,11 @@ private struct PickedFile: Transferable {
     let url: URL
     let originalName: String
 
+    /// GIF is listed before `.image` deliberately: the first matching
+    /// representation wins, and a GIF taken as a generic image comes back as a
+    /// single flattened frame with the animation gone.
     static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(importedContentType: .gif) { try copy($0) }
         FileRepresentation(importedContentType: .movie) { try copy($0) }
         FileRepresentation(importedContentType: .image) { try copy($0) }
     }

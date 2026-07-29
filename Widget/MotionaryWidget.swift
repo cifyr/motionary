@@ -21,9 +21,15 @@ struct DesignProvider: TimelineProvider {
     /// text, so a reload policy would spend battery without changing anything.
     /// The app reloads timelines explicitly when the selection or build changes.
     func getTimeline(in context: Context, completion: @escaping (Timeline<DesignEntry>) -> Void) {
+        let designID = resolvedID()
+        // With no design resolved, `.never` is a trap: the entry says "create a
+        // design" and is then kept for good, so the widget went on saying it
+        // long after a design existed because nothing ever asked again. The app
+        // also pushes a reload when its library loads; this is the backstop for
+        // a widget added before the first design.
         completion(Timeline(
-            entries: [DesignEntry(date: .now, designID: resolvedID())],
-            policy: .never
+            entries: [DesignEntry(date: .now, designID: designID)],
+            policy: designID == nil ? .after(.now.addingTimeInterval(300)) : .never
         ))
     }
 

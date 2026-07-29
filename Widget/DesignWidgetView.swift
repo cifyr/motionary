@@ -125,21 +125,20 @@ struct DesignWidgetView: View {
                 .compactMap { UUID(uuidString: $0) }
             status.designFolders = folders.count
 
-            // Only swept when there is nothing to draw. Decoding every design
-            // on a good render would spend the extension's budget to learn
-            // what it already knows.
-            if design == nil {
-                for id in folders {
-                    do {
-                        _ = try store.load(id: id)
-                        status.designsDecoded += 1
-                    } catch {
-                        let reason = String(describing: error).prefix(120)
-                        status.decodeErrors.append("\(id.uuidString.prefix(8)) \(reason)")
-                    }
+            // Swept on every render, not only on failure. Skipping it left
+            // "folders 1, decoded 0" on a perfectly good render, which reads as
+            // a store full of unreadable designs. A handful of small JSON files
+            // is worth an honest number.
+            for id in folders {
+                do {
+                    _ = try store.load(id: id)
+                    status.designsDecoded += 1
+                } catch {
+                    let reason = String(describing: error).prefix(120)
+                    status.decodeErrors.append("\(id.uuidString.prefix(8)) \(reason)")
                 }
-                status.decodeErrors = Array(status.decodeErrors.prefix(3))
             }
+            status.decodeErrors = Array(status.decodeErrors.prefix(3))
 
             if let design {
                 status.designID = design.id.uuidString
