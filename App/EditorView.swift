@@ -15,6 +15,10 @@ struct EditorView: View {
     @State private var buildFailure: String?
     @State private var exportMessage: String?
     @State private var wallpaper: Image?
+    /// A raw frame from the source, so placement can be previewed live rather
+    /// than only after a rebuild.
+    @State private var sourceFrame: CGImage?
+    @State private var placementBase = MediaTransform.identity
     @State private var showingPreview = false
     @State private var showingIconPicker = false
     /// Rotation at the start of a rotate gesture, since the gesture reports a
@@ -98,7 +102,11 @@ struct EditorView: View {
             } message: {
                 Text(exportMessage ?? "")
             }
-            .task { loadWallpaperPreview() }
+            .task {
+                loadWallpaperPreview()
+                placementBase = design.mediaTransform
+                await loadSourceFrame()
+            }
         }
     }
 
@@ -113,12 +121,20 @@ struct EditorView: View {
             ZStack {
                 Color.black
 
-                if let wallpaper {
+                if let sourceFrame {
+                    SourcePlacementLayer(
+                        sourceImage: sourceFrame,
+                        transform: design.mediaTransform,
+                        screenSize: screen,
+                        canvasScale: scale
+                    )
+                    .contentShape(Rectangle())
+                    .gesture(placementDrag(scale: scale).simultaneously(with: placementMagnify()))
+                } else if let wallpaper {
                     wallpaper.resizable().interpolation(.high)
                 } else {
-                    // Before the first build there is no composed still yet.
                     Color(white: 0.12)
-                        .overlay(Text("Build to see the video").font(.caption).foregroundStyle(.secondary))
+                        .overlay(Text("Loading source").font(.caption).foregroundStyle(.secondary))
                 }
 
                 CropOutline(rect: design.effectiveCrop, screen: screen, color: .yellow, label: "Animated")
@@ -155,6 +171,35 @@ struct EditorView: View {
         }
         .frame(maxWidth: .infinity)
         .background(Color(white: 0.06))
+    }
+
+    /// Drag anywhere off a tile to move the source. Tile gestures sit on top,
+    /// so they take precedence and this only fires on the background.
+    private func placementDrag(scale: CGFloat) -> some Gesture {
+        DragGesture()
+            .onChanged { value in
+                design.mediaTransform.offset = CGPoint(
+                    x: placementBase.offset.x + value.translation.width / scale,
+                    y: placementBase.offset.y + value.translation.height / scale
+                )
+            }
+            .onEnded { _ in
+                placementBase = design.mediaTransform
+                library.save(design)
+            }
+    }
+
+    private func placementMagnify() -> some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                // Clamped so a stray pinch cannot shrink the source to nothing
+                // or blow it up past anything useful.
+                design.mediaTransform.scale = min(max(placementBase.scale * value.magnification, 0.2), 4)
+            }
+            .onEnded { _ in
+                placementBase = design.mediaTransform
+                library.save(design)
+            }
     }
 
     private func dragGesture(for tile: PlacedTile, scale: CGFloat) -> some Gesture {
@@ -415,22 +460,11 @@ struct EditorView: View {
                     Text("Scale \(String(format: "%.2f", design.mediaTransform.scale))x")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
-                VStack(alignment: .leading, spacing: 2) {
-                    Slider(value: Binding(
-                        get: { design.mediaTransform.offset.x },
-                        set: { design.mediaTransform.offset.x = $0; library.save(design) }
-                    ), in: -600 ... 600, step: 2)
-                    Text("Horizontal \(Int(design.mediaTransform.offset.x)) px")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Slider(value: Binding(
-                        get: { design.mediaTransform.offset.y },
-                        set: { design.mediaTransform.offset.y = $0; library.save(design) }
-                    ), in: -1200 ... 1200, step: 2)
-                    Text("Vertical \(Int(design.mediaTransform.offset.y)) px")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
+                LabeledContent(
+                    "Position",
+                    value: "\(Int(design.mediaTransform.offset.x)), \(Int(design.mediaTransform.offset.y)) px"
+                )
+                .font(.caption2)
                 Toggle("Fill gaps with the source", isOn: Binding(
                     get: { design.mediaTransform.fillsBackground },
                     set: { design.mediaTransform.fillsBackground = $0; library.save(design) }
@@ -438,6 +472,7 @@ struct EditorView: View {
                 if !design.mediaTransform.isIdentity {
                     Button("Reset placement") {
                         design.mediaTransform = .identity
+                        placementBase = .identity
                         library.save(design)
                     }
                     .font(.caption)
@@ -445,7 +480,7 @@ struct EditorView: View {
             } header: {
                 Text("Source placement")
             } footer: {
-                Text("A clip shot in portrait already fills the screen; a square GIF does not. Rebuild to apply.")
+                Text("Drag and pinch the canvas to fit the source. A clip shot in portrait already fills the screen; a square GIF does not. Rebuild to apply.")
             }
 
             Section("Quality") {
@@ -528,6 +563,17 @@ struct EditorView: View {
             exportMessage = "Saved to Photos. Set it as your Home Screen wallpaper with blur and zoom off."
         } catch {
             exportMessage = String(describing: error)
+        }
+    }
+
+    private func loadSourceFrame() async {
+        guard let store = library.store else { return }
+        let url = store.sourceVideoURL(for: design)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            sourceFrame = try await MediaFrameExtractor(url: url).posterFrame(at: design.loopStartFrame)
+        } catch {
+            Self.logger.error("could not load a source frame: \(String(describing: error), privacy: .public)")
         }
     }
 

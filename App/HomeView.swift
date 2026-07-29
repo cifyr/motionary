@@ -10,6 +10,11 @@ struct HomeView: View {
     @EnvironmentObject private var router: ExternalAppRouter
 
     @State private var showingLibrary = false
+#if DEBUG
+    /// Opens the editor straight away so its canvas can be screenshotted from
+    /// the command line, where sheets cannot be tapped open.
+    @State private var debugEditing: DesignDocument?
+#endif
     @StateObject private var icons = IconImageLoader(store: try? DesignStore())
 
     var body: some View {
@@ -27,6 +32,15 @@ struct HomeView: View {
         .ignoresSafeArea()
         .statusBarHidden(library.activeDesign != nil)
         .persistentSystemOverlays(.hidden)
+#if DEBUG
+        .sheet(item: $debugEditing) { design in
+            EditorView(design: design).environmentObject(library)
+        }
+        .task {
+            guard ProcessInfo.processInfo.arguments.contains("-MotionaryOpenEditor") else { return }
+            debugEditing = library.activeDesign
+        }
+#endif
         .sheet(isPresented: $showingLibrary) {
             LibraryView()
                 .environmentObject(library)

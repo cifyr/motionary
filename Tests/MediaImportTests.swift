@@ -164,6 +164,95 @@ final class MediaImportTests: XCTestCase {
         XCTAssertGreaterThan(pixel(at: high, in: moved)[0], 100, "moving up should bring the source here")
     }
 
+    // MARK: - Shared placement
+
+    /// The editor previews placement live and the generator bakes it. Both go
+    /// through `placement`, so this pins the arithmetic they share.
+    func testPlacementAspectFillsByDefault() {
+        let screen = CGSize(width: 1206, height: 2622)
+        // A square source has to be blown up to cover a tall screen, so it
+        // overflows horizontally and sits flush top and bottom.
+        let placed = MediaFrameExtractor.placement(
+            sourceSize: CGSize(width: 400, height: 400),
+            screenSize: screen,
+            transform: .identity
+        )
+        XCTAssertEqual(placed.height, screen.height, accuracy: 0.01)
+        XCTAssertEqual(placed.width, screen.height, accuracy: 0.01, "a square source scales uniformly")
+        XCTAssertEqual(placed.midX, screen.width / 2, accuracy: 0.01)
+        XCTAssertEqual(placed.midY, screen.height / 2, accuracy: 0.01)
+    }
+
+    func testPlacementScalesAboutTheCentre() {
+        let screen = CGSize(width: 1206, height: 2622)
+        let source = CGSize(width: 400, height: 400)
+        let half = MediaFrameExtractor.placement(
+            sourceSize: source,
+            screenSize: screen,
+            transform: MediaTransform(scale: 0.5, offset: .zero, fillsBackground: false)
+        )
+        let full = MediaFrameExtractor.placement(sourceSize: source, screenSize: screen, transform: .identity)
+
+        XCTAssertEqual(half.width, full.width / 2, accuracy: 0.01)
+        XCTAssertEqual(half.midX, full.midX, accuracy: 0.01, "scaling must not move the centre")
+        XCTAssertEqual(half.midY, full.midY, accuracy: 0.01)
+    }
+
+    func testPlacementOffsetMovesRightAndDown() {
+        let placed = MediaFrameExtractor.placement(
+            sourceSize: CGSize(width: 400, height: 400),
+            screenSize: CGSize(width: 1206, height: 2622),
+            transform: MediaTransform(scale: 1, offset: CGPoint(x: 50, y: 80), fillsBackground: false)
+        )
+        let centred = MediaFrameExtractor.placement(
+            sourceSize: CGSize(width: 400, height: 400),
+            screenSize: CGSize(width: 1206, height: 2622),
+            transform: .identity
+        )
+        XCTAssertEqual(placed.minX - centred.minX, 50, accuracy: 0.01)
+        XCTAssertEqual(placed.minY - centred.minY, 80, accuracy: 0.01, "positive y is downward on screen")
+    }
+
+    /// The drag gesture and the baked frame must agree on direction, or the
+    /// preview would move one way and the build the other.
+    func testDraggingDownMatchesWhatIsBaked() async throws {
+        let url = try writeGIF(named: "drag.gif", frames: [colour(1, 0, 0), colour(0, 1, 0)])
+        let down = MediaTransform(scale: 0.3, offset: CGPoint(x: 0, y: 700), fillsBackground: false)
+
+        let placed = MediaFrameExtractor.placement(
+            sourceSize: CGSize(width: 40, height: 40),
+            screenSize: DeviceGeometry.screenPixelSize,
+            transform: down
+        )
+        XCTAssertGreaterThan(placed.midY, DeviceGeometry.screenPixelSize.height / 2, "placement says lower")
+
+        let frame = try await MediaFrameExtractor(url: url, transform: down)
+            .composedFrames(startFrame: 0, count: 1)[0]
+        let low = CGPoint(x: DeviceGeometry.screenPixelSize.width / 2, y: placed.midY)
+        let high = CGPoint(x: DeviceGeometry.screenPixelSize.width / 2, y: 2 * placed.midY - placed.maxY - 100)
+        XCTAssertGreaterThan(pixel(at: low, in: frame)[0], 100, "the source should be drawn low")
+        XCTAssertEqual(pixel(at: high, in: frame)[0], 0, "and not above where it was moved from")
+    }
+
+    func testScaleIsClampedAwayFromZero() {
+        // A zero or negative scale would collapse the source entirely.
+        let placed = MediaFrameExtractor.placement(
+            sourceSize: CGSize(width: 400, height: 400),
+            screenSize: CGSize(width: 1206, height: 2622),
+            transform: MediaTransform(scale: 0, offset: .zero, fillsBackground: false)
+        )
+        XCTAssertGreaterThan(placed.width, 0)
+    }
+
+    func testPlacementOfAnEmptySourceIsEmptyRatherThanNaN() {
+        let placed = MediaFrameExtractor.placement(
+            sourceSize: .zero,
+            screenSize: CGSize(width: 1206, height: 2622),
+            transform: .identity
+        )
+        XCTAssertEqual(placed, .zero)
+    }
+
     func testIdentityTransformIsTheDefault() {
         let design = DesignDocument.new(name: "t", sourceVideoName: "source.gif")
         XCTAssertTrue(design.mediaTransform.isIdentity)

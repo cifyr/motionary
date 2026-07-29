@@ -107,6 +107,57 @@ struct MediaFrameExtractor {
         }
     }
 
+    /// One frame straight from the source, with no composition applied.
+    ///
+    /// The editor needs the raw pixels so it can apply the placement live while
+    /// the user drags, rather than showing the last build's baked wallpaper.
+    func posterFrame(at index: Int = 0) async throws -> CGImage {
+        switch kind {
+        case .video:
+            guard let frame = try await videoFrames(startFrame: index, count: 1, progress: nil).first else {
+                throw MediaImportError.emptySource(url: url)
+            }
+            return frame
+        case .gif:
+            guard let frame = try gifFrames(startFrame: index, count: 1, progress: nil).first else {
+                throw MediaImportError.emptySource(url: url)
+            }
+            return frame
+        }
+    }
+
+    /// Where the source lands on screen for a given transform, in screen
+    /// pixels. Shared with the editor so its preview matches what a build
+    /// bakes, rather than reimplementing the arithmetic and drifting from it.
+    static func placement(
+        sourceSize: CGSize,
+        screenSize: CGSize,
+        transform: MediaTransform
+    ) -> CGRect {
+        guard sourceSize.width > 0, sourceSize.height > 0 else { return .zero }
+        let base = max(screenSize.width / sourceSize.width, screenSize.height / sourceSize.height)
+        let scale = base * max(transform.scale, 0.05)
+        let drawn = CGSize(width: sourceSize.width * scale, height: sourceSize.height * scale)
+        return CGRect(
+            x: (screenSize.width - drawn.width) / 2 + transform.offset.x,
+            y: (screenSize.height - drawn.height) / 2 + transform.offset.y,
+            width: drawn.width,
+            height: drawn.height
+        )
+    }
+
+    /// How strongly the backdrop shows through behind a shrunken source.
+    static let backdropOpacity: CGFloat = 0.45
+
+    /// The aspect-fill rect used behind a shrunken source, in screen pixels.
+    static func backdropPlacement(sourceSize: CGSize, screenSize: CGSize) -> CGRect {
+        placement(
+            sourceSize: sourceSize,
+            screenSize: screenSize,
+            transform: MediaTransform(scale: 1, offset: .zero, fillsBackground: false)
+        )
+    }
+
     /// Decodes `count` consecutive frames starting at `startFrame`, each
     /// composed onto the calibrated screen.
     func composedFrames(
@@ -298,33 +349,28 @@ struct MediaFrameExtractor {
         context.interpolationQuality = .high
 
         let source = CGSize(width: image.width, height: image.height)
-        let baseScale = max(screenSize.width / source.width, screenSize.height / source.height)
-        let scale = baseScale * max(transform.scale, 0.05)
-        let drawn = CGSize(width: source.width * scale, height: source.height * scale)
+        let placed = Self.placement(sourceSize: source, screenSize: screenSize, transform: transform)
 
-        // A scaled-down source leaves the screen uncovered; a blurred blow-up
-        // of the same frame reads better behind it than a black band.
-        if transform.fillsBackground, drawn.width < screenSize.width || drawn.height < screenSize.height {
-            let coverScale = max(screenSize.width / source.width, screenSize.height / source.height)
-            let cover = CGSize(width: source.width * coverScale, height: source.height * coverScale)
+        /// CGContext is bottom-left origin; the shared placement is top-left.
+        func flipped(_ rect: CGRect) -> CGRect {
+            CGRect(
+                x: rect.minX,
+                y: screenSize.height - rect.maxY,
+                width: rect.width,
+                height: rect.height
+            )
+        }
+
+        // A scaled-down source leaves the screen uncovered; a dim blow-up of
+        // the same frame reads better behind it than a black band.
+        if transform.fillsBackground, placed.width < screenSize.width || placed.height < screenSize.height {
             context.saveGState()
-            context.setAlpha(0.45)
-            context.draw(image, in: CGRect(
-                x: (screenSize.width - cover.width) / 2,
-                y: (screenSize.height - cover.height) / 2,
-                width: cover.width,
-                height: cover.height
-            ))
+            context.setAlpha(Self.backdropOpacity)
+            context.draw(image, in: flipped(Self.backdropPlacement(sourceSize: source, screenSize: screenSize)))
             context.restoreGState()
         }
 
-        // CGContext is bottom-left origin, so a downward offset on screen is a
-        // negative y here.
-        let origin = CGPoint(
-            x: (screenSize.width - drawn.width) / 2 + transform.offset.x,
-            y: (screenSize.height - drawn.height) / 2 - transform.offset.y
-        )
-        context.draw(image, in: CGRect(origin: origin, size: drawn))
+        context.draw(image, in: flipped(placed))
 
         guard let composed = context.makeImage() else {
             throw MediaImportError.renderFailed(frameIndex: frameIndex)
