@@ -28,8 +28,15 @@ struct DesignProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<DesignEntry>) -> Void) {
         WidgetRenderLog.append("""
         ask  timeline    preview=\(context.isPreview) family=\(context.family.rawValue) \
-        size=\(Int(context.displaySize.width))x\(Int(context.displaySize.height))
+        size=\(Int(context.displaySize.width))x\(Int(context.displaySize.height)) \
+        embed=\(WidgetArchiveFontEmbedding.isEnabled)
         """)
+        // Archiving happens after this returns, so what this finds belongs to the
+        // previous attempt. Captured here anyway: it is the only point in the
+        // extension's life that reliably runs, and one reload of lag is cheaper
+        // than bisecting routes to rediscover a type list WidgetKit already
+        // printed.
+        ArchiverErrorLog.capture()
         completion(Timeline(
             entries: [DesignEntry(date: .now, designID: nil, isPreview: context.isPreview)],
             policy: .never
@@ -42,7 +49,12 @@ struct MotionaryWidget: Widget {
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: DesignProvider()) { entry in
+            // Outermost view in the archived tree, which is where the embedding
+            // flag has to go: the archiver resolves each node's environment as it
+            // walks down, so a font used above the flag would still be encoded
+            // by reference.
             DesignWidgetView(entry: entry)
+                .embeddingCustomFontsInArchive(WidgetArchiveFontEmbedding.isEnabled)
         }
         .configurationDisplayName("Motionary")
         .description("Shows your current Motionary design, cut to the tall portrait frame.")
