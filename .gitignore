@@ -17,7 +17,4 @@ Motionary.xcodeproj/
 # Built by Motionary Studio from a source clip: 45MB of derived fonts and
 # pictures that change on every build. Run the studio to regenerate them.
 Resources/MFont*.ttf
-Resources/prebuilt-manifest.json
-Resources/prebuilt-backdrop.jpg
-Resources/prebuilt-wallpaper.png
-Resources/prebuilt-preview.mp4
+Resources/prebuilt-*

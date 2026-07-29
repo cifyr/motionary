@@ -137,6 +137,11 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     /// fills the screen and looks like a mistake when it does not.
     var backgroundName: String?
 
+    /// Starred designs are the ones compiled into the app, and the phone
+    /// switches between them. Each one costs about 29MB of fonts in the
+    /// install, because a font has to be in the bundle to draw at all.
+    var isStarred: Bool = false
+
     /// Overrides the model's estimated widget corner radius, in screen pixels.
     /// Only the phone can settle this one, so it is adjustable.
     var widgetCornerRadius: CGFloat?
@@ -243,6 +248,7 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         snapEnabled = try container.decodeIfPresent(Bool.self, forKey: .snapEnabled) ?? true
         backgroundName = try container.decodeIfPresent(String.self, forKey: .backgroundName)
         widgetCornerRadius = try container.decodeIfPresent(CGFloat.self, forKey: .widgetCornerRadius)
+        isStarred = try container.decodeIfPresent(Bool.self, forKey: .isStarred) ?? false
         buildGeneration = try container.decodeIfPresent(Int.self, forKey: .buildGeneration) ?? 0
     }
 

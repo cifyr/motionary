@@ -13,17 +13,23 @@ struct HomeView: View {
     @State private var note: String?
     @StateObject private var icons = IconImageLoader(store: try? DesignStore())
 
-    private var manifest: BuildManifest? { PrebuiltDesign.manifest }
+    @State private var selection: UUID? = ActiveDesign.identifier
+
+    private var entries: [PrebuiltDesign.Entry] { PrebuiltDesign.entries }
+    private var entry: PrebuiltDesign.Entry? { PrebuiltDesign.selected(id: selection) }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if let manifest {
-                composition(manifest: manifest)
+            if let entry, let manifest = entry.manifest {
+                composition(entry: entry, manifest: manifest)
+                    .id(entry.id)
             } else {
                 EmptyDesignView()
             }
+
+            if entries.count > 1 { PageDots(count: entries.count, index: index) }
 
             SaveButton(saving: saving) { save() }
             // A tap that opens nothing has to say why. Rewriting this view
@@ -32,19 +38,44 @@ struct HomeView: View {
             if let note = note ?? router.lastFailure { Toast(text: note) }
         }
         .ignoresSafeArea()
-        .statusBarHidden(manifest != nil)
+        .statusBarHidden(entry != nil)
         .persistentSystemOverlays(.hidden)
+        // A swipe rather than any chrome: the whole point of this screen is to
+        // be the Home Screen, and a switcher on top of it would spoil that.
+        .gesture(
+            DragGesture(minimumDistance: 40)
+                .onEnded { value in
+                    guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                    switchDesign(by: value.translation.width < 0 ? 1 : -1)
+                }
+        )
     }
 
-    private func composition(manifest: BuildManifest) -> some View {
+    private var index: Int {
+        guard let entry, let position = entries.firstIndex(where: { $0.id == entry.id }) else { return 0 }
+        return position
+    }
+
+    private func switchDesign(by step: Int) {
+        guard entries.count > 1 else { return }
+        let next = entries[(index + step + entries.count) % entries.count]
+        selection = next.id
+        // Written where the widget reads it, and pushed, so the Home Screen
+        // follows the app rather than disagreeing with it.
+        ActiveDesign.identifier = next.id
+        WidgetCenterBridge.reloadAll()
+        note = next.name
+    }
+
+    private func composition(entry: PrebuiltDesign.Entry, manifest: BuildManifest) -> some View {
         let spec = TimerFontSpec(laneCount: manifest.laneCount, framesPerSecond: manifest.framesPerSecond)
         let loop = manifest.loopFrameCount
         return LoopingCompositionView(
             screenSize: manifest.screenSize,
             viewport: CGRect(origin: .zero, size: manifest.screenSize),
             tiles: manifest.placedTiles,
-            videoURL: PrebuiltDesign.previewURL,
-            wallpaper: PrebuiltDesign.wallpaperURL
+            videoURL: entry.previewURL,
+            wallpaper: entry.wallpaperURL
                 .flatMap { UIImage(contentsOfFile: $0.path) }
                 .map { Image(uiImage: $0) },
             scaleMode: .device,
@@ -72,7 +103,7 @@ struct HomeView: View {
     }
 
     private func save() {
-        guard let url = PrebuiltDesign.wallpaperURL else {
+        guard let url = entry?.wallpaperURL else {
             note = "This build has no wallpaper in it."
             return
         }
@@ -94,6 +125,30 @@ struct HomeView: View {
                 }
             }
         }
+    }
+}
+
+/// Which of the bundled designs is showing.
+private struct PageDots: View {
+    let count: Int
+    let index: Int
+
+    var body: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 6) {
+                ForEach(0 ..< count, id: \.self) { position in
+                    Circle()
+                        .fill(.white.opacity(position == index ? 0.9 : 0.35))
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.black.opacity(0.35), in: Capsule())
+            .padding(.bottom, 44)
+        }
+        .allowsHitTesting(false)
     }
 }
 

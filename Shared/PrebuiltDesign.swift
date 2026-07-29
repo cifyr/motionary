@@ -23,6 +23,70 @@ enum PrebuiltDesign {
     static let backdropResource = "prebuilt-backdrop"
     static let wallpaperResource = "prebuilt-wallpaper"
 
+    /// One bundled design, addressed by its identity.
+    ///
+    /// Several can ship at once - a design's font family is derived from its
+    /// id, so their fonts coexist in one bundle without colliding - and the
+    /// phone chooses between them.
+    struct Entry: Identifiable, Sendable {
+        let id: UUID
+        let name: String
+        /// A build made before several designs could ship names its files
+        /// without an id. Falling back keeps such a build working rather than
+        /// requiring a rebuild to see anything at all.
+        var isLegacy = false
+
+        private func resource(_ kind: String) -> String {
+            isLegacy ? "prebuilt-\(kind)" : "prebuilt-\(id.uuidString.lowercased())-\(kind)"
+        }
+
+        var manifestName: String { resource("manifest") }
+        var backdropURL: URL? { Bundle.main.url(forResource: resource("backdrop"), withExtension: "jpg") }
+        var wallpaperURL: URL? { Bundle.main.url(forResource: resource("wallpaper"), withExtension: "png") }
+        var previewURL: URL? { Bundle.main.url(forResource: resource("preview"), withExtension: "mp4") }
+
+        var manifest: BuildManifest? {
+            guard let url = Bundle.main.url(forResource: manifestName, withExtension: "json"),
+                  let data = try? Data(contentsOf: url)
+            else { return nil }
+            return try? JSONDecoder().decode(BuildManifest.self, from: data)
+        }
+    }
+
+    /// Every design compiled into this build, in the order the studio wrote
+    /// them. Empty when nothing has been bundled yet.
+    static let entries: [Entry] = {
+        guard let url = Bundle.main.url(forResource: "prebuilt-index", withExtension: "json"),
+              let data = try? Data(contentsOf: url)
+        else {
+            // A build made before several designs could ship names its files
+            // without an id. Presented as one entry so the phone and the widget
+            // do not need to know the difference.
+            return legacyEntry.map { [$0] } ?? []
+        }
+        struct Index: Decodable {
+            struct Item: Decodable {
+                let id: UUID
+                let name: String
+            }
+            let designs: [Item]
+        }
+        guard let index = try? JSONDecoder().decode(Index.self, from: data) else { return [] }
+        return index.designs.map { Entry(id: $0.id, name: $0.name) }
+    }()
+
+    /// The single-design layout this shipped with first.
+    private static let legacyEntry: Entry? = {
+        guard let manifest else { return nil }
+        return Entry(id: manifest.designID, name: "Design", isLegacy: true)
+    }()
+
+    /// The design the phone last chose, or the first bundled one.
+    static func selected(id: UUID? = ActiveDesign.identifier) -> Entry? {
+        if let id, let match = entries.first(where: { $0.id == id }) { return match }
+        return entries.first
+    }
+
     /// Loaded once: the manifest is small, but a widget re-reads it on every
     /// render and there is no reason to touch the disk each time.
     static let manifest: BuildManifest? = {

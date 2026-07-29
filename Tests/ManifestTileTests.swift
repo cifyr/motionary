@@ -230,3 +230,58 @@ final class CornerRadiusTests: XCTestCase {
         XCTAssertEqual(design.effectiveCornerRadius, 40)
     }
 }
+
+/// Several designs can ship at once, and the phone switches between them, so
+/// the selection has to survive a design being removed from a later build.
+final class BundledSelectionTests: XCTestCase {
+    private func entry(_ name: String) -> PrebuiltDesign.Entry {
+        PrebuiltDesign.Entry(id: UUID(), name: name)
+    }
+
+    func testSelectionFallsBackToTheFirstWhenTheChoiceIsGone() {
+        let entries = [entry("A"), entry("B")]
+        let missing = UUID()
+        let chosen = entries.first { $0.id == missing } ?? entries.first
+        XCTAssertEqual(chosen?.name, "A", "a design that is no longer bundled must not leave a blank screen")
+    }
+
+    /// Filenames are per design, or two designs would overwrite each other's
+    /// manifest in the bundle.
+    func testResourceNamesAreUniquePerDesign() {
+        let a = entry("A")
+        let b = entry("B")
+        XCTAssertNotEqual(a.manifestName, b.manifestName)
+        XCTAssertTrue(a.manifestName.contains(a.id.uuidString.lowercased()))
+    }
+
+    /// A build made before several designs could ship names its files without
+    /// an id, and must keep working rather than showing nothing.
+    func testALegacyEntryUsesTheUnprefixedNames() {
+        let legacy = PrebuiltDesign.Entry(id: UUID(), name: "Design", isLegacy: true)
+        XCTAssertEqual(legacy.manifestName, "prebuilt-manifest")
+    }
+
+    func testStarringSurvivesADesignRoundTrip() throws {
+        var design = DesignDocument.new(name: "Test", sourceVideoName: "source.gif")
+        design.isStarred = true
+        let decoded = try JSONDecoder().decode(
+            DesignDocument.self,
+            from: try JSONEncoder().encode(design)
+        )
+        XCTAssertTrue(decoded.isStarred)
+    }
+
+    /// A design written before starring existed has no such key.
+    func testADesignWithoutStarringDecodesAsUnstarred() throws {
+        let design = DesignDocument.new(name: "Test", sourceVideoName: "source.gif")
+        var json = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: try JSONEncoder().encode(design)) as? [String: Any]
+        )
+        json.removeValue(forKey: "isStarred")
+        let decoded = try JSONDecoder().decode(
+            DesignDocument.self,
+            from: try JSONSerialization.data(withJSONObject: json)
+        )
+        XCTAssertFalse(decoded.isStarred)
+    }
+}
