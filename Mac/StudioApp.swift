@@ -7,6 +7,9 @@ struct MotionaryStudioApp: App {
         // A window cannot be driven from a build script, and the pipeline is
         // the part worth checking, so it can also be run without one:
         //   MotionaryStudio.app/Contents/MacOS/MotionaryStudio --build clip.gif
+        if CommandLine.arguments.contains("--roundtrip") {
+            HeadlessBuild.roundTrip()
+        }
         if let source = HeadlessBuild.requested(in: CommandLine.arguments) {
             HeadlessBuild.run(source: source)
         }
@@ -35,6 +38,38 @@ enum HeadlessBuild {
               arguments.index(after: flag) < arguments.endIndex
         else { return nil }
         return arguments[arguments.index(after: flag)]
+    }
+
+    /// Exports the newest design and imports it back, printing what survived.
+    ///
+    /// `DesignArchive` shells out to `ditto`, and `Process` does not exist on
+    /// iOS - so the unit suite, which runs on the simulator, cannot cover this.
+    /// A real round trip can, and does.
+    static func roundTrip() -> Never {
+        guard let store = try? StudioPipeline.openStore(),
+              let design = StudioPipeline.saved().first
+        else {
+            FileHandle.standardError.write(Data("failed: no design to export\n".utf8))
+            exit(1)
+        }
+        let archive = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("motionary-roundtrip.zip")
+        do {
+            try DesignArchive.export(design, store: store, to: archive)
+            let size = (try? Data(contentsOf: archive).count) ?? 0
+            print("exported \(design.name) -> \(size) bytes")
+
+            let elsewhere = try DesignStore(containerURL: URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("motionary-roundtrip-store-\(UUID().uuidString)", isDirectory: true))
+            let restored = try DesignArchive.restore(from: archive, into: elsewhere)
+            let clip = FileManager.default.fileExists(atPath: elsewhere.sourceVideoURL(for: restored).path)
+            print("imported \(restored.name) tiles=\(restored.tiles.count) clip=\(clip) background=\(restored.backgroundName ?? "none")")
+            print(restored.id == design.id && clip ? "roundtrip ok" : "roundtrip INCOMPLETE")
+            exit(restored.id == design.id && clip ? 0 : 1)
+        } catch {
+            FileHandle.standardError.write(Data("failed: \(error)\n".utf8))
+            exit(1)
+        }
     }
 
     static func run(source: URL) -> Never {
@@ -166,7 +201,11 @@ struct StudioView: View {
     /// would put every tile back in the middle of the frame.
     private var savedDesigns: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Edit an existing design").font(.caption.weight(.semibold))
+            HStack {
+                Text("Edit an existing design").font(.caption.weight(.semibold))
+                Spacer()
+                Button("Import...") { importDesign() }.buttonStyle(.link)
+            }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     ForEach(saved) { design in
@@ -184,6 +223,7 @@ struct StudioView: View {
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
+                            Button("Export...") { exportDesign(design) }
                             Button("Delete", role: .destructive) { delete(design) }
                         }
                     }
@@ -192,6 +232,39 @@ struct StudioView: View {
             .frame(maxHeight: 88)
         }
         .disabled(isBusy)
+    }
+
+    private func exportDesign(_ design: DesignDocument) {
+        guard let store = try? StudioPipeline.openStore() else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.zip]
+        panel.nameFieldStringValue = "\(design.name).motionary.zip"
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        guard panel.runModal() == .OK, let target = panel.url else { return }
+        do {
+            try DesignArchive.export(design, store: store, to: target)
+            done = "Exported \(design.name). It carries the clip, the background and the skins it uses."
+            failure = nil
+        } catch {
+            failure = "Could not export: \(error)"
+        }
+    }
+
+    private func importDesign() {
+        guard let store = try? StudioPipeline.openStore() else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.zip]
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        guard panel.runModal() == .OK, let source = panel.url else { return }
+        do {
+            let design = try DesignArchive.restore(from: source, into: store)
+            saved = StudioPipeline.saved()
+            done = "Imported \(design.name). Open it to edit or build."
+            failure = nil
+        } catch {
+            failure = "Could not import: \(error)"
+        }
     }
 
     private func delete(_ design: DesignDocument) {
