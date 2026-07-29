@@ -383,11 +383,26 @@ final class GeometryAndSnapTests: XCTestCase {
         XCTAssertNil(LaunchLink.appID(from: URL(string: "https://example.com/launch/spotify")!))
     }
 
+    /// Apple does not publish a URL scheme for every one of its apps, so
+    /// "everything is launchable" was never true - it had simply never been
+    /// tested against an entry that admitted it. The rule that does hold is
+    /// narrower: an entry is launchable unless it is one of the few known not
+    /// to be, and a new entry arriving with no scheme still fails here.
+    private static let knownUnlaunchable: Set<String> = ["clock"]
+
     func testCatalogEntriesAreUniqueAndLaunchable() {
         let ids = AppCatalog.all.map(\.id)
         XCTAssertEqual(Set(ids).count, ids.count, "catalog ids must be unique")
-        for app in AppCatalog.all {
-            XCTAssertFalse(app.launchCandidates.isEmpty, "\(app.name) has no launch route")
+        for app in AppCatalog.all where !Self.knownUnlaunchable.contains(app.id) {
+            XCTAssertTrue(app.canLaunch, "\(app.name) has no launch route")
+        }
+    }
+
+    func testUnlaunchableEntriesAdmitIt() {
+        for id in Self.knownUnlaunchable {
+            let app = AppCatalog.app(id: id)
+            XCTAssertNotNil(app, "\(id) is listed as unlaunchable but is not in the catalogue")
+            XCTAssertEqual(app?.canLaunch, false, "\(id) gained a launch route; take it off the list")
         }
     }
 }
