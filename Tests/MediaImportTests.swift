@@ -540,3 +540,89 @@ final class MediaImportTests: XCTestCase {
         return [data[0], data[1], data[2]]
     }
 }
+
+/// The memory ceiling is a correctness constraint, not a preference: a widget
+/// extension that exceeds it has its render dropped and shows black.
+final class QualityPlanTests: XCTestCase {
+    /// A smooth gradient, because that is roughly how compressible real footage
+    /// is. Pure noise is not: it refuses to fit at any setting, which makes the
+    /// planner look broken when it is being correct.
+    private func gradient(width: Int, height: Int) -> CGImage {
+        let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        for y in 0 ..< height {
+            context.setFillColor(
+                red: Double(y) / Double(height), green: 0.4,
+                blue: 1 - Double(y) / Double(height), alpha: 1
+            )
+            context.fill(CGRect(x: 0, y: y, width: width, height: 1))
+        }
+        return context.makeImage()!
+    }
+
+    private func noise(width: Int, height: Int) -> CGImage {
+        let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        for x in stride(from: 0, to: width, by: 2) {
+            for y in stride(from: 0, to: height, by: 2) {
+                context.setFillColor(
+                    red: Double((x * 7 + y * 13) % 255) / 255,
+                    green: Double((x * 3 + y * 5) % 255) / 255,
+                    blue: Double((x + y) % 255) / 255, alpha: 1
+                )
+                context.fill(CGRect(x: x, y: y, width: 2, height: 2))
+            }
+        }
+        return context.makeImage()!
+    }
+
+    /// The one guarantee the planner must never break.
+    func testAnyPlanItReturnsFitsTheBudget() throws {
+        for side in [200, 600, 1074] {
+            let height = side * 3 / 2
+            for image in [gradient(width: side, height: height), noise(width: side, height: height)] {
+                let crop = CGRect(x: 0, y: 0, width: side, height: height)
+                if let plan = PayloadBudget.bestPlan(sample: image, crop: crop) {
+                    XCTAssertLessThanOrEqual(
+                        plan.estimatedBytes, PayloadBudget.recommendedMaximumBytes,
+                        "\(side)x\(height) produced an over-budget plan"
+                    )
+                    XCTAssertGreaterThanOrEqual(plan.quality, 0.3)
+                }
+            }
+        }
+    }
+
+    func testATinyCropGetsTheSmoothestSetting() throws {
+        let image = gradient(width: 200, height: 200)
+        let plan = try XCTUnwrap(
+            PayloadBudget.bestPlan(sample: image, crop: CGRect(x: 0, y: 0, width: 200, height: 200))
+        )
+        XCTAssertEqual(plan.smoothness, .standard, "a small crop has room to spare")
+    }
+
+    /// Typical footage at the full widget frame should still be buildable.
+    func testAFullFrameCropOfOrdinaryFootageFits() throws {
+        let image = gradient(width: 1074, height: 1632)
+        let plan = try XCTUnwrap(
+            PayloadBudget.bestPlan(sample: image, crop: CGRect(x: 0, y: 0, width: 1074, height: 1632))
+        )
+        XCTAssertLessThanOrEqual(plan.estimatedBytes, PayloadBudget.recommendedMaximumBytes)
+    }
+
+    /// Refusing is correct when nothing fits. Returning an over-budget plan
+    /// would build a widget that renders black.
+    func testAnImpossibleCropRefusesRatherThanOverspending() {
+        let image = noise(width: 1206, height: 2622)
+        let crop = CGRect(x: 0, y: 0, width: 1206, height: 2622)
+        if let plan = PayloadBudget.bestPlan(sample: image, crop: crop) {
+            XCTAssertLessThanOrEqual(plan.estimatedBytes, PayloadBudget.recommendedMaximumBytes)
+        }
+    }
+}

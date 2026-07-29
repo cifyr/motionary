@@ -81,6 +81,18 @@ struct FrameEncoder {
 /// Each unique frame is embedded once per glyph selection, so the payload is
 /// `laneCount x 15` copies of one encoded frame, not one copy per frame. That
 /// multiplier is why a modest crop change moves tens of megabytes.
+/// Settings chosen to look as good as the memory ceiling allows.
+struct QualityPlan: Sendable, Equatable {
+    let smoothness: MotionSmoothness
+    let quality: Double
+    let estimatedBytes: Int
+
+    var summary: String {
+        let size = ByteCountFormatter.string(fromByteCount: Int64(estimatedBytes), countStyle: .file)
+        return "\(smoothness.framesPerSecond) fps · quality \(Int(quality * 100))% · \(size)"
+    }
+}
+
 struct PayloadBudget {
     /// Measured on an iPhone 17 Pro rather than guessed. A jetsam report caught
     /// the Onewheel build peaking at 43.3MB and drawing correctly, while a
@@ -106,6 +118,34 @@ struct PayloadBudget {
 
     var formattedEstimate: String {
         ByteCountFormatter.string(fromByteCount: Int64(estimatedTotalBytes), countStyle: .file)
+    }
+
+    /// The best-looking settings that still fit the measured budget.
+    ///
+    /// Smoothness is tried from smoothest downwards and the first level that
+    /// keeps JPEG quality respectable wins. Below that threshold, trading
+    /// frames per second for image quality reads better on a wallpaper than
+    /// the reverse — a crisp 16fps loop beats a mushy 32fps one.
+    static func bestPlan(sample: CGImage, crop: CGRect) -> QualityPlan? {
+        var fallback: QualityPlan?
+        for smoothness in [MotionSmoothness.standard, .balanced, .light] {
+            let spec = TimerFontSpec(smoothness: smoothness)
+            guard let quality = suggestedQuality(spec: spec, sample: sample, crop: crop, startingAt: 0.88),
+                  let cropped = sample.cropping(to: crop),
+                  let data = FrameEncoder.jpegData(cropped, quality: quality)
+            else { continue }
+
+            let plan = QualityPlan(
+                smoothness: smoothness,
+                quality: quality,
+                estimatedBytes: PayloadBudget(
+                    spec: spec, averageEncodedFrameBytes: data.count
+                ).estimatedTotalBytes
+            )
+            if quality >= 0.55 { return plan }
+            if fallback == nil || quality > fallback!.quality { fallback = plan }
+        }
+        return fallback
     }
 
     /// Largest JPEG quality that keeps a crop inside the recommended budget,

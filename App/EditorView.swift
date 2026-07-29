@@ -21,6 +21,8 @@ struct EditorView: View {
     @State private var placementBase = MediaTransform.identity
     @State private var showingPreview = false
     @State private var showingIconPicker = false
+    /// What the optimiser chose, so the setting is visible rather than magic.
+    @State private var optimisedNote: String?
     /// Rotation at the start of a rotate gesture, since the gesture reports a
     /// delta from where the fingers began rather than an absolute angle.
     @State private var rotationBase: Double = 0
@@ -570,6 +572,16 @@ struct EditorView: View {
 
             Section {
                 Button {
+                    Task { await optimiseAndBuild() }
+                } label: {
+                    Label("Best quality that fits", systemImage: "wand.and.stars")
+                }
+                .disabled(buildStage != nil)
+                if let optimisedNote {
+                    Text(optimisedNote).font(.caption2).foregroundStyle(.secondary)
+                }
+
+                Button {
                     Task { await build() }
                 } label: {
                     Label("Build widget", systemImage: "hammer.fill")
@@ -637,6 +649,42 @@ struct EditorView: View {
     }
 
     // MARK: - Actions
+
+    /// Picks the best settings this crop can afford, then builds.
+    ///
+    /// The ceiling is not a matter of taste: a widget extension that goes over
+    /// it has its render dropped and shows black. Choosing the settings from a
+    /// real encoded sample is the only way to know what fits.
+    private func optimiseAndBuild() async {
+        guard let store = library.store else { return }
+        buildStage = .analysing
+        do {
+            let extractor = MediaFrameExtractor(
+                url: store.sourceVideoURL(for: design), transform: design.mediaTransform
+            )
+            let sample = try await extractor.composedFrames(
+                startFrame: design.loopStartFrame, count: 1,
+                frameRate: design.spec.framesPerSecond, speed: design.playbackSpeed
+            )
+            guard let frame = sample.first,
+                  let plan = PayloadBudget.bestPlan(sample: frame, crop: design.effectiveCrop)
+            else {
+                buildFailure = "Could not find settings that fit. Shrink the animated area and try again."
+                buildStage = nil
+                return
+            }
+            design.smoothness = plan.smoothness
+            design.jpegQuality = plan.quality
+            library.save(design)
+            Self.logger.info("optimised to \(plan.summary, privacy: .public)")
+            optimisedNote = "Set to \(plan.summary)"
+        } catch {
+            buildFailure = "Could not sample the source: \(error)"
+            buildStage = nil
+            return
+        }
+        await build()
+    }
 
     private func build() async {
         guard let store = library.store else { return }
