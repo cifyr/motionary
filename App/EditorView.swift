@@ -549,7 +549,7 @@ struct EditorView: View {
                 LabeledContent("Animated area", value: sizeCaption)
                 if let estimate {
                     LabeledContent("Estimated payload", value: estimate.formattedEstimate)
-                        .foregroundStyle(estimate.isWithinRecommended ? .primary : .orange)
+                        .foregroundStyle(estimate.isWithinRecommended ? Color.primary : Color.orange)
                     if !estimate.isWithinRecommended {
                         Text("Above the size a widget extension comfortably holds. Lower quality, shrink the animated area, or drop Smoothness.")
                             .font(.caption2)
