@@ -17,7 +17,16 @@ struct DesignWidgetView: View {
         content
             .background {
                 GeometryReader { geometry in
-                    Color.clear.onAppear { Self.lastRenderedSize = geometry.size }
+                    Color.clear.onAppear {
+                        Self.lastRenderedSize = geometry.size
+                        // Teach the app this device's real family size, so the
+                        // editor stops sizing crops from a table measured on
+                        // another OS.
+                        ObservedGeometryStore.record(
+                            size: geometry.size,
+                            for: WidgetFamilyCompatibility.sizeOption(for: family)
+                        )
+                    }
                 }
             }
             .widgetAccentable(false)
@@ -56,7 +65,6 @@ struct DesignWidgetView: View {
                 // viewport moves the whole composition together.
                 viewport: loaded.design.widgetRect,
                 wallpaper: loaded.wallpaper,
-                wallpaperIsWidgetSized: loaded.usesCroppedBackdrop,
                 isAnimated: loaded.fontsReady
             ) { tile, side in
                 Link(destination: LaunchLink.url(for: tile.appID)) {
@@ -198,9 +206,10 @@ struct DesignWidgetView: View {
 
             let report = RuntimeFontRegistry.register(manifest: manifest, store: store)
 
-            let backdropURL = store.widgetBackdropURL(for: designID)
-            let usesBackdrop = FileManager.default.fileExists(atPath: backdropURL.path)
-            let imageURL = usesBackdrop ? backdropURL : store.wallpaperURL(for: designID)
+            // The full composition, not the pre-cropped backdrop: only the
+            // full one is guaranteed to cover whatever size the system gives.
+            let usesBackdrop = false
+            let imageURL = store.wallpaperURL(for: designID)
             // Cap the decode: the fallback is a full-screen PNG, and decoding
             // it whole is a plausible way to end up with nothing to draw.
             let maxPixels = Int(max(manifest.screenSize.width, manifest.screenSize.height))

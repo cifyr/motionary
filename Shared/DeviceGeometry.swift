@@ -96,7 +96,17 @@ enum DeviceGeometry {
     private static var verticalGutter: CGFloat { largeSize.height - 2 * unit }
     private static var rowPitch: CGFloat { unit + verticalGutter }
 
+    /// What the system actually gave this family, if it has ever drawn one.
+    /// Preferred over the table, which can only ever be right for the device
+    /// and OS it was measured on.
     static func pixelSize(of size: WidgetSizeOption) -> CGSize {
+        if let observed = ObservedGeometryStore.load().size(for: size) {
+            return CGSize(width: observed.width * scale, height: observed.height * scale)
+        }
+        return tabulatedPixelSize(of: size)
+    }
+
+    static func tabulatedPixelSize(of size: WidgetSizeOption) -> CGSize {
         switch size {
         case .small: CGSize(width: unit, height: unit)
         case .medium: CGSize(width: largeSize.width, height: unit)

@@ -14,9 +14,6 @@ struct CompositionView<Tile: View>: View {
     /// layout; the visible extent comes from the real view size.
     let viewport: CGRect
     let wallpaper: Image?
-    /// True when the image is already cropped to the viewport, so it is drawn
-    /// at the origin instead of being positioned as a full screen.
-    var wallpaperIsWidgetSized = false
     let isAnimated: Bool
     @ViewBuilder let tileContent: (PlacedTile, CGFloat) -> Tile
 
@@ -41,18 +38,15 @@ struct CompositionView<Tile: View>: View {
                 Color.black
 
                 if let wallpaper {
-                    if wallpaperIsWidgetSized {
-                        wallpaper
-                            .resizable()
-                            .interpolation(.high)
-                            .frame(width: viewport.width * scale, height: viewport.height * scale)
-                    } else {
-                        wallpaper
-                            .resizable()
-                            .interpolation(.high)
-                            .frame(width: screen.width, height: screen.height)
-                            .offset(x: originX, y: originY)
-                    }
+                    // Always positioned as a full screen by origin. Stretching
+                    // a pre-cropped image to an assumed widget size left the
+                    // rest of the widget black wherever the system sized the
+                    // family differently than the table predicted.
+                    wallpaper
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: screen.width, height: screen.height)
+                        .offset(x: originX, y: originY)
                 }
 
                 if isAnimated {

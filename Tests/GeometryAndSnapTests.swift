@@ -60,8 +60,8 @@ final class GeometryAndSnapTests: XCTestCase {
         let rect = DeviceGeometry.widgetRect(size: .large, slot: .topLeft)
         XCTAssertEqual(rect.minX, 79)
         XCTAssertEqual(rect.minY, 272)
-        XCTAssertEqual(rect.width, 1049)
-        XCTAssertEqual(rect.height, 1095)
+        XCTAssertEqual(DeviceGeometry.tabulatedPixelSize(of: .large).width, 1049)
+        XCTAssertEqual(DeviceGeometry.tabulatedPixelSize(of: .large).height, 1095)
 
         XCTAssertEqual(rect.minX / DeviceGeometry.scale, 26.33, accuracy: 0.01)
         XCTAssertNotEqual(rect.minX / DeviceGeometry.scale, 19, "the documented margin is not this device's")
