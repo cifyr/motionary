@@ -146,6 +146,45 @@ struct MediaFrameExtractor {
         )
     }
 
+    /// Rescales about a point on screen rather than about the centre.
+    ///
+    /// Pinching should keep whatever is between the fingers between the
+    /// fingers. Placement centres the source and then offsets it, so holding a
+    /// point still means solving for the offset that puts the same bit of
+    /// source back under the anchor at the new scale.
+    static func transform(
+        _ current: MediaTransform,
+        scaledTo newScale: Double,
+        anchoredAt anchor: CGPoint,
+        sourceSize: CGSize,
+        screenSize: CGSize
+    ) -> MediaTransform {
+        let before = placement(sourceSize: sourceSize, screenSize: screenSize, transform: current)
+        guard before.width > 0, before.height > 0 else {
+            var fallback = current
+            fallback.scale = newScale
+            return fallback
+        }
+
+        // Where the anchor falls within the source, as a fraction of it.
+        let unitX = (anchor.x - before.minX) / before.width
+        let unitY = (anchor.y - before.minY) / before.height
+
+        var scaled = current
+        scaled.scale = newScale
+        let after = placement(sourceSize: sourceSize, screenSize: screenSize, transform: scaled)
+
+        // Undo the centring the new size introduced, then place the same
+        // fraction of the source back under the anchor.
+        let centredX = (screenSize.width - after.width) / 2
+        let centredY = (screenSize.height - after.height) / 2
+        scaled.offset = CGPoint(
+            x: anchor.x - unitX * after.width - centredX,
+            y: anchor.y - unitY * after.height - centredY
+        )
+        return scaled
+    }
+
     /// How strongly the backdrop shows through behind a shrunken source.
     static let backdropOpacity: CGFloat = 0.45
 

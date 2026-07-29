@@ -192,14 +192,36 @@ struct EditorView: View {
     private func placementMagnify() -> some Gesture {
         MagnifyGesture()
             .onChanged { value in
-                // Clamped so a stray pinch cannot shrink the source to nothing
-                // or blow it up past anything useful.
-                design.mediaTransform.scale = min(max(placementBase.scale * value.magnification, 0.2), 4)
+                applyPinch(value)
             }
-            .onEnded { _ in
+            .onEnded { value in
+                applyPinch(value)
                 placementBase = design.mediaTransform
                 library.save(design)
             }
+    }
+
+    /// Always derived from the transform at gesture start, so a long pinch does
+    /// not accumulate rounding from its own intermediate results.
+    private func applyPinch(_ value: MagnifyGesture.Value) {
+        guard let sourceFrame else { return }
+        // Clamped so a stray pinch cannot shrink the source to nothing or blow
+        // it up past anything useful.
+        let scale = min(max(placementBase.scale * value.magnification, 0.2), 4)
+        let screen = DeviceGeometry.screenPixelSize
+        // startAnchor is a unit point over the canvas, which represents the
+        // whole screen, so it converts straight to screen pixels.
+        let anchor = CGPoint(
+            x: value.startAnchor.x * screen.width,
+            y: value.startAnchor.y * screen.height
+        )
+        design.mediaTransform = MediaFrameExtractor.transform(
+            placementBase,
+            scaledTo: scale,
+            anchoredAt: anchor,
+            sourceSize: CGSize(width: sourceFrame.width, height: sourceFrame.height),
+            screenSize: screen
+        )
     }
 
     private func dragGesture(for tile: PlacedTile, scale: CGFloat) -> some Gesture {

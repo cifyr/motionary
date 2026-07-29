@@ -234,6 +234,90 @@ final class MediaImportTests: XCTestCase {
         XCTAssertEqual(pixel(at: high, in: frame)[0], 0, "and not above where it was moved from")
     }
 
+    // MARK: - Anchored pinch
+
+    private let screen = CGSize(width: 1206, height: 2622)
+    private let square = CGSize(width: 400, height: 400)
+
+    /// Where a screen point falls within the source, as a fraction of it. If
+    /// pinching holds the anchor, this is what must not change.
+    private func sourceFraction(of point: CGPoint, under transform: MediaTransform) -> CGPoint {
+        let rect = MediaFrameExtractor.placement(
+            sourceSize: square, screenSize: screen, transform: transform
+        )
+        return CGPoint(x: (point.x - rect.minX) / rect.width, y: (point.y - rect.minY) / rect.height)
+    }
+
+    func testPinchKeepsTheAnchorOverTheSameBitOfSource() {
+        let start = MediaTransform.identity
+        for anchor in [
+            CGPoint(x: 200, y: 400),
+            CGPoint(x: 1000, y: 2200),
+            CGPoint(x: 603, y: 1311),
+        ] {
+            let before = sourceFraction(of: anchor, under: start)
+            for scale in [0.3, 0.75, 1.6, 3.0] {
+                let zoomed = MediaFrameExtractor.transform(
+                    start, scaledTo: scale, anchoredAt: anchor,
+                    sourceSize: square, screenSize: screen
+                )
+                let after = sourceFraction(of: anchor, under: zoomed)
+                XCTAssertEqual(after.x, before.x, accuracy: 0.0001, "anchor \(anchor) at \(scale)x")
+                XCTAssertEqual(after.y, before.y, accuracy: 0.0001, "anchor \(anchor) at \(scale)x")
+            }
+        }
+    }
+
+    /// Pinching at the centre should behave as it did before anchoring, so the
+    /// change does not alter the common case.
+    func testPinchAtTheCentreLeavesTheOffsetAlone() {
+        let centre = CGPoint(x: screen.width / 2, y: screen.height / 2)
+        let zoomed = MediaFrameExtractor.transform(
+            .identity, scaledTo: 2, anchoredAt: centre,
+            sourceSize: square, screenSize: screen
+        )
+        XCTAssertEqual(zoomed.offset.x, 0, accuracy: 0.001)
+        XCTAssertEqual(zoomed.offset.y, 0, accuracy: 0.001)
+    }
+
+    /// Pinching off-centre has to move the source, or the anchor could not
+    /// have been held.
+    func testPinchOffCentreMovesTheSource() {
+        let zoomed = MediaFrameExtractor.transform(
+            .identity, scaledTo: 2, anchoredAt: CGPoint(x: 100, y: 200),
+            sourceSize: square, screenSize: screen
+        )
+        XCTAssertNotEqual(zoomed.offset.x, 0, accuracy: 0.001)
+        XCTAssertNotEqual(zoomed.offset.y, 0, accuracy: 0.001)
+    }
+
+    func testPinchComposesFromAnExistingPlacement() {
+        // Anchoring must work from wherever the source already sits, not only
+        // from the identity transform.
+        let start = MediaTransform(scale: 0.6, offset: CGPoint(x: -120, y: 350), fillsBackground: true)
+        let anchor = CGPoint(x: 800, y: 900)
+        let before = sourceFraction(of: anchor, under: start)
+
+        let zoomed = MediaFrameExtractor.transform(
+            start, scaledTo: 1.8, anchoredAt: anchor,
+            sourceSize: square, screenSize: screen
+        )
+        let after = sourceFraction(of: anchor, under: zoomed)
+        XCTAssertEqual(after.x, before.x, accuracy: 0.0001)
+        XCTAssertEqual(after.y, before.y, accuracy: 0.0001)
+        XCTAssertTrue(zoomed.fillsBackground, "unrelated settings must survive")
+    }
+
+    func testPinchOnAnEmptySourceDoesNotProduceNaN() {
+        let zoomed = MediaFrameExtractor.transform(
+            .identity, scaledTo: 2, anchoredAt: CGPoint(x: 10, y: 10),
+            sourceSize: .zero, screenSize: screen
+        )
+        XCTAssertEqual(zoomed.scale, 2, accuracy: 0.001)
+        XCTAssertFalse(zoomed.offset.x.isNaN)
+        XCTAssertFalse(zoomed.offset.y.isNaN)
+    }
+
     func testScaleIsClampedAwayFromZero() {
         // A zero or negative scale would collapse the source entirely.
         let placed = MediaFrameExtractor.placement(
