@@ -256,6 +256,17 @@ struct LibraryView: View {
                         .font(.caption2).foregroundStyle(.secondary)
                 }
 
+                if let store = library.store,
+                   let active = library.activeDesign,
+                   let manifest = library.manifest(for: active) {
+                    // Rendered in the app, where nothing is memory-capped and
+                    // no snapshot sits in between. If the glyph draws here but
+                    // the widget is black, the font is sound and the widget's
+                    // environment is not; if it is black here too, the fonts
+                    // this app generates are what iOS 27 will not draw.
+                    LaneGlyphProbe(store: store, manifest: manifest)
+                }
+
                 Button {
                     restartWidget()
                 } label: {
@@ -557,5 +568,60 @@ struct ProgressOverlay: View {
             .padding(24)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
+    }
+}
+
+/// Draws one lane glyph in the app, against a colour nothing else uses.
+///
+/// The widget renders black with the animated layer on and correctly with it
+/// off, which narrows the fault to the generated fonts or to the environment
+/// they are drawn in. Those two look identical from the Home Screen. Here there
+/// is no memory cap and no archived snapshot, so whatever this shows is what
+/// the font itself does.
+private struct LaneGlyphProbe: View {
+    let store: DesignStore
+    let manifest: BuildManifest
+
+    @State private var report: RuntimeFontRegistry.Report?
+
+    private var laneZero: String {
+        LaneFontBuilder.postScriptName(family: manifest.fontFamilyBase, lane: 0)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Animation font probe").font(.caption.weight(.semibold))
+
+            ZStack {
+                // Magenta, so an opaque black glyph and a glyph that did not
+                // draw at all cannot be confused.
+                Color(red: 1, green: 0, blue: 1)
+                if report?.isUsable == true {
+                    Text(TimerFontSpec.cycleAlignedReference() + 1, style: .timer)
+                        .font(.custom(laneZero, size: 240))
+                        .foregroundStyle(.white)
+                        .frame(width: 240 * 9, height: 240)
+                        .multilineTextAlignment(.trailing)
+                        .offset(x: -240 * 4)
+                }
+            }
+            .frame(width: 240, height: 240)
+            .clipped()
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(.secondary))
+
+            Text(caption).font(.caption2).foregroundStyle(.secondary)
+        }
+        .task {
+            report = RuntimeFontRegistry.register(manifest: manifest, store: store)
+        }
+    }
+
+    private var caption: String {
+        guard let report else { return "Registering…" }
+        guard report.isUsable else {
+            return "Fonts did not register here either: \(report.resolvable)/\(report.requested)."
+        }
+        return "Picture means the fonts are sound and the widget's environment is at fault. "
+            + "Black or magenta means these generated fonts are what will not draw."
     }
 }
