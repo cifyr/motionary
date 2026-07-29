@@ -62,11 +62,23 @@ struct DesignWidgetView: View {
     /// whose lane fonts it can try to deliver nine different ways.
     private func lab() -> FontLabView? {
         guard let store = try? DesignStore() else { return nil }
+        // Logged step by step: the widget came back black with not even a
+        // label drawn, which means the extension stopped somewhere before the
+        // view existed. A black rectangle cannot say where.
+        WidgetRenderLog.append("lab  enter \(MemoryFootprint.megabytes)MB")
         let importedManifest = ActiveDesign.resolve(in: store)
             .flatMap { try? store.loadManifest(id: $0.id) }
-        guard let manifest = importedManifest ?? PrebuiltDesign.manifest else { return nil }
+        guard let manifest = importedManifest ?? PrebuiltDesign.manifest else {
+            WidgetRenderLog.append("lab  no manifest")
+            return nil
+        }
 
+        WidgetRenderLog.append("lab  manifest \(MemoryFootprint.megabytes)MB")
         let outcomes = FontLab.run(manifest: manifest, store: store)
+        WidgetRenderLog.append("""
+        lab  prepared \(outcomes.filter(\.isDrawable).count)/\(outcomes.count) \
+        \(MemoryFootprint.megabytes)MB
+        """)
         FontLab.record(outcomes, store: store)
         return FontLabView(
             manifest: manifest,
