@@ -15,9 +15,6 @@ struct MotionaryApp: App {
                 .onOpenURL { url in
                     router.handle(url)
                 }
-                .task {
-                    await library.seedBundledDesignIfNeeded()
-                }
 #if DEBUG
                 .task {
                     if DemoSeeder.isRequested {
@@ -145,20 +142,11 @@ final class DesignLibrary: ObservableObject {
         }
     }
 
-    /// Builds the bundled design on a fresh install, so the widget works
-    /// before anyone has touched the editor.
-    func seedBundledDesignIfNeeded() async {
-        guard let store, designs.isEmpty else { return }
-        switch await BundledDesignSeeder.seedIfEmpty(store: store, existing: designs) {
-        case .seeded:
-            activeDesignID = ActiveDesign.identifier
-            reload()
-        case .skipped:
-            break
-        case .failed(let message):
-            operationFailure = "Could not prepare the bundled design: \(message)"
-        }
-    }
+    // The bundled design is no longer copied into the store on launch. The
+    // widget prefers an imported design over the bundled one, so a seeded copy
+    // would outrank the version that is known to draw — and if runtime-
+    // registered fonts still will not render, that trades a working widget for
+    // a black one. Until something is imported, the bundle is the design.
 
     func manifest(for design: DesignDocument) -> BuildManifest? {
         try? store?.loadManifest(id: design.id)
