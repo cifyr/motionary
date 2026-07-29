@@ -148,6 +148,20 @@ def main():
             changes += 1
         previous = index
     print("changes       %d over %d consecutive pairs" % (changes, max(0, len(rows) - 1)))
+
+    # A burst that photographed the wrong Home Screen page is 200 pictures of
+    # wallpaper, and every summary line above still prints happily. That reads as
+    # "the widget did not animate" when it means "the widget was never in frame",
+    # so it has to be an error rather than a zero.
+    if unreadable == len(rows):
+        print(
+            "\nnot one shot showed a probe frame. The burst most likely photographed a page the "
+            "widget is not on (MOTIONARY_BURST_PAGE), or the widget is not placed, or it rendered "
+            "blank. Mean colour of the first shot was (%.1f,%.1f,%.1f) over crop %s."
+            % (rows[0][1][0], rows[0][1][1], rows[0][1][2], crop),
+            file=sys.stderr,
+        )
+        return 2
     return 0
 
 
