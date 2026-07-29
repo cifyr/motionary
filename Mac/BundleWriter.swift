@@ -79,49 +79,83 @@ struct BundleWriter {
         let totalBytes: Int
     }
 
-    /// `designFolder` is a built design's folder in the studio's scratch store.
-    /// `iconsFolder` is that store's icon cache, if the design placed any.
+    /// One design in a bundle that may hold several.
+    struct Bundled {
+        let name: String
+        /// The design's folder in the studio's store.
+        let folder: URL
+        let manifest: BuildManifest
+    }
+
+    /// Installs every design the phone should be able to switch between.
+    ///
+    /// A design's font family is derived from its id, so several sets coexist
+    /// without colliding - but every lane of every design has to be declared in
+    /// `UIAppFonts`, and each design costs about 29MB of the install.
     @discardableResult
-    func install(designFolder: URL, manifest: BuildManifest, iconsFolder: URL? = nil) throws -> Result {
+    func install(_ designs: [Bundled], iconsFolder: URL? = nil) throws -> Result {
         let manager = FileManager.default
         try manager.createDirectory(at: resources, withIntermediateDirectories: true)
 
-        let fontsFolder = designFolder.appendingPathComponent("Fonts", isDirectory: true)
-        let fonts = try manager.contentsOfDirectory(at: fontsFolder, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "ttf" }
-            .sorted { laneNumber($0) < laneNumber($1) }
-        guard !fonts.isEmpty else { throw BundleWriterError.noFonts(path: fontsFolder.path) }
-
-        // The previous design's lanes have to go, or the bundle accumulates
-        // every clip ever built and UIAppFonts names fonts that are no longer
-        // the current design's.
-        for stale in try manager.contentsOfDirectory(at: resources, includingPropertiesForKeys: nil)
-        where stale.pathExtension == "ttf" && stale.lastPathComponent.hasPrefix("MFont") {
-            try manager.removeItem(at: stale)
+        // Everything from the previous build goes first, or the bundle
+        // accumulates every clip ever made and UIAppFonts names fonts that no
+        // longer belong to anything.
+        for stale in try manager.contentsOfDirectory(at: resources, includingPropertiesForKeys: nil) {
+            let name = stale.lastPathComponent
+            if (stale.pathExtension == "ttf" && name.hasPrefix("MFont")) || name.hasPrefix("prebuilt-") {
+                try manager.removeItem(at: stale)
+            }
         }
 
+        var allFonts: [String] = []
         var totalBytes = 0
-        for font in fonts {
-            let destination = resources.appendingPathComponent(font.lastPathComponent)
-            try manager.copyItem(at: font, to: destination)
-            totalBytes += (try? Data(contentsOf: font).count) ?? 0
+        for design in designs {
+            let fontsFolder = design.folder.appendingPathComponent("Fonts", isDirectory: true)
+            let fonts = try manager.contentsOfDirectory(at: fontsFolder, includingPropertiesForKeys: nil)
+                .filter { $0.pathExtension == "ttf" }
+                .sorted { laneNumber($0) < laneNumber($1) }
+            guard !fonts.isEmpty else { throw BundleWriterError.noFonts(path: fontsFolder.path) }
+
+            for font in fonts {
+                try manager.copyItem(at: font, to: resources.appendingPathComponent(font.lastPathComponent))
+                totalBytes += (try? Data(contentsOf: font).count) ?? 0
+            }
+            allFonts += fonts.map(\.lastPathComponent)
+
+            let key = design.manifest.designID.uuidString.lowercased()
+            try copy(design.folder.appendingPathComponent("manifest.json"), to: "prebuilt-\(key)-manifest.json")
+            try copy(design.folder.appendingPathComponent("widget-backdrop.jpg"), to: "prebuilt-\(key)-backdrop.jpg")
+            try copy(design.folder.appendingPathComponent("wallpaper.png"), to: "prebuilt-\(key)-wallpaper.png")
+            // The app plays this rather than drawing the lane fonts: only the
+            // widget renderer advances timer text.
+            try copy(design.folder.appendingPathComponent("preview.mp4"), to: "prebuilt-\(key)-preview.mp4")
+            try installIcons(manifest: design.manifest, from: iconsFolder)
         }
 
-        try copy(designFolder.appendingPathComponent("manifest.json"), to: "prebuilt-manifest.json")
-        try copy(designFolder.appendingPathComponent("widget-backdrop.jpg"), to: "prebuilt-backdrop.jpg")
-        try copy(designFolder.appendingPathComponent("wallpaper.png"), to: "prebuilt-wallpaper.png")
-        // The app plays this rather than drawing the lane fonts: only the
-        // widget renderer advances timer text.
-        try copy(designFolder.appendingPathComponent("preview.mp4"), to: "prebuilt-preview.mp4")
+        try writeIndex(designs)
+        try rewriteAppFonts(at: projectRoot.appendingPathComponent("Widget/Info.plist"), fonts: allFonts)
+        try rewriteAppFonts(at: projectRoot.appendingPathComponent("App/Info.plist"), fonts: allFonts)
 
-        try installIcons(manifest: manifest, from: iconsFolder)
+        return Result(fontCount: allFonts.count, totalBytes: totalBytes)
+    }
 
-        let names = fonts.map(\.lastPathComponent)
-        try rewriteAppFonts(at: projectRoot.appendingPathComponent("Widget/Info.plist"), fonts: names)
-        try rewriteAppFonts(at: projectRoot.appendingPathComponent("App/Info.plist"), fonts: names)
-
-        _ = manifest
-        return Result(fontCount: fonts.count, totalBytes: totalBytes)
+    /// Names and orders what shipped, so the phone can offer them without
+    /// hunting the bundle for files.
+    private func writeIndex(_ designs: [Bundled]) throws {
+        struct Index: Encodable {
+            struct Item: Encodable {
+                let id: UUID
+                let name: String
+            }
+            let designs: [Item]
+        }
+        let index = Index(designs: designs.map { .init(id: $0.manifest.designID, name: $0.name) })
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(index).write(
+            to: resources.appendingPathComponent("prebuilt-index.json"),
+            options: .atomic
+        )
     }
 
     /// One PNG per tile rather than one per icon.
@@ -132,11 +166,6 @@ struct BundleWriter {
     /// than teaching the extension about cache keys.
     private func installIcons(manifest: BuildManifest, from iconsFolder: URL?) throws {
         let manager = FileManager.default
-        for stale in try manager.contentsOfDirectory(at: resources, includingPropertiesForKeys: nil)
-        where stale.lastPathComponent.hasPrefix("prebuilt-icon-") {
-            try manager.removeItem(at: stale)
-        }
-
         let skins = try? SkinLibrary()
         for tile in manifest.placedTiles {
             // A skin wins over a catalogue icon: it is the artwork someone

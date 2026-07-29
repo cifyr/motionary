@@ -202,14 +202,25 @@ struct StudioView: View {
     private var savedDesigns: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Edit an existing design").font(.caption.weight(.semibold))
+                Text("Designs").font(.caption.weight(.semibold))
+                Text("star to ship").font(.caption2).foregroundStyle(.secondary)
                 Spacer()
                 Button("Import...") { importDesign() }.buttonStyle(.link)
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     ForEach(saved) { design in
-                        Button { reopen(design) } label: {
+                        HStack(spacing: 6) {
+                            Button {
+                                toggleStar(design)
+                            } label: {
+                                Image(systemName: design.isStarred ? "star.fill" : "star")
+                                    .foregroundStyle(design.isStarred ? .yellow : .secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Starred designs are compiled into the app, and the phone switches between them. About 29MB each.")
+
+                            Button { reopen(design) } label: {
                             HStack {
                                 Text(design.name).lineLimit(1)
                                 Spacer()
@@ -221,8 +232,10 @@ struct StudioView: View {
                             .font(.callout)
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                            .buttonStyle(.plain)
+                        }
                         .contextMenu {
+                            Button(design.isStarred ? "Unstar" : "Star") { toggleStar(design) }
                             Button("Export...") { exportDesign(design) }
                             Button("Delete", role: .destructive) { delete(design) }
                         }
@@ -232,6 +245,14 @@ struct StudioView: View {
             .frame(maxHeight: 88)
         }
         .disabled(isBusy)
+    }
+
+    private func toggleStar(_ design: DesignDocument) {
+        guard let store = try? StudioPipeline.openStore() else { return }
+        var updated = design
+        updated.isStarred.toggle()
+        try? store.save(updated)
+        saved = StudioPipeline.saved()
     }
 
     private func exportDesign(_ design: DesignDocument) {
