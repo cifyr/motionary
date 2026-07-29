@@ -10,6 +10,7 @@ struct HomeView: View {
     @EnvironmentObject private var router: ExternalAppRouter
 
     @State private var showingLibrary = false
+    @StateObject private var icons = IconImageLoader(store: try? DesignStore())
 
     var body: some View {
         ZStack {
@@ -62,7 +63,7 @@ struct HomeView: View {
             Button {
                 router.launch(appID: tile.appID)
             } label: {
-                TileView(tile: tile, side: side)
+                TileView(tile: tile, side: side, iconImage: icons.image(for: tile))
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open \(AppCatalog.app(id: tile.appID)?.name ?? tile.appID)")

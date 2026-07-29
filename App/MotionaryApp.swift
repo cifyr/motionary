@@ -77,7 +77,9 @@ final class DesignLibrary: ObservableObject {
     func reload() {
         guard let store else { return }
         designs = store.loadAll()
-        Self.logger.debug("loaded \(self.designs.count) designs")
+        let selection = activeDesignID?.uuidString ?? "none"
+        let resolved = activeDesign?.name ?? "none"
+        Self.logger.info("loaded \(self.designs.count) designs; selection=\(selection, privacy: .public) resolved=\(resolved, privacy: .public)")
     }
 
     func save(_ design: DesignDocument) {
@@ -115,6 +117,9 @@ final class DesignLibrary: ObservableObject {
         switch await DemoSeeder.run(store: store) {
         case .success(let manifest):
             reload()
+            // Show what was just seeded, rather than leaving whatever was
+            // selected before in place.
+            activeDesignID = manifest.designID
             pendingPreviewDesignID = manifest.designID
         case .failure(let message):
             loadFailure = message

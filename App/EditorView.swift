@@ -16,9 +16,16 @@ struct EditorView: View {
     @State private var exportMessage: String?
     @State private var wallpaper: Image?
     @State private var showingPreview = false
+    @State private var showingIconPicker = false
+    @StateObject private var icons: IconImageLoader
 
     init(design: DesignDocument) {
         _design = State(initialValue: design)
+        _icons = StateObject(wrappedValue: IconImageLoader(store: try? DesignStore()))
+    }
+
+    private var selectedTile: PlacedTile? {
+        design.tiles.first { $0.id == selectedTileID }
     }
 
     var body: some View {
@@ -48,6 +55,16 @@ struct EditorView: View {
             .sheet(isPresented: $showingTilePalette) {
                 TilePaletteView { app in
                     addTile(for: app)
+                }
+            }
+            .sheet(isPresented: $showingIconPicker) {
+                if let store = library.store, let cache = try? IconCache(store: store), let tile = selectedTile {
+                    IconPickerView(
+                        cache: cache,
+                        suggestion: AppCatalog.app(id: tile.appID)?.name ?? tile.appID
+                    ) { icon in
+                        applyIcon(icon, to: tile.id)
+                    }
                 }
             }
             .sheet(isPresented: $showingPreview) {
@@ -103,7 +120,12 @@ struct EditorView: View {
                 CropOutline(rect: design.widgetRect, screen: screen, color: .cyan, label: design.widgetSize.title)
 
                 ForEach(design.tiles) { tile in
-                    TileView(tile: tile, side: tile.size * scale, isSelected: tile.id == selectedTileID)
+                    TileView(
+                        tile: tile,
+                        side: tile.size * scale,
+                        isSelected: tile.id == selectedTileID,
+                        iconImage: icons.image(for: tile)
+                    )
                         .position(
                             x: tile.center.x * scale,
                             y: tile.center.y * scale
@@ -159,6 +181,14 @@ struct EditorView: View {
         if commit { library.save(design) }
     }
 
+    private func applyIcon(_ icon: IconAsset?, to tileID: UUID) {
+        guard let index = design.tiles.firstIndex(where: { $0.id == tileID }) else { return }
+        if let existing = design.tiles[index].icon { icons.forget(existing) }
+        design.tiles[index].icon = icon
+        library.save(design)
+        Self.logger.info("tile \(tileID.uuidString, privacy: .public) icon set to \(icon?.id ?? "none", privacy: .public)")
+    }
+
     private func addTile(for app: CatalogApp) {
         let widget = design.widgetRect
         let side = min(widget.width, widget.height) * 0.22
@@ -205,6 +235,46 @@ struct EditorView: View {
                     Text("Only the full-screen slot is measured. Nudge the others until the widget lines up with the wallpaper on your phone.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                }
+            }
+
+            if let tile = selectedTile {
+                Section("Selected tile") {
+                    LabeledContent("App", value: AppCatalog.app(id: tile.appID)?.name ?? tile.appID)
+                    Button {
+                        showingIconPicker = true
+                    } label: {
+                        Label(tile.icon == nil ? "Choose icon" : "Change icon", systemImage: "square.grid.2x2")
+                    }
+                    if let icon = tile.icon {
+                        HStack {
+                            Text(icon.id).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            Spacer()
+                            Button("Remove") { applyIcon(nil, to: tile.id) }
+                                .font(.caption)
+                        }
+                    }
+                    ColorPicker("Plate colour", selection: Binding(
+                        get: { tile.tintHex.flatMap(Color.init(hex:)) ?? AppCatalog.app(id: tile.appID)?.tint ?? .gray },
+                        set: { newValue in
+                            guard let index = design.tiles.firstIndex(where: { $0.id == tile.id }) else { return }
+                            design.tiles[index].tintHex = newValue.hexString
+                            library.save(design)
+                        }
+                    ))
+                    Toggle("Show label", isOn: Binding(
+                        get: { tile.showsLabel },
+                        set: { newValue in
+                            guard let index = design.tiles.firstIndex(where: { $0.id == tile.id }) else { return }
+                            design.tiles[index].showsLabel = newValue
+                            library.save(design)
+                        }
+                    ))
+                    Button("Remove tile", role: .destructive) {
+                        design.tiles.removeAll { $0.id == tile.id }
+                        selectedTileID = nil
+                        library.save(design)
+                    }
                 }
             }
 

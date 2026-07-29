@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// How a placed app tile is drawn, in both the editor and the widget.
 ///
@@ -8,8 +9,16 @@ struct TileView: View {
     let tile: PlacedTile
     let side: CGFloat
     var isSelected: Bool = false
+    /// Rasterised icon from the shared cache. The widget cannot fetch one, so
+    /// whoever draws the tile supplies it and the SF Symbol is the fallback.
+    var iconImage: Image?
 
     private var app: CatalogApp? { AppCatalog.app(id: tile.appID) }
+
+    private var plateColor: Color {
+        if let hex = tile.tintHex, let color = Color(hex: hex) { return color }
+        return app?.tint ?? .gray
+    }
 
     var body: some View {
         VStack(spacing: side * 0.06) {
@@ -18,7 +27,7 @@ struct TileView: View {
                     .fill(.ultraThinMaterial)
                     .overlay {
                         RoundedRectangle(cornerRadius: side * tile.cornerRadius, style: .continuous)
-                            .fill((app?.tint ?? .gray).opacity(0.55))
+                            .fill(plateColor.opacity(0.55))
                     }
                     .overlay {
                         RoundedRectangle(cornerRadius: side * tile.cornerRadius, style: .continuous)
@@ -26,10 +35,19 @@ struct TileView: View {
                     }
                     .shadow(color: .black.opacity(0.35), radius: side * 0.06, y: side * 0.03)
 
-                Image(systemName: app?.symbol ?? "questionmark")
-                    .font(.system(size: side * 0.44, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.4), radius: side * 0.03)
+                if let iconImage {
+                    iconImage
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: side * 0.56, height: side * 0.56)
+                        .shadow(color: .black.opacity(0.4), radius: side * 0.03)
+                } else {
+                    Image(systemName: app?.symbol ?? "questionmark")
+                        .font(.system(size: side * 0.44, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.4), radius: side * 0.03)
+                }
             }
             .frame(width: side, height: side)
 
@@ -64,5 +82,25 @@ enum LaunchLink {
     static func appID(from url: URL) -> String? {
         guard url.scheme == scheme, url.host == "launch" else { return nil }
         return url.pathComponents.dropFirst().first
+    }
+}
+
+extension Color {
+    /// Accepts the `#rrggbb` form the tile editor writes.
+    init?(hex: String) {
+        var text = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        if text.count == 3 { text = text.map { "\($0)\($0)" }.joined() }
+        guard text.count == 6, let value = UInt32(text, radix: 16) else { return nil }
+        self.init(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
+    }
+
+    var hexString: String? {
+        guard let components = UIColor(self).cgColor.components, components.count >= 3 else { return nil }
+        let scaled = components.prefix(3).map { Int(($0 * 255).rounded()) }
+        return String(format: "#%02x%02x%02x", scaled[0], scaled[1], scaled[2])
     }
 }

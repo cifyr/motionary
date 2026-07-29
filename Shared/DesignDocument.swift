@@ -13,6 +13,11 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
     var cornerRadius: CGFloat = 0.22
     var showsLabel: Bool = true
     var opacity: Double = 1
+    /// Chosen from the Iconify catalogue. Nil falls back to the catalogue
+    /// entry's SF Symbol, so designs made before icons existed still draw.
+    var icon: IconAsset?
+    /// Overrides the catalogue's brand tint for the plate behind the icon.
+    var tintHex: String?
 
     var rect: CGRect {
         CGRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size)

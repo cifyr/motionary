@@ -16,6 +16,7 @@ struct WidgetPreviewView: View {
     @State private var report: RuntimeFontRegistry.Report?
     @State private var failure: String?
     @State private var wallpaper: Image?
+    @StateObject private var icons = IconImageLoader(store: try? DesignStore())
 
     var body: some View {
         NavigationStack {
@@ -33,7 +34,7 @@ struct WidgetPreviewView: View {
                             videoURL: store.previewVideoURL(for: design.id),
                             wallpaper: wallpaper
                         ) { tile, side in
-                            TileView(tile: tile, side: side)
+                            TileView(tile: tile, side: side, iconImage: icons.image(for: tile))
                         }
                         .frame(width: width, height: width / aspect)
                         .clipShape(RoundedRectangle(cornerRadius: width * 0.09, style: .continuous))

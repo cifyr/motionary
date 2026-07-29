@@ -20,6 +20,41 @@ enum DemoSeeder {
         ProcessInfo.processInfo.arguments.contains(launchFlag)
     }
 
+    /// Exercises the whole icon path: fetch from Iconify, rasterise locally,
+    /// cache into the app group, and reference it from the tiles.
+    private static let demoIcons = [
+        "spotify": "simple-icons:spotify",
+        "settings": "material-symbols:settings",
+        "gmaps": "simple-icons:googlemaps",
+        "clock": "material-symbols:schedule",
+    ]
+
+    private static func attachIcons(to design: inout DesignDocument, store: DesignStore) async {
+        guard let cache = try? IconCache(store: store) else { return }
+        let service = IconifyService()
+        for index in design.tiles.indices {
+            guard design.tiles[index].icon == nil,
+                  let id = demoIcons[design.tiles[index].appID],
+                  let icon = IconAsset(id: id)
+            else { continue }
+            do {
+                if !cache.isCached(icon) {
+                    let body = try await service.body(for: icon)
+                    let image = try SVGIconRenderer(
+                        viewBox: body.viewBox,
+                        tint: CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+                    ).image(body: body.body, side: IconCache.renderedSide)
+                    try cache.store(image, for: icon)
+                }
+                design.tiles[index].icon = icon
+                logger.info("DEMO ICON \(icon.id, privacy: .public) attached")
+            } catch {
+                logger.error("demo icon \(id, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+        try? store.save(design)
+    }
+
     enum Outcome {
         case success(BuildManifest)
         case failure(String)
@@ -28,9 +63,10 @@ enum DemoSeeder {
     static func run(store: DesignStore) async -> Outcome {
         // Reuse an already-built demo so repeated launches exercise the render
         // path without paying for a full regeneration each time.
-        if let existing = store.loadAll().first(where: { $0.name == "Demo" }),
+        if var existing = store.loadAll().first(where: { $0.name == "Demo" }),
            let manifest = try? store.loadManifest(id: existing.id) {
             logger.info("reusing demo design \(existing.id.uuidString, privacy: .public)")
+            await attachIcons(to: &existing, store: store)
             let report = RuntimeFontRegistry.register(manifest: manifest, store: store)
             logger.info("DEMO REUSE lanes=\(report.resolvable)/\(report.requested) usable=\(report.isUsable)")
             return .success(manifest)
@@ -71,6 +107,7 @@ enum DemoSeeder {
                 logger.info("demo \(stage.caption, privacy: .public)")
             }
             design.buildGeneration = manifest.buildGeneration
+            await attachIcons(to: &design, store: store)
             try store.save(design)
 
             let report = RuntimeFontRegistry.register(manifest: manifest, store: store)

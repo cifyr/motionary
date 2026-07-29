@@ -32,7 +32,7 @@ struct DesignWidgetView: View {
                 isAnimated: loaded.fontsReady
             ) { tile, side in
                 Link(destination: LaunchLink.url(for: tile.appID)) {
-                    TileView(tile: tile, side: side)
+                    TileView(tile: tile, side: side, iconImage: loaded.icons.image(for: tile))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Open \(AppCatalog.app(id: tile.appID)?.name ?? tile.appID)")
@@ -47,6 +47,7 @@ struct DesignWidgetView: View {
         let manifest: BuildManifest
         let wallpaper: Image?
         let fontsReady: Bool
+        let icons: IconImageProvider
     }
 
     private enum LoadOutcome {
@@ -78,7 +79,8 @@ struct DesignWidgetView: View {
                 design: design,
                 manifest: manifest,
                 wallpaper: wallpaper,
-                fontsReady: report.isUsable
+                fontsReady: report.isUsable,
+                icons: IconImageProvider(store: store)
             ))
         } catch {
             return .failure(String(describing: error))
