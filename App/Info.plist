@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+  <key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
+  <key>CFBundleDisplayName</key><string>Motionary</string>
+  <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+  <key>CFBundlePackageType</key><string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+  <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
+  <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
+  <key>UILaunchScreen</key><dict/>
+  <key>NSPhotoLibraryAddUsageDescription</key>
+  <string>Motionary saves the generated Home Screen wallpaper to your photo library so you can set it as your background.</string>
+  <key>NSPhotoLibraryUsageDescription</key>
+  <string>Motionary reads the video you pick so it can turn it into an animated widget.</string>
+  <key>CFBundleURLTypes</key>
+  <array><dict>
+    <key>CFBundleURLName</key><string>com.caden.Motionary.launch</string>
+    <key>CFBundleURLSchemes</key><array><string>motionary</string></array>
+  </dict></array>
+</dict></plist>
