@@ -161,16 +161,31 @@ struct FontSetGenerator {
         let wallpaper = try FrameEncoder.pngData(frames[0])
         try wallpaper.write(to: store.wallpaperURL(for: design.id), options: DesignStore.writingOptions)
 
-        // A 1206x2622 PNG costs about 12.6MB decompressed, and a widget
-        // extension has far less headroom than that once 30MB of fonts are
-        // mapped. The widget never draws anything outside its own frame, so
-        // bake that crop and let it decode a fraction of the pixels.
-        let widgetRect = design.widgetRect.integral
-        if let cropped = frames[0].cropping(to: widgetRect) {
+        // The full screen costs about 12.6MB decompressed and the widget only
+        // ever shows its own frame. On this phone the extension peaked at
+        // 46.7MB against a working reference of 43.3MB and its render was
+        // dropped, which is what a black widget looks like from outside.
+        //
+        // Padded, because the system hands over 359x548pt where the
+        // calibration says 358x544: cropping to the exact frame would leave a
+        // few unpainted pixels down the right and bottom edges.
+        let padding: CGFloat = 24
+        let backdropRect = design.widgetRect
+            .insetBy(dx: -padding, dy: -padding)
+            .intersection(CGRect(origin: .zero, size: DeviceGeometry.screenPixelSize))
+            .integral
+        var bakedBackdrop: CGRect?
+        if !backdropRect.isNull, let cropped = frames[0].cropping(to: backdropRect) {
             let data = try FrameEncoder.jpegData(cropped, quality: 0.9)
                 ?? FrameEncoder.pngData(cropped)
             try data.write(to: store.widgetBackdropURL(for: design.id), options: DesignStore.writingOptions)
-            Self.logger.info("widget backdrop \(Int(widgetRect.width))x\(Int(widgetRect.height)), \(data.count) bytes")
+            bakedBackdrop = backdropRect
+            Self.logger.info("""
+            widget backdrop \(Int(backdropRect.width))x\(Int(backdropRect.height)), \
+            \(data.count) bytes, saving \
+            \(Int((DeviceGeometry.screenPixelSize.width * DeviceGeometry.screenPixelSize.height
+                - backdropRect.width * backdropRect.height) * 4 / 1_000_000))MB when decoded
+            """)
         }
 
         // The in-app preview plays this rather than the lane fonts: only the
@@ -192,7 +207,8 @@ struct FontSetGenerator {
             screenSize: DeviceGeometry.screenPixelSize,
             wallpaperName: "wallpaper.png",
             totalFontBytes: totalBytes,
-            builtAt: Date()
+            builtAt: Date(),
+            backdropRect: bakedBackdrop
         )
         try store.save(manifest)
 

@@ -82,9 +82,12 @@ struct FrameEncoder {
 /// `laneCount x 15` copies of one encoded frame, not one copy per frame. That
 /// multiplier is why a modest crop change moves tens of megabytes.
 struct PayloadBudget {
-    /// Widget extensions are memory-capped, and a font set well past this is a
-    /// reliable way to get a blank widget instead of an animated one.
-    static let recommendedMaximumBytes = 60 * 1024 * 1024
+    /// Measured on an iPhone 17 Pro rather than guessed. A jetsam report caught
+    /// the Onewheel build peaking at 43.3MB and drawing correctly, while a
+    /// 74.8MB Motionary set peaked at 46.7MB and had its render dropped — which
+    /// is what a black widget looks like from outside. 45MB sits just above the
+    /// figure known to work.
+    static let recommendedMaximumBytes = 45 * 1024 * 1024
     static let hardMaximumBytes = 120 * 1024 * 1024
 
     let spec: TimerFontSpec

@@ -14,6 +14,12 @@ struct CompositionView<Tile: View>: View {
     /// layout; the visible extent comes from the real view size.
     let viewport: CGRect
     let wallpaper: Image?
+    /// Screen-space rect the wallpaper image covers: the whole screen for the
+    /// full wallpaper, or the baked crop when the widget loads the smaller
+    /// backdrop. Stated rather than assumed, because positioning a pre-cropped
+    /// image as if it were full-screen is what previously left the rest of the
+    /// widget black.
+    var wallpaperRect: CGRect?
     let isAnimated: Bool
     @ViewBuilder let tileContent: (PlacedTile, CGFloat) -> Tile
 
@@ -38,15 +44,18 @@ struct CompositionView<Tile: View>: View {
                 Color.black
 
                 if let wallpaper {
-                    // Always positioned as a full screen by origin. Stretching
-                    // a pre-cropped image to an assumed widget size left the
-                    // rest of the widget black wherever the system sized the
-                    // family differently than the table predicted.
+                    // Placed by the rect it actually covers, so a full-screen
+                    // image and a baked crop both land on the same pixels.
+                    let covered = wallpaperRect
+                        ?? CGRect(origin: .zero, size: manifest.screenSize)
                     wallpaper
                         .resizable()
                         .interpolation(.high)
-                        .frame(width: screen.width, height: screen.height)
-                        .offset(x: originX, y: originY)
+                        .frame(width: covered.width * scale, height: covered.height * scale)
+                        .offset(
+                            x: originX + covered.minX * scale,
+                            y: originY + covered.minY * scale
+                        )
                 }
 
                 if isAnimated {

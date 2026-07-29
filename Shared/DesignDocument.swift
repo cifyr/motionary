@@ -237,6 +237,11 @@ struct BuildManifest: Codable, Equatable, Sendable {
     var totalFontBytes: Int
     var builtAt: Date
 
+    /// Screen-space rect covered by the pre-cropped widget backdrop, when one
+    /// was baked. Optional so manifests written before it existed still decode
+    /// — the widget falls back to the full-screen wallpaper for those.
+    var backdropRect: CGRect?
+
     var spec: TimerFontSpec {
         TimerFontSpec(laneCount: laneCount, framesPerSecond: framesPerSecond)
     }

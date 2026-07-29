@@ -62,6 +62,7 @@ struct DesignWidgetView: View {
                 // viewport moves the whole composition together.
                 viewport: loaded.design.widgetRect,
                 wallpaper: loaded.wallpaper,
+                wallpaperRect: loaded.wallpaperRect,
                 isAnimated: loaded.fontsReady
             ) { tile, side in
                 Link(destination: LaunchLink.url(for: tile.appID)) {
@@ -85,6 +86,7 @@ struct DesignWidgetView: View {
         let icons: IconImageProvider
         let report: RuntimeFontRegistry.Report
         let usesCroppedBackdrop: Bool
+        let wallpaperRect: CGRect?
         let backdropLoaded: Bool
         let sizeMatches: Bool
         let backdropFacts: (exists: Bool, bytes: Int, decoded: CGSize)
@@ -259,13 +261,22 @@ struct DesignWidgetView: View {
 
             let report = RuntimeFontRegistry.register(manifest: manifest, store: store)
 
-            // The full composition, not the pre-cropped backdrop: only the
-            // full one is guaranteed to cover whatever size the system gives.
-            let usesBackdrop = false
-            let imageURL = store.wallpaperURL(for: designID)
-            // Cap the decode: the fallback is a full-screen PNG, and decoding
-            // it whole is a plausible way to end up with nothing to draw.
-            let maxPixels = Int(max(manifest.screenSize.width, manifest.screenSize.height))
+            // The baked crop when this design has one, because decoding the
+            // full screen costs about 12.6MB and the widget shows only its own
+            // frame. On this phone the extension peaked at 46.7MB against a
+            // working reference of 43.3MB and the system dropped its render,
+            // which is what a black widget looks like from outside. The crop is
+            // padded at build time so it still covers the slightly larger frame
+            // the system actually hands over.
+            let backdropURL = store.widgetBackdropURL(for: designID)
+            let backdropRect = manifest.backdropRect
+            let usesBackdrop = backdropRect != nil
+                && FileManager.default.fileExists(atPath: backdropURL.path)
+            let imageURL = usesBackdrop ? backdropURL : store.wallpaperURL(for: designID)
+            let covered = usesBackdrop
+                ? backdropRect
+                : CGRect(origin: .zero, size: manifest.screenSize)
+            let maxPixels = Int(max(covered?.width ?? 0, covered?.height ?? 0))
             let loadedImage = ImageLoader.load(at: imageURL, maxPixelSize: maxPixels)
             let wallpaper = loadedImage.map { Image(decorative: $0, scale: 1) }
             Self.logger.info("""
@@ -282,6 +293,7 @@ struct DesignWidgetView: View {
                 icons: IconImageProvider(store: store),
                 report: report,
                 usesCroppedBackdrop: usesBackdrop,
+                wallpaperRect: covered,
                 backdropLoaded: loadedImage != nil,
                 sizeMatches: sizeMatches,
                 backdropFacts: (

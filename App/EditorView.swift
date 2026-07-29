@@ -561,7 +561,7 @@ struct EditorView: View {
                     LabeledContent("Estimated payload", value: estimate.formattedEstimate)
                         .foregroundStyle(estimate.isWithinRecommended ? Color.primary : Color.orange)
                     if !estimate.isWithinRecommended {
-                        Text("Above the size a widget extension comfortably holds. Lower quality, shrink the animated area, or drop Smoothness.")
+                        Text("Above what a widget extension can hold. The system drops the render and the widget goes black. Lower quality, shrink the animated area, or drop Smoothness.")
                             .font(.caption2)
                             .foregroundStyle(.orange)
                     }
