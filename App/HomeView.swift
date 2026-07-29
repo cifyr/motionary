@@ -51,7 +51,7 @@ struct HomeView: View {
             tiles: design.tiles,
             videoURL: FileManager.default.fileExists(atPath: videoURL.path) ? videoURL : nil,
             wallpaper: UIImage(contentsOfFile: wallpaperURL.path).map { Image(uiImage: $0) },
-            fillsViewport: true
+            scaleMode: .device
         ) { tile, side in
             Button {
                 router.launch(appID: tile.appID)

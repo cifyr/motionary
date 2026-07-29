@@ -8,24 +8,40 @@ import UIKit
 /// The app plays a video rather than the lane fonts because only the system
 /// widget renderer advances timer text fast enough to drive those.
 struct LoopingCompositionView<Tile: View>: View {
+    /// How screen pixels map to points.
+    enum ScaleMode {
+        /// Life size: one screen pixel is one device pixel. Used anywhere the
+        /// result has to line up with the real Home Screen.
+        case device
+        /// Shrink to fit the available width, for a scaled-down mock.
+        case fitWidth
+    }
+
+    @Environment(\.displayScale) private var displayScale
+
     let screenSize: CGSize
-    /// Region of the screen to show, in screen pixels.
+    /// Region of the screen to show, in screen pixels. Under `.device` only its
+    /// origin matters; the visible extent comes from the real view size.
     let viewport: CGRect
     let tiles: [PlacedTile]
     let videoURL: URL?
     let wallpaper: Image?
-    /// Fills the viewport rather than fitting it, for the full-screen home.
-    var fillsViewport = false
+    var scaleMode: ScaleMode = .fitWidth
     @ViewBuilder let tileContent: (PlacedTile, CGFloat) -> Tile
 
     var body: some View {
         GeometryReader { geometry in
-            let scale = fillsViewport
-                ? max(geometry.size.width / viewport.width, geometry.size.height / viewport.height)
+            let scale = scaleMode == .device
+                ? 1 / max(displayScale, 1)
                 : geometry.size.width / viewport.width
             let screen = CGSize(width: screenSize.width * scale, height: screenSize.height * scale)
-            let originX = -viewport.minX * scale + (geometry.size.width - viewport.width * scale) / 2
-            let originY = -viewport.minY * scale + (geometry.size.height - viewport.height * scale) / 2
+            // At device scale the viewport's top-left pins to the view's
+            // top-left; centring would reintroduce a dependency on the assumed
+            // viewport size being exactly the real one.
+            let centreX = scaleMode == .device ? 0 : (geometry.size.width - viewport.width * scale) / 2
+            let centreY = scaleMode == .device ? 0 : (geometry.size.height - viewport.height * scale) / 2
+            let originX = -viewport.minX * scale + centreX
+            let originY = -viewport.minY * scale + centreY
 
             ZStack(alignment: .topLeading) {
                 Color.black

@@ -6,9 +6,12 @@ import SwiftUI
 /// The app editor passes the whole screen; the widget passes its own frame.
 /// Both therefore lay tiles out from identical screen pixel coordinates.
 struct CompositionView<Tile: View>: View {
+    @Environment(\.displayScale) private var displayScale
+
     let manifest: BuildManifest
     let tiles: [PlacedTile]
-    /// Region of the screen to show, in screen pixels.
+    /// Region of the screen to show, in screen pixels. Only its origin affects
+    /// layout; the visible extent comes from the real view size.
     let viewport: CGRect
     let wallpaper: Image?
     let isAnimated: Bool
@@ -16,7 +19,13 @@ struct CompositionView<Tile: View>: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let scale = geometry.size.width / viewport.width
+            // The composition is authored in screen pixels, so points per
+            // screen pixel is exactly 1/displayScale. Deriving it from
+            // `geometry.size.width / viewport.width` instead would make every
+            // position depend on the widget-size table being exactly right,
+            // and a 1.6% width error drifts content by ~16px over a large
+            // widget — visible as the scene jumping when the app opens.
+            let scale = 1 / max(displayScale, 1)
             let screen = CGSize(
                 width: manifest.screenSize.width * scale,
                 height: manifest.screenSize.height * scale

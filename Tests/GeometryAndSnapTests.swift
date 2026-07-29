@@ -41,6 +41,31 @@ final class GeometryAndSnapTests: XCTestCase {
         XCTAssertEqual(rect, last)
     }
 
+    // MARK: - Scale invariants
+
+    /// The composition is authored in screen pixels, so one screen pixel must
+    /// be one device pixel wherever the result has to line up with the real
+    /// Home Screen. Deriving scale from an assumed widget width instead makes
+    /// every position depend on the size table being exact.
+    func testScreenPixelsMapToPointsAtDeviceScale() {
+        let pointsPerPixel = 1 / DeviceGeometry.scale
+        XCTAssertEqual(DeviceGeometry.screenPixelSize.width * pointsPerPixel, 402, accuracy: 0.001)
+        XCTAssertEqual(DeviceGeometry.screenPixelSize.height * pointsPerPixel, 874, accuracy: 0.001)
+    }
+
+    /// If a family's tabulated width were wrong, width-derived scaling would
+    /// drift content by this much over the widget's height. The test documents
+    /// the sensitivity that motivated pinning the scale.
+    func testWidthErrorWouldDriftContentSignificantly() {
+        let tabulated = WidgetSizeOption.large.pointSize.width
+        let measuredPortraitWidth = WidgetSizeOption.fullScreen.pointSize.width
+        let ratio = measuredPortraitWidth / tabulated
+        XCTAssertLessThan(ratio, 1, "the portrait family is narrower than the tabulated standard families")
+
+        let drift = WidgetSizeOption.large.pointSize.height * (1 - ratio)
+        XCTAssertGreaterThan(drift, 5, "a width error this size is visible, so scale must not depend on it")
+    }
+
     // MARK: - Crop derivation
 
     func testEffectiveCropIsClippedToTheWidgetFrame() {
