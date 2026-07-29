@@ -59,9 +59,18 @@ struct CompositionView<Tile: View>: View {
                 }
 
                 if isAnimated {
-                    TimerFontLayer(manifest: manifest)
-                        .frame(width: screen.width, height: screen.height)
-                        .offset(x: originX, y: originY)
+                    TimerFontLayer(
+                        laneCount: manifest.laneCount,
+                        framesPerSecond: manifest.framesPerSecond,
+                        font: { lane, size in
+                            .custom(
+                                LaneFontBuilder.postScriptName(family: manifest.fontFamilyBase, lane: lane),
+                                size: size
+                            )
+                        }
+                    )
+                    .frame(width: screen.width, height: screen.height)
+                    .offset(x: originX, y: originY)
                 }
 
                 ForEach(tiles) { tile in
@@ -84,13 +93,24 @@ struct CompositionView<Tile: View>: View {
 ///
 /// Nothing here runs per frame. The system re-renders the timer text on its own
 /// schedule and that is what advances the visible glyph.
+///
+/// The lane font is supplied rather than derived from the manifest so the font
+/// lab can push the same drawing through a font obtained some other way; the
+/// point of the lab is that it is not a second renderer.
 struct TimerFontLayer: View {
-    let manifest: BuildManifest
+    let laneCount: Int
+    let framesPerSecond: Int
+    let font: (Int, CGFloat) -> Font
 
     var body: some View {
         GeometryReader { geometry in
             let size = geometry.size.width
-            TimerFontCanvas(size: size, manifest: manifest)
+            TimerFontCanvas(
+                size: size,
+                laneCount: laneCount,
+                framesPerSecond: framesPerSecond,
+                font: font
+            )
                 .frame(width: size, height: size)
                 // The glyph canvas is square; stretch it back to screen aspect.
                 .scaleEffect(x: 1, y: geometry.size.height / size, anchor: .top)
@@ -103,15 +123,13 @@ struct TimerFontLayer: View {
 
 private struct TimerFontCanvas: View {
     let size: CGFloat
-    let manifest: BuildManifest
-
-    private func laneFont(_ lane: Int) -> String {
-        LaneFontBuilder.postScriptName(family: manifest.fontFamilyBase, lane: lane)
-    }
+    let laneCount: Int
+    let framesPerSecond: Int
+    let font: (Int, CGFloat) -> Font
 
     var body: some View {
-        let lanes = manifest.laneCount
-        let frameDuration = 1 / CGFloat(manifest.framesPerSecond)
+        let lanes = laneCount
+        let frameDuration = 1 / CGFloat(framesPerSecond)
         // Anchored to a whole cycle rather than "now minus 60", so the visible
         // frame is a pure function of wall-clock time. That is what lets the
         // app resume the animation where the widget left it. It also keeps the
@@ -125,13 +143,13 @@ private struct TimerFontCanvas: View {
             // gated as a group.
             ZStack {
                 Text(reference + 1, style: .timer)
-                    .font(.custom(laneFont(0), size: size))
+                    .font(font(0, size))
                     .foregroundStyle(.white)
                     .centerAnimationGlyph(size: size)
 
                 ForEach(1 ..< max(2, lanes / 2), id: \.self) { lane in
                     Text(reference + 1 + frameDuration * CGFloat(lane), style: .timer)
-                        .font(.custom(laneFont(lane), size: size))
+                        .font(font(lane, size))
                         .foregroundStyle(.white)
                         .centerAnimationGlyph(size: size)
                         .mask {
@@ -144,7 +162,7 @@ private struct TimerFontCanvas: View {
             ZStack {
                 ForEach((lanes / 2) ..< lanes, id: \.self) { lane in
                     Text(reference + 1 + frameDuration * CGFloat(lane), style: .timer)
-                        .font(.custom(laneFont(lane), size: size))
+                        .font(font(lane, size))
                         .foregroundStyle(.white)
                         .centerAnimationGlyph(size: size)
                         .mask {
@@ -159,6 +177,30 @@ private struct TimerFontCanvas: View {
         }
         .frame(width: size, height: size)
         .clipped()
+    }
+}
+
+/// Lane 0 on its own, unmasked - the same drawing the stack does first, with
+/// nothing else layered over it.
+///
+/// The font lab needs a picture per route, not motion, and one lane says
+/// everything: if this draws, the route reached the renderer.
+struct SingleLaneGlyph: View {
+    let font: (CGFloat) -> Font
+
+    var body: some View {
+        GeometryReader { geometry in
+            let size = geometry.size.width
+            Text(TimerFontSpec.cycleAlignedReference() + 1, style: .timer)
+                .font(font(size))
+                .foregroundStyle(.white)
+                .centerAnimationGlyph(size: size)
+                .frame(width: size, height: size)
+                .scaleEffect(x: 1, y: geometry.size.height / size, anchor: .top)
+                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
+        }
+        .clipped()
+        .accessibilityHidden(true)
     }
 }
 

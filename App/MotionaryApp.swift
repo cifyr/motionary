@@ -15,6 +15,13 @@ struct MotionaryApp: App {
                 .onOpenURL { url in
                     router.handle(url)
                 }
+                .task {
+                    guard let wanted = FontLab.launchOverride(in: ProcessInfo.processInfo.arguments),
+                          wanted != FontLab.isEnabled
+                    else { return }
+                    FontLab.isEnabled = wanted
+                    WidgetCenterBridge.reloadAll()
+                }
 #if DEBUG
                 .task {
                     if DemoSeeder.isRequested {

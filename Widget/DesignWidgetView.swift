@@ -40,7 +40,9 @@ struct DesignWidgetView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let source = imported() ?? bundled() {
+        if FontLab.isEnabled, let lab = lab() {
+            lab
+        } else if let source = imported() ?? bundled() {
             let _ = record(source: source)
             CompositionView(
                 manifest: source.manifest,
@@ -54,6 +56,23 @@ struct DesignWidgetView: View {
             let _ = record(source: nil)
             PlaceholderView(message: "Open Motionary and add a clip.")
         }
+    }
+
+    /// The font lab, when it is switched on and there is an imported design
+    /// whose lane fonts it can try to deliver nine different ways.
+    private func lab() -> FontLabView? {
+        guard let store = try? DesignStore() else { return nil }
+        let importedManifest = ActiveDesign.resolve(in: store)
+            .flatMap { try? store.loadManifest(id: $0.id) }
+        guard let manifest = importedManifest ?? PrebuiltDesign.manifest else { return nil }
+
+        let outcomes = FontLab.run(manifest: manifest, store: store)
+        FontLab.record(outcomes, store: store)
+        return FontLabView(
+            manifest: manifest,
+            outcomes: outcomes,
+            viewport: DeviceGeometry.widgetRect
+        )
     }
 
     /// The design chosen in the app, if it is built and its fonts will draw.
