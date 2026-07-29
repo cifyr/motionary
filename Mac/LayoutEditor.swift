@@ -213,6 +213,37 @@ struct LayoutEditor: View {
             .onTapGesture { selection = nil }
     }
 
+    /// The clip, in canvas coordinates.
+    ///
+    /// Wrapped in a canvas-sized container before being masked, because a mask
+    /// applies in the coordinate space of the thing it masks: masking the
+    /// offset image directly would clip against the image's own bounds and cut
+    /// the wrong region entirely.
+    private func clipLayer(poster: CGImage) -> some View {
+        let rect = placement
+        let frame = design.widgetRect
+        return Color.clear
+            .frame(width: canvas.width, height: canvas.height)
+            .overlay(alignment: .topLeading) {
+                Image(decorative: poster, scale: 1)
+                    .resizable()
+                    .frame(width: rect.width * unit, height: rect.height * unit)
+                    .offset(x: rect.minX * unit, y: rect.minY * unit)
+            }
+            .mask(alignment: .topLeading) {
+                // With a background chosen the clip stops at the widget frame:
+                // beyond it the wallpaper should be the picture that was
+                // picked, not the clip running past the only place it animates.
+                if background == nil {
+                    Rectangle()
+                } else {
+                    Rectangle()
+                        .frame(width: frame.width * unit, height: frame.height * unit)
+                        .offset(x: frame.minX * unit, y: frame.minY * unit)
+                }
+            }
+    }
+
     private var layers: some View {
         ZStack(alignment: .topLeading) {
             // Zero-sized anchor: it fixes the stack's origin at the canvas's
@@ -243,11 +274,7 @@ struct LayoutEditor: View {
                         .frame(width: fill.width * unit, height: fill.height * unit)
                         .offset(x: fill.minX * unit, y: fill.minY * unit)
                 }
-                let rect = placement
-                Image(decorative: poster, scale: 1)
-                    .resizable()
-                    .frame(width: rect.width * unit, height: rect.height * unit)
-                    .offset(x: rect.minX * unit, y: rect.minY * unit)
+                clipLayer(poster: poster)
             }
             widgetFrame
             ForEach(design.tiles) { tile in
@@ -585,3 +612,5 @@ private struct AsyncSkinThumbnail: View {
         }
     }
 }
+
+
