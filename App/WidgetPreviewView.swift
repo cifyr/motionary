@@ -26,11 +26,14 @@ struct WidgetPreviewView: View {
                         let width = min(geometry.size.width, geometry.size.height * aspect)
 
                         LoopingCompositionView(
-                            manifest: manifest,
+                            screenSize: manifest.screenSize,
+                            viewport: manifest.widgetRect,
                             tiles: design.tiles,
                             videoURL: store.previewVideoURL(for: design.id),
                             wallpaper: wallpaper
-                        )
+                        ) { tile, side in
+                            TileView(tile: tile, side: side)
+                        }
                         .frame(width: width, height: width / aspect)
                         .clipShape(RoundedRectangle(cornerRadius: width * 0.09, style: .continuous))
                         .frame(width: geometry.size.width, height: geometry.size.height)
@@ -64,98 +67,6 @@ struct WidgetPreviewView: View {
             wallpaper = UIImage(contentsOfFile: url.path).map { Image(uiImage: $0) }
         } catch {
             failure = String(describing: error)
-        }
-    }
-}
-
-/// The widget's viewport onto a looping video of the composed scene, with the
-/// same tiles drawn on top.
-private struct LoopingCompositionView: View {
-    let manifest: BuildManifest
-    let tiles: [PlacedTile]
-    let videoURL: URL
-    let wallpaper: Image?
-
-    var body: some View {
-        GeometryReader { geometry in
-            let viewport = manifest.widgetRect
-            let scale = geometry.size.width / viewport.width
-            let screen = CGSize(
-                width: manifest.screenSize.width * scale,
-                height: manifest.screenSize.height * scale
-            )
-            let originX = -viewport.minX * scale
-            let originY = -viewport.minY * scale
-
-            ZStack(alignment: .topLeading) {
-                Color.black
-
-                if let wallpaper {
-                    wallpaper
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: screen.width, height: screen.height)
-                        .offset(x: originX, y: originY)
-                }
-
-                LoopingVideoView(url: videoURL)
-                    .frame(width: screen.width, height: screen.height)
-                    .offset(x: originX, y: originY)
-
-                ForEach(tiles) { tile in
-                    TileView(tile: tile, side: tile.size * scale)
-                        .frame(width: tile.size * scale, height: tile.size * scale)
-                        .offset(
-                            x: originX + tile.rect.minX * scale,
-                            y: originY + tile.rect.minY * scale
-                        )
-                }
-            }
-            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
-        }
-        .clipped()
-    }
-}
-
-private struct LoopingVideoView: UIViewRepresentable {
-    let url: URL
-
-    func makeUIView(context: Context) -> PlayerView {
-        let view = PlayerView()
-        view.play(url: url)
-        return view
-    }
-
-    func updateUIView(_ view: PlayerView, context: Context) {}
-
-    static func dismantleUIView(_ view: PlayerView, coordinator: ()) {
-        view.stop()
-    }
-
-    final class PlayerView: UIView {
-        override class var layerClass: AnyClass { AVPlayerLayer.self }
-        private var looper: AVPlayerLooper?
-        private var queuePlayer: AVQueuePlayer?
-
-        private var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
-
-        func play(url: URL) {
-            guard FileManager.default.fileExists(atPath: url.path) else { return }
-            let item = AVPlayerItem(url: url)
-            let player = AVQueuePlayer()
-            player.isMuted = true
-            // AVPlayerLooper gives a gapless repeat; restarting on the
-            // did-play-to-end notification visibly stutters at the wrap.
-            looper = AVPlayerLooper(player: player, templateItem: item)
-            playerLayer.player = player
-            playerLayer.videoGravity = .resize
-            queuePlayer = player
-            player.play()
-        }
-
-        func stop() {
-            queuePlayer?.pause()
-            looper?.disableLooping()
         }
     }
 }

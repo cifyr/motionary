@@ -8,9 +8,10 @@ struct MotionaryApp: App {
 
     var body: some Scene {
         WindowGroup {
-            LibraryView()
+            HomeView()
                 .environmentObject(library)
                 .environmentObject(router)
+                .preferredColorScheme(.dark)
                 .onOpenURL { url in
                     router.handle(url)
                 }
@@ -33,9 +34,34 @@ final class DesignLibrary: ObservableObject {
     @Published private(set) var designs: [DesignDocument] = []
     @Published var loadFailure: String?
 
+    /// Which design the Home Screen imitation shows. Persisted in the app group
+    /// so it survives relaunches.
+    @Published var activeDesignID: UUID? {
+        didSet { defaults?.set(activeDesignID?.uuidString, forKey: Self.activeKey) }
+    }
+
+    private static let activeKey = "activeDesignID"
+    private let defaults = UserDefaults(suiteName: DesignStore.appGroupIdentifier)
+
     private(set) var store: DesignStore?
 
+    /// Falls back to the most recently edited built design, so the app is never
+    /// blank just because nothing was explicitly chosen.
+    var activeDesign: DesignDocument? {
+        let built = designs.filter { hasBuild(for: $0) }
+        if let activeDesignID, let match = built.first(where: { $0.id == activeDesignID }) {
+            return match
+        }
+        return built.first ?? designs.first
+    }
+
+    func hasBuild(for design: DesignDocument) -> Bool {
+        guard let store else { return false }
+        return FileManager.default.fileExists(atPath: store.manifestURL(for: design.id).path)
+    }
+
     init() {
+        activeDesignID = defaults?.string(forKey: Self.activeKey).flatMap(UUID.init(uuidString:))
         do {
             store = try DesignStore()
             reload()

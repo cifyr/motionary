@@ -32,6 +32,16 @@ final class ExternalAppRouter: ObservableObject {
         }
     }
 
+    /// Tapped inside the app, where the scene is already active and no settling
+    /// delay is needed.
+    func launch(appID: String) {
+        guard let app = AppCatalog.app(id: appID) else {
+            lastFailure = "No catalog entry for \"\(appID)\"."
+            return
+        }
+        Task { [weak self] in await self?.open(app) }
+    }
+
     private func open(_ app: CatalogApp) async {
         let candidates = app.launchCandidates
         guard !candidates.isEmpty else {
