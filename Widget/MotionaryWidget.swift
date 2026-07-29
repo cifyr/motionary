@@ -22,14 +22,16 @@ struct DesignProvider: TimelineProvider {
     /// The app reloads timelines explicitly when the selection or build changes.
     func getTimeline(in context: Context, completion: @escaping (Timeline<DesignEntry>) -> Void) {
         let designID = resolvedID()
-        // With no design resolved, `.never` is a trap: the entry says "create a
-        // design" and is then kept for good, so the widget went on saying it
-        // long after a design existed because nothing ever asked again. The app
-        // also pushes a reload when its library loads; this is the backstop for
-        // a widget added before the first design.
+        // Never `.never`. The animation needs no reloads — the timer text
+        // drives it — but a timeline that never expires is also a timeline
+        // that can never correct itself, and one built before a design existed
+        // left the widget saying "create a design" for good. An hourly refresh
+        // is roughly 24 a day against WidgetKit's budget and costs nothing to
+        // serve, since the entry is just a UUID.
+        let retry: TimeInterval = designID == nil ? 300 : 3600
         completion(Timeline(
             entries: [DesignEntry(date: .now, designID: designID)],
-            policy: designID == nil ? .after(.now.addingTimeInterval(300)) : .never
+            policy: .after(.now.addingTimeInterval(retry))
         ))
     }
 

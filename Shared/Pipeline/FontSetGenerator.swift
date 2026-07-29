@@ -14,7 +14,8 @@ enum GeneratorError: Error, CustomStringConvertible {
         case .templateMissing(let name):
             "generate: shaping template \(name) is missing from the bundle"
         case .emptyCrop(let design):
-            "generate: design \"\(design)\" has no animated area inside its widget frame"
+            "generate: design \"\(design)\" has no animated area inside its widget frame. "
+                + "Tap Reset animated area under Quality, then build again."
         case .loopDoesNotDivideCycle(let loop, let total):
             "generate: a \(loop)-frame loop does not divide the \(total)-selection cycle, so the wrap would visibly cut"
         case .payloadTooLarge(let estimated, let limit):

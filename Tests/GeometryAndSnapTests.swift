@@ -100,6 +100,30 @@ final class GeometryAndSnapTests: XCTestCase {
         var design = DesignDocument.new(name: "test", sourceVideoName: "source.mov")
         design.animationCrop = CGRect(x: 0, y: 2400, width: 200, height: 200)
         XCTAssertTrue(design.effectiveCrop.isEmpty)
+        XCTAssertFalse(design.hasAnimatedArea)
+    }
+
+    /// Motion detected below the widget frame used to be stored as it came,
+    /// which built a design that could never be built: every attempt ended in
+    /// "no animated area" with no way to put it right.
+    func testMotionOutsideTheWidgetFallsBackToTheWholeFrame() {
+        let widget = DeviceGeometry.widgetRect
+        let belowTheWidget = CGRect(x: 0, y: 2400, width: 200, height: 200)
+        XCTAssertEqual(DesignDocument.usableCrop(belowTheWidget, in: widget), widget)
+    }
+
+    func testMotionStraddlingTheWidgetEdgeIsClamped() {
+        let widget = DeviceGeometry.widgetRect
+        let straddling = CGRect(x: 100, y: 100, width: 400, height: 400)
+        let usable = DesignDocument.usableCrop(straddling, in: widget)
+        XCTAssertEqual(usable, straddling.intersection(widget).integral)
+        XCTAssertTrue(widget.insetBy(dx: -1, dy: -1).contains(usable))
+    }
+
+    func testAWholeScreenCropReducesToTheWidgetFrame() {
+        let widget = DeviceGeometry.widgetRect
+        let screen = CGRect(origin: .zero, size: DeviceGeometry.screenPixelSize)
+        XCTAssertEqual(DesignDocument.usableCrop(screen, in: widget), widget.integral)
     }
 
     // MARK: - Timer spec

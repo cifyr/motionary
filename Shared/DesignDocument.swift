@@ -145,6 +145,23 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         return intersection.isNull ? .zero : intersection.integral
     }
 
+    /// Whether there is anything to animate. A crop that misses the widget
+    /// frame entirely builds nothing, and is worth catching before a build
+    /// rather than as an error at the end of one.
+    var hasAnimatedArea: Bool {
+        let crop = effectiveCrop
+        return crop.width >= 2 && crop.height >= 2
+    }
+
+    /// A detected motion box reduced to something that can actually be built.
+    /// Motion outside the widget frame is never drawn, so a box that misses it
+    /// is no better than no box at all — fall back to the whole frame.
+    static func usableCrop(_ detected: CGRect, in widgetRect: CGRect) -> CGRect {
+        let clamped = detected.intersection(widgetRect)
+        guard !clamped.isNull, clamped.width >= 2, clamped.height >= 2 else { return widgetRect }
+        return clamped.integral
+    }
+
     /// Font family prefix. Per-design so two designs can be registered in the
     /// same extension process without colliding.
     var fontFamilyBase: String {

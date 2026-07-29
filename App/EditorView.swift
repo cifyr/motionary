@@ -541,6 +541,22 @@ struct EditorView: View {
                         .foregroundStyle(.secondary)
                 }
                 LabeledContent("Animated area", value: sizeCaption)
+                if !design.hasAnimatedArea {
+                    // Recoverable in place. Without this the design could only
+                    // report "no animated area" at the end of every build, with
+                    // no way to put it right.
+                    Label(
+                        "The animated area falls outside the widget frame, so there is nothing to build.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    Button("Reset animated area") {
+                        design.animationCrop = design.widgetRect
+                        library.save(design)
+                    }
+                    .font(.caption)
+                }
                 if let estimate {
                     LabeledContent("Estimated payload", value: estimate.formattedEstimate)
                         .foregroundStyle(estimate.isWithinRecommended ? Color.primary : Color.orange)

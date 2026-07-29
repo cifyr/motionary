@@ -316,10 +316,15 @@ struct LibraryView: View {
                 count: min(design.loopFrameCount, 16),
                 frameRate: spec.framesPerSecond
             )
+            // The detector works across the whole screen, so the motion it
+            // finds can sit entirely outside the widget frame — and only
+            // pixels inside that frame are ever drawn. Storing a disjoint crop
+            // built a design that could never be built ("no animated area").
             let detection = MotionCropDetector().detect(frames: sample, screenSize: DeviceGeometry.screenPixelSize)
-            design.animationCrop = detection.crop.isEmpty
-                ? CGRect(origin: .zero, size: DeviceGeometry.screenPixelSize)
-                : detection.crop
+            design.animationCrop = DesignDocument.usableCrop(detection.crop, in: design.widgetRect)
+            Self.logger.info(
+                "motion \(String(describing: detection.crop), privacy: .public) -> crop \(String(describing: design.animationCrop), privacy: .public)"
+            )
 
             library.save(design)
             library.reload()
