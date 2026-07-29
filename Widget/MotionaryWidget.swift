@@ -25,22 +25,22 @@ struct DesignProvider: TimelineProvider {
         completion(DesignEntry(date: .now, designID: resolvedID(), isPreview: context.isPreview))
     }
 
-    /// One entry, `.never`: the animation is advanced by the system's timer
-    /// text, so a reload policy would spend battery without changing anything.
-    /// The app reloads timelines explicitly when the selection or build changes.
+    /// One entry. The animation is advanced by the system's timer text, so a
+    /// working widget needs no reloads at all.
+    ///
+    /// Never `.never`, though: a timeline that cannot expire cannot correct
+    /// itself, and one built before a design existed left the widget saying
+    /// "create a design" for good.
+    ///
+    /// The hour is reserved for a design that can actually be drawn. Anything
+    /// else — no design, or one still mid-build — is a state worth asking
+    /// about again shortly. A design being built resolves perfectly well and
+    /// then fails to render, so it used to receive the hour and sat on "has
+    /// not been built yet" long after the build had finished.
     func getTimeline(in context: Context, completion: @escaping (Timeline<DesignEntry>) -> Void) {
-        let designID = resolvedID()
-        // Never `.never`. The animation needs no reloads — the timer text
-        // drives it — but a timeline that never expires is also a timeline
-        // that can never correct itself, and one built before a design existed
-        // left the widget saying "create a design" for good. An hourly refresh
-        // is roughly 24 a day against WidgetKit's budget and costs nothing to
-        // serve, since the entry is just a UUID.
-        // A minute, not five. With nothing to draw the widget says "create a
-        // design", and the window between building one and the widget asking
-        // again is time spent looking at a stale complaint — which is exactly
-        // how this read as broken when it was merely behind.
-        let retry: TimeInterval = designID == nil ? 60 : 3600
+        let current = resolved()
+        let designID = current?.id
+        let retry: TimeInterval = current?.isBuilt == true ? 3600 : 60
         WidgetRenderLog.append("""
         ask  timeline    preview=\(context.isPreview) family=\(context.family.rawValue) \
         size=\(Int(context.displaySize.width))x\(Int(context.displaySize.height)) \
@@ -52,9 +52,20 @@ struct DesignProvider: TimelineProvider {
         ))
     }
 
-    private func resolvedID() -> UUID? {
-        guard let store = try? DesignStore() else { return nil }
-        return ActiveDesign.resolve(in: store)?.id
+    private func resolvedID() -> UUID? { resolved()?.id }
+
+    /// Whether the design can actually be drawn, not just whether one exists.
+    ///
+    /// A design that is still being built resolves perfectly well and then
+    /// fails to render, and it used to be given the hour-long refresh reserved
+    /// for a working widget — so a widget drawn during a build stayed on
+    /// "has not been built yet" for an hour after the build finished.
+    private func resolved() -> (id: UUID, isBuilt: Bool)? {
+        guard let store = try? DesignStore(),
+              let design = ActiveDesign.resolve(in: store)
+        else { return nil }
+        let isBuilt = FileManager.default.fileExists(atPath: store.manifestURL(for: design.id).path)
+        return (design.id, isBuilt)
     }
 }
 
