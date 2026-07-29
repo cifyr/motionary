@@ -204,7 +204,14 @@ struct SingleLaneGlyph: View {
     }
 }
 
-private struct BlinkMask: View {
+/// One square wave from the bundled blink font: opaque for a second, clear for
+/// a second, with the edges moved by `blinkOffset`.
+///
+/// Not private, because it is the only design-independent piece of the
+/// animation and the image lab is built entirely out of it. Sharing it also
+/// means the lab is testing the mask this widget really uses rather than a
+/// second copy of it that might differ.
+struct BlinkMask: View {
     /// Shared with the lane texts so both sides of the mask agree on phase.
     let reference: Date
     let blinkOffset: TimeInterval

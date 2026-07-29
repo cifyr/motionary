@@ -40,7 +40,9 @@ struct DesignWidgetView: View {
 
     @ViewBuilder
     private var content: some View {
-        if FontLab.isEnabled, let lab = lab() {
+        if ImageLayerLab.isEnabled, let lab = imageLab() {
+            lab
+        } else if FontLab.isEnabled, let lab = lab() {
             lab
         } else if let source = imported() ?? bundled() {
             let _ = record(source: source)
@@ -56,6 +58,51 @@ struct DesignWidgetView: View {
             let _ = record(source: nil)
             PlaceholderView(message: "Open Motionary and add a clip.")
         }
+    }
+
+    /// The image lab: pictures out of the app group, masked by the one font
+    /// that already ships with the extension.
+    ///
+    /// Every load is logged with the footprint after it, because the memory
+    /// answer is the one that decides this. A stack of full-frame images cannot
+    /// fit under the widget's cap and the interesting question is where it
+    /// stops fitting, which is only visible as a jetsam - a widget that is
+    /// simply blank, with no error anywhere saying why.
+    private func imageLab() -> ImageLayerLabView? {
+        guard let store = try? DesignStore() else { return nil }
+        let settings = ImageLayerLab.settings
+        WidgetRenderLog.append("img  enter \(settings.stamp) \(MemoryFootprint.megabytes)MB")
+
+        var frames: [Image] = []
+        var sheet: Image?
+        switch settings.mode {
+        case .separate:
+            for index in 0 ..< settings.frameCount {
+                let url = ImageLayerLab.frameURL(index: index, in: store)
+                guard let decoded = ImageLoader.load(at: url, maxPixelSize: settings.tileSide * 4) else {
+                    WidgetRenderLog.append("img  MISSING frame \(index)")
+                    continue
+                }
+                frames.append(Image(decorative: decoded, scale: 1))
+            }
+        case .sheet:
+            let url = ImageLayerLab.sheetURL(in: store)
+            // The strip is `frameCount` frames tall, so the cap has to allow
+            // for that or the whole sheet comes back shrunk to one frame's
+            // worth of pixels and every window shows the same smear.
+            let longest = settings.tileSide * 4 * settings.frameCount
+            sheet = ImageLoader.load(at: url, maxPixelSize: longest).map { Image(decorative: $0, scale: 1) }
+            if sheet == nil { WidgetRenderLog.append("img  MISSING sheet") }
+        }
+
+        let footprint = MemoryFootprint.megabytes
+        WidgetRenderLog.append("img  loaded \(frames.count) sheet=\(sheet != nil) \(footprint)MB")
+        return ImageLayerLabView(
+            settings: settings,
+            frames: frames,
+            sheet: sheet,
+            footprintMB: footprint
+        )
     }
 
     /// The font lab, when it is switched on and there is an imported design

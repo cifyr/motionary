@@ -20,7 +20,43 @@ struct MotionaryApp: App {
             FontLab.isEnabled = wanted
             changed = true
         }
+        if MotionaryApp.applyImageLab(arguments: arguments) { changed = true }
         if changed { WidgetCenterBridge.reloadAll() }
+    }
+
+    /// Applies the image lab's launch flags and writes its frames.
+    ///
+    /// The frames are drawn here, in the app, at launch. That is the claim
+    /// being tested rather than a shortcut: if a widget can animate pictures a
+    /// phone made moments earlier, a design never has to go through a
+    /// toolchain. Returns whether the widget needs telling.
+    @discardableResult
+    static func applyImageLab(arguments: [String]) -> Bool {
+        let logger = Logger(subsystem: "com.caden.Motionary", category: "ImageLayerLab")
+        let override = ImageLayerLab.launchOverride(in: arguments)
+        var changed = false
+        if let wanted = override.enabled, wanted != ImageLayerLab.isEnabled {
+            ImageLayerLab.isEnabled = wanted
+            changed = true
+        }
+        if let settings = override.settings, settings != ImageLayerLab.settings {
+            ImageLayerLab.settings = settings
+            changed = true
+        }
+        guard ImageLayerLab.isEnabled else { return changed }
+
+        do {
+            let store = try DesignStore()
+            let settings = ImageLayerLab.settings
+            let written = try ImageLayerLab.writeProbeFrames(settings, in: store)
+            logger.info("image lab ready: \(settings.stamp, privacy: .public), \(written) files written")
+            // A rewrite means the widget is holding pictures that no longer
+            // exist, so it has to be told even when no setting changed.
+            if written > 0 { changed = true }
+        } catch {
+            logger.error("image lab frames unavailable: \(String(describing: error), privacy: .public)")
+        }
+        return changed
     }
 
     var body: some Scene {
