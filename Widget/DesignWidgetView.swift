@@ -85,14 +85,14 @@ struct DesignWidgetView: View {
         let report: RuntimeFontRegistry.Report
         let usesCroppedBackdrop: Bool
         let backdropLoaded: Bool
-        let familyMatches: Bool
+        let sizeMatches: Bool
         let backdropFacts: (exists: Bool, bytes: Int, decoded: CGSize)
 
         var outcome: String {
             if !backdropLoaded { return "ok, but the backdrop image did not load" }
-            if !familyMatches {
-                return "ok, but this design was cut for a different size than the widget "
-                    + "it is in. Rebuild it now that the real size has been measured."
+            if !sizeMatches {
+                return "ok, but the frame the system gave this widget is not the calibrated "
+                    + "tall portrait size. The composition is scaled to fit it."
             }
             return "ok"
         }
@@ -165,9 +165,6 @@ struct DesignWidgetView: View {
         }
 
         status.memoryFootprintMB = MemoryFootprint.megabytes
-        status.learnedSizes = ObservedGeometryStore.load().sizes
-            .sorted { $0.key < $1.key }
-            .map { "\($0.key)=\(Int($0.value.width))x\(Int($0.value.height))" }
         WidgetStatusLog.write(status)
         return true
     }
@@ -196,15 +193,17 @@ struct DesignWidgetView: View {
                 return .failure("\"\(design.name)\" has not been built yet. Open Motionary, open the design, and tap Build widget.")
             }
 
-            // Whether the design fits is judged by comparing its rect against
-            // the size actually rendered, not by the family enum, which has
-            // reported two different families for one widget on iOS 27.
+            // Reported by measurement, never by the family enum, which on iOS 27
+            // has named two different families for one widget rendering at an
+            // identical size. Only the tall portrait family is advertised now,
+            // so this is a sanity check rather than a branch: it should only
+            // fail on a system old enough to fall back to the large square.
             let expected = design.widgetRect.size
             let actual = CGSize(
                 width: Self.lastRenderedSize.width * DeviceGeometry.scale,
                 height: Self.lastRenderedSize.height * DeviceGeometry.scale
             )
-            let familyMatches = actual.width < 1 || actual.height < 1
+            let sizeMatches = actual.width < 1 || actual.height < 1
                 || (abs(expected.width - actual.width) < expected.width * 0.05
                     && abs(expected.height - actual.height) < expected.height * 0.05)
 
@@ -234,7 +233,7 @@ struct DesignWidgetView: View {
                 report: report,
                 usesCroppedBackdrop: usesBackdrop,
                 backdropLoaded: loadedImage != nil,
-                familyMatches: familyMatches,
+                sizeMatches: sizeMatches,
                 backdropFacts: (
                     exists: FileManager.default.fileExists(atPath: imageURL.path),
                     bytes: (try? imageURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0,

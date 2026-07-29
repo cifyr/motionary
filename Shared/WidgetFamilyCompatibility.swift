@@ -23,29 +23,24 @@ enum WidgetFamilyCompatibility {
 #endif
     }
 
-    /// Families the extension advertises. The tall portrait family is appended
-    /// only where the running system has it, so older systems see the large
-    /// square instead of an entry that renders blank.
+    /// The only family the extension advertises.
+    ///
+    /// Offering several meant a design cut for one shape could be dropped into
+    /// another, and on iOS 27 the family enum cannot even be trusted to say
+    /// which: one physical widget reported both `systemLarge` and
+    /// `systemMedium` while rendering at an identical size. With a single
+    /// advertised family the rendered size is known in advance and there is
+    /// nothing left to mismatch.
+    ///
+    /// Older systems get `systemLarge`, matching the Onewheel build: a widget
+    /// must advertise at least one family, and the composition scales to fit.
     static func supportedFamilies() -> [WidgetFamily] {
-        var families: [WidgetFamily] = [.systemSmall, .systemMedium, .systemLarge]
-        if let portrait = portraitFamily() {
-            families.append(portrait)
-        }
-        return families
+        guard let portrait = portraitFamily() else { return [.systemLarge] }
+        return [portrait]
     }
 
-    /// Maps a rendered family back to the design size it should crop for.
-    static func sizeOption(for family: WidgetFamily) -> WidgetSizeOption {
-        if family.rawValue == portraitExtraLargeRawValue { return .fullScreen }
-        switch family {
-        case .systemSmall: return .small
-        case .systemMedium: return .medium
-        default: return .large
-        }
-    }
-
-    /// Whether this build can offer the full-screen size at all. The editor
-    /// greys the option out rather than letting a design be cut for a family
-    /// the device will never render.
+    /// Whether this build can offer the tall portrait family at all. The editor
+    /// says so plainly rather than letting a design be cut for a family the
+    /// device will never render.
     static var supportsFullScreen: Bool { portraitFamily() != nil }
 }

@@ -14,7 +14,6 @@ struct DesignProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (DesignEntry) -> Void) {
-        learn(from: context)
         completion(DesignEntry(date: .now, designID: resolvedID()))
     }
 
@@ -22,28 +21,10 @@ struct DesignProvider: TimelineProvider {
     /// text, so a reload policy would spend battery without changing anything.
     /// The app reloads timelines explicitly when the selection or build changes.
     func getTimeline(in context: Context, completion: @escaping (Timeline<DesignEntry>) -> Void) {
-        learn(from: context)
         completion(Timeline(
             entries: [DesignEntry(date: .now, designID: resolvedID())],
             policy: .never
         ))
-    }
-
-    /// `displaySize` is the size the system will draw at, stated rather than
-    /// inferred, and `isPreview` marks the gallery, whose preview would
-    /// otherwise be learned as a real size.
-    ///
-    /// Recorded against the size the design was cut for rather than the family
-    /// enum: on iOS 27 one physical widget has reported both systemLarge and
-    /// systemMedium while rendering at an identical 359x548, so the enum cannot
-    /// be trusted to say which slot the user actually filled. What they chose
-    /// in the editor can be.
-    private func learn(from context: Context) {
-        guard !context.isPreview,
-              let store = try? DesignStore(),
-              let design = ActiveDesign.resolve(in: store)
-        else { return }
-        ObservedGeometryStore.record(size: context.displaySize, for: design.widgetSize)
     }
 
     private func resolvedID() -> UUID? {
@@ -60,7 +41,7 @@ struct MotionaryWidget: Widget {
             DesignWidgetView(entry: entry)
         }
         .configurationDisplayName("Motionary")
-        .description("Shows your current Motionary design, cut to this widget's frame.")
+        .description("Shows your current Motionary design, cut to the tall portrait frame.")
         .supportedFamilies(WidgetFamilyCompatibility.supportedFamilies())
         .contentMarginsDisabled()
         .containerBackgroundRemovable(false)

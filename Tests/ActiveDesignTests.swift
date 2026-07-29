@@ -20,7 +20,6 @@ final class ActiveDesignTests: XCTestCase {
     @discardableResult
     private func makeDesign(named name: String, built: Bool) throws -> DesignDocument {
         var design = DesignDocument.new(name: name, sourceVideoName: "source.mov")
-        design.widgetSize = .large
         try store.save(design)
         if built {
             try store.save(BuildManifest(

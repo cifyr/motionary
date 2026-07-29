@@ -187,25 +187,20 @@ struct LibraryView: View {
             }
 
             Section {
-                let learned = ObservedGeometryStore.load().sizes.sorted { $0.key < $1.key }
-                if learned.isEmpty {
-                    Text("No widget sizes learned yet. Place a widget and they appear here.")
-                        .font(.caption2).foregroundStyle(.secondary)
-                } else {
-                    ForEach(learned, id: \.key) { entry in
-                        LabeledContent(entry.key, value: "\(Int(entry.value.width))x\(Int(entry.value.height)) pt")
-                            .font(.caption)
-                    }
-                    Button("Forget learned sizes", role: .destructive) {
-                        ObservedGeometryStore.reset()
-                        WidgetCenterBridge.reloadAll()
-                    }
-                    .font(.caption)
-                }
+                LabeledContent(
+                    "Widget frame",
+                    value: "\(Int(DeviceGeometry.pixelSize.width))x\(Int(DeviceGeometry.pixelSize.height)) px"
+                )
+                .font(.caption)
+                LabeledContent(
+                    "Origin",
+                    value: "\(Int(DeviceGeometry.origin.x)),\(Int(DeviceGeometry.origin.y))"
+                )
+                .font(.caption)
             } header: {
-                Text("Measured widget sizes")
+                Text("Calibration")
             } footer: {
-                Text("Taken from the system when a widget draws, and preferred over the built-in table.")
+                Text("Measured on an iPhone 17 Pro. Designs are cut for the tall portrait widget only.")
             }
 
             Section("About") {

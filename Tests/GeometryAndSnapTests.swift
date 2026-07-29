@@ -4,41 +4,69 @@ import XCTest
 final class GeometryAndSnapTests: XCTestCase {
     // MARK: - Widget geometry
 
-    func testFullScreenSlotMatchesTheMeasuredCalibration() {
-        let rect = DeviceGeometry.widgetRect(size: .fullScreen, slot: .topLeft)
-        XCTAssertEqual(rect, CGRect(x: 66, y: 270, width: 1074, height: 1632))
+    /// The one calibration, measured on a physical iPhone 17 Pro by the
+    /// Onewheel build. Everything the app renders is cut to this rect, so if it
+    /// drifts the widget stops lining up with the wallpaper behind it.
+    func testWidgetRectMatchesTheOnewheelCalibration() {
+        XCTAssertEqual(DeviceGeometry.widgetRect, CGRect(x: 66, y: 270, width: 1074, height: 1632))
     }
 
-    func testEveryWidgetRectStaysOnScreen() {
+    /// 1074x1632 at 3x is the tall portrait family's 358x544 points.
+    func testCalibratedFrameIsTheTallPortraitFamilyInPoints() {
+        let points = WidgetSizeOption.fullScreen.pointSize
+        XCTAssertEqual(points.width, 358, accuracy: 0.01)
+        XCTAssertEqual(points.height, 544, accuracy: 0.01)
+    }
+
+    func testWidgetRectStaysOnScreen() {
         let screen = CGRect(origin: .zero, size: DeviceGeometry.screenPixelSize)
-        for size in WidgetSizeOption.allCases {
-            let grid = size.slotGrid
-            for column in 0 ..< grid.columns {
-                for row in 0 ..< grid.rows {
-                    let rect = DeviceGeometry.widgetRect(size: size, slot: WidgetSlot(column: column, row: row))
-                    XCTAssertTrue(
-                        screen.contains(rect),
-                        "\(size.title) slot (\(column),\(row)) at \(rect) leaves the screen"
-                    )
-                }
-            }
-        }
+        XCTAssertTrue(screen.contains(DeviceGeometry.widgetRect))
+    }
+
+    /// Side margins come out symmetric; an asymmetric result means the measured
+    /// width and origin disagree.
+    func testWidgetIsHorizontallyCentred() {
+        let rect = DeviceGeometry.widgetRect
+        let rightMargin = DeviceGeometry.screenPixelSize.width - rect.maxX
+        XCTAssertEqual(rect.minX, rightMargin, accuracy: 1)
     }
 
     func testNudgeIsClampedToTheScreen() {
-        let rect = DeviceGeometry.widgetRect(
-            size: .small,
-            slot: .topLeft,
-            nudge: CGPoint(x: -10_000, y: -10_000)
-        )
+        let rect = DeviceGeometry.widgetRect(nudge: CGPoint(x: -10_000, y: -10_000))
         XCTAssertEqual(rect.minX, 0)
         XCTAssertEqual(rect.minY, 0)
+        XCTAssertEqual(rect.size, DeviceGeometry.pixelSize, "a nudge must move the frame, not resize it")
     }
 
-    func testOutOfRangeSlotClampsRatherThanCrashing() {
-        let rect = DeviceGeometry.widgetRect(size: .small, slot: WidgetSlot(column: 99, row: 99))
-        let last = DeviceGeometry.widgetRect(size: .small, slot: WidgetSlot(column: 1, row: 2))
-        XCTAssertEqual(rect, last)
+    // MARK: - Single family
+
+    /// Only the tall portrait family is advertised. Offering several is what
+    /// let a design cut for one shape be dropped into another, and on iOS 27
+    /// the family enum reported two different families for one widget at an
+    /// identical rendered size.
+    func testOnlyTheTallPortraitFamilyIsAdvertisedOniOS27() {
+        let families = WidgetFamilyCompatibility.supportedFamilies()
+        XCTAssertEqual(families.count, 1)
+    }
+
+    func testThereIsExactlyOneWidgetSize() {
+        XCTAssertEqual(WidgetSizeOption.allCases, [.fullScreen])
+    }
+
+    /// Designs saved when small, medium and large existed name those sizes.
+    /// Decoding strictly would throw, and the store drops designs it cannot
+    /// read, so they would leave the library rather than fail loudly.
+    func testDesignsSavedUnderTheOldSizesStillDecode() throws {
+        for legacy in ["small", "medium", "large", "fullScreen", "nonsense"] {
+            let json = """
+            {"name":"old","sourceVideoName":"source.mov","widgetSize":"\(legacy)",
+             "widgetSlot":{"column":1,"row":2},
+             "animationCrop":[[0,0],[100,100]]}
+            """
+            let design = try JSONDecoder().decode(DesignDocument.self, from: Data(json.utf8))
+            XCTAssertEqual(design.widgetSize, .fullScreen, "\(legacy) should migrate, not throw")
+            XCTAssertEqual(design.widgetRect, DeviceGeometry.widgetRect)
+        }
     }
 
     // MARK: - Scale invariants
@@ -46,60 +74,17 @@ final class GeometryAndSnapTests: XCTestCase {
     /// The composition is authored in screen pixels, so one screen pixel must
     /// be one device pixel wherever the result has to line up with the real
     /// Home Screen. Deriving scale from an assumed widget width instead makes
-    /// every position depend on the size table being exact.
+    /// every position depend on the frame being exact.
     func testScreenPixelsMapToPointsAtDeviceScale() {
         let pointsPerPixel = 1 / DeviceGeometry.scale
         XCTAssertEqual(DeviceGeometry.screenPixelSize.width * pointsPerPixel, 402, accuracy: 0.001)
         XCTAssertEqual(DeviceGeometry.screenPixelSize.height * pointsPerPixel, 874, accuracy: 0.001)
     }
 
-    /// Measured from a placed large widget on an iPhone 17 Pro. Apple's
-    /// documented 364x382 at a 19pt margin is wrong for this device, and the
-    /// 7.33pt origin error showed up as the composition sitting ~22px right.
-    func testLargeWidgetMatchesTheMeasuredRect() {
-        let rect = DeviceGeometry.widgetRect(size: .large, slot: .topLeft)
-        XCTAssertEqual(rect.minX, 79)
-        XCTAssertEqual(rect.minY, 272)
-        XCTAssertEqual(DeviceGeometry.tabulatedPixelSize(of: .large).width, 1049)
-        XCTAssertEqual(DeviceGeometry.tabulatedPixelSize(of: .large).height, 1095)
-
-        XCTAssertEqual(rect.minX / DeviceGeometry.scale, 26.33, accuracy: 0.01)
-        XCTAssertNotEqual(rect.minX / DeviceGeometry.scale, 19, "the documented margin is not this device's")
-    }
-
-    /// Side margins should come out symmetric; an asymmetric result means the
-    /// measured width and margin disagree.
-    func testStandardFamiliesAreHorizontallyCentred() {
-        for size in [WidgetSizeOption.medium, .large] {
-            let rect = DeviceGeometry.widgetRect(size: size, slot: .topLeft)
-            let rightMargin = DeviceGeometry.screenPixelSize.width - rect.maxX
-            XCTAssertEqual(rect.minX, rightMargin, accuracy: 1, "\(size.title) is not centred")
-        }
-    }
-
-    /// The two small slots must mirror each other and not overlap.
-    func testSmallSlotsMirrorWithoutOverlapping() {
-        let left = DeviceGeometry.widgetRect(size: .small, slot: WidgetSlot(column: 0, row: 0))
-        let right = DeviceGeometry.widgetRect(size: .small, slot: WidgetSlot(column: 1, row: 0))
-        XCTAssertLessThan(left.maxX, right.minX)
-        XCTAssertEqual(left.minX, DeviceGeometry.screenPixelSize.width - right.maxX, accuracy: 1)
-    }
-
-    /// Large spans two grid units vertically, so two stacked small slots plus
-    /// the gutter must reconstruct its measured height exactly.
-    func testGridUnitsReconstructTheMeasuredLargeHeight() {
-        let small = DeviceGeometry.widgetRect(size: .small, slot: WidgetSlot(column: 0, row: 0))
-        let secondRow = DeviceGeometry.widgetRect(size: .small, slot: WidgetSlot(column: 0, row: 1))
-        let large = DeviceGeometry.widgetRect(size: .large, slot: .topLeft)
-        XCTAssertEqual(secondRow.maxY - small.minY, large.height, accuracy: 0.01)
-    }
-
     // MARK: - Crop derivation
 
     func testEffectiveCropIsClippedToTheWidgetFrame() {
         var design = DesignDocument.new(name: "test", sourceVideoName: "source.mov")
-        design.widgetSize = .small
-        design.widgetSlot = .topLeft
         design.animationCrop = CGRect(origin: .zero, size: DeviceGeometry.screenPixelSize)
 
         let crop = design.effectiveCrop
@@ -107,14 +92,12 @@ final class GeometryAndSnapTests: XCTestCase {
         XCTAssertLessThan(
             crop.width * crop.height,
             DeviceGeometry.screenPixelSize.width * DeviceGeometry.screenPixelSize.height,
-            "a small widget must encode far fewer pixels than the whole screen"
+            "motion outside the widget frame must not be encoded"
         )
     }
 
     func testDisjointCropAndWidgetProduceAnEmptyCrop() {
         var design = DesignDocument.new(name: "test", sourceVideoName: "source.mov")
-        design.widgetSize = .small
-        design.widgetSlot = .topLeft
         design.animationCrop = CGRect(x: 0, y: 2400, width: 200, height: 200)
         XCTAssertTrue(design.effectiveCrop.isEmpty)
     }
@@ -216,11 +199,11 @@ final class GeometryAndSnapTests: XCTestCase {
     // MARK: - Snapping
 
     private func engine() -> SnapEngine {
-        SnapEngine(widgetRect: DeviceGeometry.widgetRect(size: .fullScreen, slot: .topLeft))
+        SnapEngine(widgetRect: DeviceGeometry.widgetRect)
     }
 
     func testTileSnapsToTheWidgetCentreLine() {
-        let widget = DeviceGeometry.widgetRect(size: .fullScreen, slot: .topLeft)
+        let widget = DeviceGeometry.widgetRect
         let result = engine().snap(
             center: CGPoint(x: widget.midX + 6, y: 900),
             tileSize: 200,
@@ -231,7 +214,7 @@ final class GeometryAndSnapTests: XCTestCase {
     }
 
     func testDistantTileDoesNotSnap() {
-        let widget = DeviceGeometry.widgetRect(size: .fullScreen, slot: .topLeft)
+        let widget = DeviceGeometry.widgetRect
         let free = CGPoint(x: widget.midX + 300, y: 907)
         let result = engine().snap(center: free, tileSize: 200, siblings: [])
         XCTAssertEqual(result.center.x, free.x, accuracy: 0.01)
@@ -357,47 +340,5 @@ final class GeometryAndSnapTests: XCTestCase {
         for app in AppCatalog.all {
             XCTAssertFalse(app.launchCandidates.isEmpty, "\(app.name) has no launch route")
         }
-    }
-}
-
-/// The self-calibration learned `large = 359x359` from a widget gallery preview
-/// and sized every crop from it. Squares are refused on read as well as write,
-/// because a value stored before the check existed would otherwise persist.
-final class ObservedGeometryTests: XCTestCase {
-    func testSquareReadingsAreRejected() {
-        var observed = ObservedGeometry()
-        observed.sizes["large"] = CGSize(width: 359, height: 359)
-        XCTAssertNil(observed.size(for: .large), "a square is not a widget shape")
-    }
-
-    func testRealShapesAreAccepted() {
-        var observed = ObservedGeometry()
-        observed.sizes["large"] = CGSize(width: 359, height: 548)
-        observed.sizes["medium"] = CGSize(width: 359, height: 169)
-        XCTAssertEqual(observed.size(for: .large), CGSize(width: 359, height: 548))
-        XCTAssertEqual(observed.size(for: .medium), CGSize(width: 359, height: 169))
-    }
-
-    func testDegenerateReadingsAreRejected() {
-        var observed = ObservedGeometry()
-        observed.sizes["small"] = .zero
-        observed.sizes["medium"] = CGSize(width: 359, height: 0)
-        XCTAssertNil(observed.size(for: .small))
-        XCTAssertNil(observed.size(for: .medium))
-    }
-
-    func testPlausibilityBracketsTheSquare() {
-        XCTAssertFalse(ObservedGeometry.isPlausible(CGSize(width: 100, height: 100)))
-        XCTAssertFalse(ObservedGeometry.isPlausible(CGSize(width: 102, height: 100)))
-        XCTAssertTrue(ObservedGeometry.isPlausible(CGSize(width: 359, height: 169)))
-        XCTAssertTrue(ObservedGeometry.isPlausible(CGSize(width: 359, height: 548)))
-    }
-
-    /// An unusable reading must fall back to the table rather than to nothing.
-    func testUnusableReadingFallsBackToTheTable() {
-        XCTAssertEqual(
-            DeviceGeometry.tabulatedPixelSize(of: .large),
-            CGSize(width: 1049, height: 1095)
-        )
     }
 }

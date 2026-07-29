@@ -84,7 +84,6 @@ enum DemoSeeder {
 
         do {
             var design = DesignDocument.new(name: usesGIF ? "Demo GIF" : "Demo", sourceVideoName: usesGIF ? "source.gif" : "source.mov")
-            design.widgetSize = .large
             design.smoothness = .light
             try store.createFolder(for: design.id)
             try FileManager.default.copyItem(at: source, to: store.sourceVideoURL(for: design))

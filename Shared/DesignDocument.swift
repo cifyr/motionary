@@ -103,9 +103,8 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
 
     // Output shape
     var widgetSize: WidgetSizeOption = .fullScreen
-    var widgetSlot: WidgetSlot = .topLeft
-    /// Manual pixel correction for the widget rect. Every family except the
-    /// measured full-screen slot is derived, so this is the escape hatch.
+    /// Manual pixel correction for the widget rect, in case a phone seats the
+    /// widget a pixel or two off the calibrated origin.
     var widgetNudge: CGPoint = .zero
 
     var smoothness: MotionSmoothness = .standard
@@ -136,12 +135,11 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     }
 
     var widgetRect: CGRect {
-        DeviceGeometry.widgetRect(size: widgetSize, slot: widgetSlot, nudge: widgetNudge)
+        DeviceGeometry.widgetRect(nudge: widgetNudge)
     }
 
     /// Only pixels inside the widget are ever drawn, so the encoded crop is the
-    /// intersection. This is what makes a small widget far cheaper than a
-    /// full-screen one rather than merely smaller on screen.
+    /// intersection: motion outside the widget frame costs nothing to skip.
     var effectiveCrop: CGRect {
         let intersection = animationCrop.intersection(widgetRect)
         return intersection.isNull ? .zero : intersection.integral
@@ -180,7 +178,6 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         loopStartFrame = try container.decodeIfPresent(Int.self, forKey: .loopStartFrame) ?? 0
         loopFrameCount = try container.decodeIfPresent(Int.self, forKey: .loopFrameCount) ?? 32
         widgetSize = try container.decodeIfPresent(WidgetSizeOption.self, forKey: .widgetSize) ?? .fullScreen
-        widgetSlot = try container.decodeIfPresent(WidgetSlot.self, forKey: .widgetSlot) ?? .topLeft
         widgetNudge = try container.decodeIfPresent(CGPoint.self, forKey: .widgetNudge) ?? .zero
         smoothness = try container.decodeIfPresent(MotionSmoothness.self, forKey: .smoothness) ?? .standard
         jpegQuality = try container.decodeIfPresent(Double.self, forKey: .jpegQuality) ?? 0.62

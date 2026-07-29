@@ -350,17 +350,13 @@ struct EditorView: View {
     private var controls: some View {
         Form {
             Section("Widget") {
-                Picker("Size", selection: $design.widgetSize) {
-                    ForEach(WidgetSizeOption.allCases) { size in
-                        Text(size.title).tag(size)
-                    }
-                }
-                .onChange(of: design.widgetSize) { _, _ in
-                    design.widgetSlot = .topLeft
-                    library.save(design)
-                }
+                LabeledContent("Size", value: "Full screen")
+                LabeledContent(
+                    "Frame",
+                    value: "\(Int(DeviceGeometry.pixelSize.width))x\(Int(DeviceGeometry.pixelSize.height)) px"
+                )
 
-                if design.widgetSize == .fullScreen, !WidgetFamilyCompatibility.supportsFullScreen {
+                if !WidgetFamilyCompatibility.supportsFullScreen {
                     Label(
                         "This device does not offer the tall portrait widget. It needs iOS 27.",
                         systemImage: "exclamationmark.triangle"
@@ -369,12 +365,10 @@ struct EditorView: View {
                     .foregroundStyle(.orange)
                 }
 
-                SlotPicker(size: design.widgetSize, slot: $design.widgetSlot)
-
                 DisclosureGroup("Fine alignment") {
                     NudgeSlider(label: "Horizontal", value: $design.widgetNudge.x)
                     NudgeSlider(label: "Vertical", value: $design.widgetNudge.y)
-                    Text("Only the full-screen slot is measured. Nudge the others until the widget lines up with the wallpaper on your phone.")
+                    Text("The frame is calibrated for an iPhone 17 Pro. Nudge it only if the widget sits slightly off the wallpaper on your phone.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -745,36 +739,6 @@ private struct GuideLine: View {
         case .widgetFrame: .cyan
         case .iconGrid: .green
         case .sibling: .orange
-        }
-    }
-}
-
-private struct SlotPicker: View {
-    let size: WidgetSizeOption
-    @Binding var slot: WidgetSlot
-
-    var body: some View {
-        let grid = size.slotGrid
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Placement").font(.caption).foregroundStyle(.secondary)
-            VStack(spacing: 4) {
-                ForEach(0 ..< grid.rows, id: \.self) { row in
-                    HStack(spacing: 4) {
-                        ForEach(0 ..< grid.columns, id: \.self) { column in
-                            let candidate = WidgetSlot(column: column, row: row)
-                            Button {
-                                slot = candidate
-                            } label: {
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(slot == candidate ? Color.accentColor : Color.secondary.opacity(0.25))
-                                    .frame(height: 22)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-            }
-            .frame(maxWidth: 160)
         }
     }
 }
