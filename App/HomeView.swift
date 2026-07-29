@@ -21,7 +21,13 @@ struct HomeView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if let design = library.activeDesign, let store = library.store {
+            if FontLab.isEnabled, let lab = lab() {
+                // Deliberately the same view the widget puts up. The app draws
+                // its own views, so this is the control for the widget's copy:
+                // a route that draws here and not there is being refused by the
+                // renderer rather than by the font.
+                lab.ignoresSafeArea()
+            } else if let design = library.activeDesign, let store = library.store {
                 composition(design: design, store: store)
             } else {
                 WelcomeView(hasStorageFailure: library.loadFailure != nil)
@@ -54,6 +60,20 @@ struct HomeView: View {
         } message: {
             Text(router.lastFailure ?? "")
         }
+    }
+
+    private func lab() -> FontLabView? {
+        guard let store = library.store else { return nil }
+        let imported = library.activeDesign.flatMap { library.manifest(for: $0) }
+        guard let manifest = imported ?? PrebuiltDesign.manifest else { return nil }
+        let outcomes = FontLab.run(manifest: manifest, store: store)
+        FontLab.record(outcomes, store: store)
+        return FontLabView(
+            manifest: manifest,
+            outcomes: outcomes,
+            viewport: DeviceGeometry.widgetRect,
+            usesCoreTextProof: true
+        )
     }
 
     private func composition(design: DesignDocument, store: DesignStore) -> some View {

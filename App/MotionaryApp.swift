@@ -6,6 +6,17 @@ struct MotionaryApp: App {
     @StateObject private var library = DesignLibrary()
     @StateObject private var router = ExternalAppRouter()
 
+    /// Applied before the first view is built. Setting it from a `.task`
+    /// switched the flag but left the already-drawn home on screen, which reads
+    /// as the flag having been ignored.
+    init() {
+        guard let wanted = FontLab.launchOverride(in: ProcessInfo.processInfo.arguments),
+              wanted != FontLab.isEnabled
+        else { return }
+        FontLab.isEnabled = wanted
+        WidgetCenterBridge.reloadAll()
+    }
+
     var body: some Scene {
         WindowGroup {
             HomeView()
@@ -14,13 +25,6 @@ struct MotionaryApp: App {
                 .preferredColorScheme(.dark)
                 .onOpenURL { url in
                     router.handle(url)
-                }
-                .task {
-                    guard let wanted = FontLab.launchOverride(in: ProcessInfo.processInfo.arguments),
-                          wanted != FontLab.isEnabled
-                    else { return }
-                    FontLab.isEnabled = wanted
-                    WidgetCenterBridge.reloadAll()
                 }
 #if DEBUG
                 .task {
