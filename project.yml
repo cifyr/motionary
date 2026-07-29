@@ -82,9 +82,18 @@ targets:
       - path: Shared/DeviceGeometry.swift
       - path: Shared/TimerFontSpec.swift
       - path: Shared/WidgetFamilyCompatibility.swift
-      # A design's tiles carry an icon, so the model drags this in even though
-      # the studio never draws one.
+      # The editor places the same tiles the widget draws, so it shares the
+      # tile view, the catalogue, the snapping, and the icon pipeline.
       - path: Shared/Icons/IconAsset.swift
+      - path: Shared/Icons/SVGIconRenderer.swift
+      - path: Shared/Icons/SVGPathParser.swift
+      - path: Shared/TileView.swift
+      - path: Shared/AppCatalog.swift
+      - path: Shared/SnapEngine.swift
+      - path: Shared/CompositionView.swift
+      - path: Shared/PrebuiltDesign.swift
+      - path: Shared/WidgetStatus.swift
+      - path: App/IconifyService.swift
       - path: Resources/MotionTemplate-Regular.ttf
         buildPhase: resources
     settings:

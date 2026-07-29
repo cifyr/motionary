@@ -258,6 +258,20 @@ struct BuildManifest: Codable, Equatable, Sendable {
     /// — the widget falls back to the full-screen wallpaper for those.
     var backdropRect: CGRect?
 
+    /// The app tiles to draw over the animation.
+    ///
+    /// They travel in the manifest because it is the only part of a design
+    /// that ships inside the app: the widget has no other way to reach what
+    /// was placed on the canvas.
+    ///
+    /// Optional rather than defaulted, because Swift's synthesised decoding
+    /// does not apply property defaults to missing keys. A manifest written
+    /// before this existed would throw, and a design that will not decode is
+    /// silently dropped rather than reported.
+    var tiles: [PlacedTile]?
+
+    var placedTiles: [PlacedTile] { tiles ?? [] }
+
     var spec: TimerFontSpec {
         TimerFontSpec(laneCount: laneCount, framesPerSecond: framesPerSecond)
     }

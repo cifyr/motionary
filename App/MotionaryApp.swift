@@ -24,10 +24,16 @@ struct MotionaryApp: App {
         if changed { WidgetCenterBridge.reloadAll() }
     }
 
+    @StateObject private var router = ExternalAppRouter()
+
     var body: some Scene {
         WindowGroup {
             HomeView()
+                .environmentObject(router)
                 .preferredColorScheme(.dark)
+                // A tile tapped on the widget opens the app with a launch URL,
+                // and the app forwards it to the destination.
+                .onOpenURL { router.handle($0) }
         }
     }
 }

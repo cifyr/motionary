@@ -60,20 +60,19 @@ enum HeadlessBuild {
                         deviceID: deviceID,
                         onStage: report
                     )
-                } else {
-                    outcome = try await pipeline.build(
+                } else if CommandLine.arguments.contains("--bundle") {
+                    // `--bundle` writes the design into the project but
+                    // installs nothing, so a build can be prepared and checked
+                    // in a simulator with no phone anywhere near it.
+                    outcome = try await pipeline.run(
                         source: source,
                         loopSeconds: nil,
+                        deviceID: nil,
                         onStage: report
                     )
-                    // `--bundle` stops after writing the design into the
-                    // project, so a build can be prepared and checked in a
-                    // simulator with no phone anywhere near it.
-                    if CommandLine.arguments.contains("--bundle") {
-                        report(.bundling)
-                        try BundleWriter(projectRoot: root)
-                            .install(designFolder: outcome.folder, manifest: outcome.manifest)
-                    }
+                } else {
+                    let prepared = try await pipeline.prepare(source: source, onStage: report)
+                    outcome = try await pipeline.generate(prepared, loopSeconds: nil, onStage: report)
                 }
                 print("built \(outcome.summary)")
                 print("folder \(outcome.folder.path)")
@@ -101,6 +100,7 @@ struct StudioView: View {
     @State private var deviceID: String?
     @State private var loopSeconds: Double = 0
 
+    @State private var prepared: StudioPipeline.Prepared?
     @State private var stage: StudioPipeline.Stage?
     @State private var failure: String?
     @State private var done: String?
@@ -124,6 +124,20 @@ struct StudioView: View {
         .padding(24)
         .frame(width: 520)
         .task { refreshDevices() }
+        .sheet(item: Binding(
+            get: { prepared.map { EditorSheet(prepared: $0) } },
+            set: { if $0 == nil { prepared = nil } }
+        )) { sheet in
+            EditorWindow(
+                prepared: sheet.prepared,
+                model: model,
+                onCancel: { prepared = nil },
+                onBuild: { edited in
+                    prepared = nil
+                    install(edited)
+                }
+            )
+        }
     }
 
     private var header: some View {
@@ -210,9 +224,9 @@ struct StudioView: View {
 
     private var actions: some View {
         HStack {
-            Button("Build and install") { start() }
+            Button(prepared == nil ? "Edit layout" : "Editing...") { start() }
                 .keyboardShortcut(.defaultAction)
-                .disabled(source == nil || deviceID == nil || isBusy)
+                .disabled(source == nil || isBusy)
             if projectRoot == nil {
                 Button("Choose project folder") { chooseProject() }
             }
@@ -277,21 +291,47 @@ struct StudioView: View {
         }
     }
 
+    /// Reads the clip and opens the editor. Nothing is generated yet: the
+    /// crop and the placement are baked into the glyphs, so they have to be
+    /// settled before the fonts exist.
     private func start() {
-        guard let source, let deviceID, let projectRoot else { return }
-        self.done = nil
-        self.failure = nil
+        guard let source, let projectRoot else { return }
+        done = nil
+        failure = nil
         log = []
         stage = .preparing
 
         let pipeline = StudioPipeline(projectRoot: projectRoot, model: model)
-        let loop = loopSeconds
         Task {
             do {
-                let built = try await pipeline.run(
-                    source: source,
+                let ready = try await pipeline.prepare(source: source) { stage in
+                    Task { @MainActor in self.stage = stage }
+                }
+                await MainActor.run {
+                    self.stage = nil
+                    self.prepared = ready
+                }
+            } catch {
+                await MainActor.run {
+                    self.stage = nil
+                    self.failure = String(describing: error)
+                }
+            }
+        }
+    }
+
+    private func install(_ edited: StudioPipeline.Prepared) {
+        guard let projectRoot else { return }
+        stage = .preparing
+        let pipeline = StudioPipeline(projectRoot: projectRoot, model: model)
+        let loop = loopSeconds
+        let device = deviceID
+        Task {
+            do {
+                let built = try await pipeline.install(
+                    edited,
                     loopSeconds: loop > 0 ? loop : nil,
-                    deviceID: deviceID
+                    deviceID: device
                 ) { stage in
                     Task { @MainActor in
                         self.stage = stage
@@ -300,7 +340,9 @@ struct StudioView: View {
                 }
                 await MainActor.run {
                     self.stage = nil
-                    self.done = "Installed. \(built.summary). Add the Motionary widget if it is not already on the Home Screen."
+                    self.done = device == nil
+                        ? "Built into the app. \(built.summary). Connect the phone and press again to install."
+                        : "Installed. \(built.summary). Add the Motionary widget if it is not already on the Home Screen."
                 }
             } catch {
                 await MainActor.run {
@@ -308,6 +350,34 @@ struct StudioView: View {
                     self.failure = String(describing: error)
                 }
             }
+        }
+    }
+}
+
+
+/// Identifiable wrapper so the editor can be presented as a sheet.
+private struct EditorSheet: Identifiable {
+    let prepared: StudioPipeline.Prepared
+    var id: UUID { prepared.design.id }
+}
+
+private struct EditorWindow: View {
+    @State var prepared: StudioPipeline.Prepared
+    let model: DeviceModel
+    let onCancel: () -> Void
+    let onBuild: (StudioPipeline.Prepared) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            LayoutEditor(design: $prepared.design, model: model, poster: prepared.poster)
+            Divider()
+            HStack {
+                Button("Cancel", action: onCancel)
+                Spacer()
+                Button("Build and install") { onBuild(prepared) }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
         }
     }
 }

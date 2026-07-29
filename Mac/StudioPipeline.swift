@@ -54,11 +54,21 @@ struct StudioPipeline: Sendable {
             .appendingPathComponent("MotionaryStudio", isDirectory: true))
     }
 
-    func build(
+    /// A design worked out from the clip, before anything is generated.
+    ///
+    /// Split out so there is somewhere for the editor to stand: the crop and
+    /// the placement are baked into the glyphs, so they have to be settled
+    /// before the fonts are built rather than adjusted afterwards.
+    struct Prepared: @unchecked Sendable {
+        var design: DesignDocument
+        let store: DesignStore
+        let poster: CGImage?
+    }
+
+    func prepare(
         source: URL,
-        loopSeconds: Double?,
         onStage: @escaping @Sendable (Stage) -> Void
-    ) async throws -> Built {
+    ) async throws -> Prepared {
         onStage(.preparing)
         let store = try makeStore()
 
@@ -109,6 +119,19 @@ struct StudioPipeline: Sendable {
         // After the planner, never before: a loop sized against the wrong
         // frame rate plays at the wrong speed.
         design.retuneLoop()
+        try store.save(design)
+
+        let poster = try? await extractor.posterFrame()
+        return Prepared(design: design, store: store, poster: poster)
+    }
+
+    func generate(
+        _ prepared: Prepared,
+        loopSeconds: Double?,
+        onStage: @escaping @Sendable (Stage) -> Void
+    ) async throws -> Built {
+        var design = prepared.design
+        let store = prepared.store
         if let loopSeconds, loopSeconds > 0 {
             design.loopFrameCount = design.spec.seamlessLoopLength(
                 nearest: max(1, Int((loopSeconds * Double(design.spec.framesPerSecond)).rounded())),
@@ -139,14 +162,31 @@ struct StudioPipeline: Sendable {
     func run(
         source: URL,
         loopSeconds: Double?,
-        deviceID: String,
+        deviceID: String?,
         onStage: @escaping @Sendable (Stage) -> Void
     ) async throws -> Built {
-        let built = try await build(source: source, loopSeconds: loopSeconds, onStage: onStage)
+        let prepared = try await prepare(source: source, onStage: onStage)
+        return try await install(prepared, loopSeconds: loopSeconds, deviceID: deviceID, onStage: onStage)
+    }
+
+    /// Generates and installs an already-prepared design, which is what the
+    /// editor hands back.
+    func install(
+        _ prepared: Prepared,
+        loopSeconds: Double?,
+        deviceID: String?,
+        onStage: @escaping @Sendable (Stage) -> Void
+    ) async throws -> Built {
+        let built = try await generate(prepared, loopSeconds: loopSeconds, onStage: onStage)
 
         onStage(.bundling)
-        try BundleWriter(projectRoot: projectRoot)
-            .install(designFolder: built.folder, manifest: built.manifest)
+        try BundleWriter(projectRoot: projectRoot).install(
+            designFolder: built.folder,
+            manifest: built.manifest,
+            iconsFolder: prepared.store.root.deletingLastPathComponent()
+                .appendingPathComponent("Icons", isDirectory: true)
+        )
+        guard let deviceID else { return built }
 
         try DeviceInstaller(projectRoot: projectRoot)
             .installAndLaunch(deviceID: deviceID) { onStage(.installing($0)) }
