@@ -17,6 +17,7 @@ struct LibraryView: View {
     @State private var editing: DesignDocument?
     @State private var showingFileImporter = false
     @State private var showingPhotosPicker = false
+    @State private var restartNote: String?
 
     var body: some View {
         NavigationStack {
@@ -223,12 +224,49 @@ struct LibraryView: View {
                 Text("Measured on an iPhone 17 Pro. Designs are cut for the tall portrait widget only.")
             }
 
+            Section {
+                Button {
+                    restartWidget()
+                } label: {
+                    Label("Restart widget", systemImage: "arrow.clockwise")
+                }
+                if let note = restartNote {
+                    Text(note).font(.caption2).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Troubleshooting")
+            } footer: {
+                Text("Re-writes the selection, clears the last report, re-registers the fonts and asks the system for fresh timelines. Use this if the widget is showing something out of date.")
+            }
+
             Section("About") {
                 LabeledContent("Version", value: Bundle.main.shortVersion)
                 LabeledContent("Designs", value: "\(library.designs.count)")
             }
         }
         .listStyle(.insetGrouped)
+    }
+
+    /// Puts every piece of shared state the widget reads back into a known
+    /// condition, in the order the widget reads them.
+    private func restartWidget() {
+        guard let store = library.store else {
+            restartNote = "The shared container is unavailable, so there is nothing to restart."
+            return
+        }
+        // Written again even when unchanged: the app group's defaults are
+        // cached by cfprefsd, and a re-write is what makes the extension's copy
+        // agree with this one.
+        let resolved = library.activeDesign?.id
+        ActiveDesign.identifier = resolved
+        WidgetStatusLog.clear(store: store)
+        library.reload()
+        WidgetCenterBridge.reloadAll()
+
+        let name = library.activeDesign?.name ?? "no design"
+        restartNote = "Restarted at \(Date().formatted(date: .omitted, time: .standard)), showing \(name). "
+            + "Give the Home Screen a few seconds."
+        Self.logger.info("widget restarted; selection=\(resolved?.uuidString ?? "none", privacy: .public)")
     }
 
     private func importPicked(_ item: PhotosPickerItem) async {

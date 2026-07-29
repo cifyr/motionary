@@ -156,6 +156,13 @@ enum WidgetStatusLog {
         }
     }
 
+    /// Drops the last report so the next render writes a fresh one. Without
+    /// this a report from an earlier render sits there looking current.
+    static func clear(store: DesignStore) {
+        try? FileManager.default.removeItem(at: url(in: store))
+        logger.info("cleared the widget status")
+    }
+
     static func read(store: DesignStore) -> WidgetStatus? {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601

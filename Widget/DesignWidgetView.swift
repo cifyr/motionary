@@ -204,12 +204,26 @@ struct DesignWidgetView: View {
     }
 
     private func load() -> LoadOutcome {
-        guard let designID = entry.designID else {
-            return .failure("Open Motionary to create a design.")
-        }
         do {
             let store = try DesignStore()
-            let design = try store.load(id: designID)
+
+            // The entry only records which design was current when the timeline
+            // was built, which may be long ago and may have been nothing at
+            // all. Trusting it meant one nil entry pinned the widget to
+            // "create a design" no matter what the store held afterwards, even
+            // across a remove and re-add. Resolving here costs one directory
+            // read and always reflects the container as it is now.
+            let design: DesignDocument
+            if let id = entry.designID, let fromEntry = try? store.load(id: id) {
+                design = fromEntry
+            } else if let resolved = ActiveDesign.resolve(in: store) {
+                Self.logger.info("entry had no usable design; resolved \(resolved.id.uuidString, privacy: .public) live")
+                design = resolved
+            } else {
+                return .failure("Open Motionary to create a design.")
+            }
+
+            let designID = design.id
             guard let manifest = try? store.loadManifest(id: designID) else {
                 return .failure("\"\(design.name)\" has not been built yet. Open Motionary, open the design, and tap Build widget.")
             }
