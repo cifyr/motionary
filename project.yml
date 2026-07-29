@@ -58,6 +58,7 @@ targets:
       # at all, and it is plain Foundation, so it is covered here rather than
       # needing a second test target.
       - path: Mac/BundleWriter.swift
+      - path: Mac/SkinLibrary.swift
       - path: Resources
         buildPhase: resources
     settings:
@@ -89,6 +90,7 @@ targets:
       - path: Shared/Icons/SVGPathParser.swift
       - path: Shared/TileView.swift
       - path: Shared/AppCatalog.swift
+      - path: Shared/ImageLoader.swift
       - path: Shared/SnapEngine.swift
       - path: Shared/CompositionView.swift
       - path: Shared/PrebuiltDesign.swift

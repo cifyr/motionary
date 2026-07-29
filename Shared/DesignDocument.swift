@@ -16,6 +16,12 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
     /// Chosen from the Iconify catalogue. Nil falls back to the catalogue
     /// entry's SF Symbol, so designs made before icons existed still draw.
     var icon: IconAsset?
+    /// A custom icon image, by filename in the skin library.
+    ///
+    /// A skin is the whole artwork rather than a glyph, so it is drawn edge to
+    /// edge with no tinted plate behind it - putting one inside the plate at
+    /// 56% would frame somebody's icon inside a second icon.
+    var skin: String?
     /// Overrides the catalogue's brand tint for the plate behind the icon.
     var tintHex: String?
     /// Clockwise rotation in degrees, so tiles can follow an angled element in
@@ -43,6 +49,7 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         showsLabel: Bool = true,
         opacity: Double = 1,
         icon: IconAsset? = nil,
+        skin: String? = nil,
         tintHex: String? = nil,
         rotation: Double = 0
     ) {
@@ -54,6 +61,7 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         self.showsLabel = showsLabel
         self.opacity = opacity
         self.icon = icon
+        self.skin = skin
         self.tintHex = tintHex
         self.rotation = rotation
     }
@@ -74,6 +82,7 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         showsLabel = try container.decodeIfPresent(Bool.self, forKey: .showsLabel) ?? true
         opacity = try container.decodeIfPresent(Double.self, forKey: .opacity) ?? 1
         icon = try container.decodeIfPresent(IconAsset.self, forKey: .icon)
+        skin = try container.decodeIfPresent(String.self, forKey: .skin)
         tintHex = try container.decodeIfPresent(String.self, forKey: .tintHex)
         rotation = try container.decodeIfPresent(Double.self, forKey: .rotation) ?? 0
     }

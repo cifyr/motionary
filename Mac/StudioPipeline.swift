@@ -46,6 +46,11 @@ struct StudioPipeline: Sendable {
         /// Set when the design was installed but something after it was not
         /// clean - a locked phone refusing to open the app, most often.
         var warning: String?
+
+        /// The full-screen wallpaper this design needs behind it. Offered from
+        /// the Mac as well as the phone: the picture is made here, and going
+        /// via Photos to fetch it back is a detour.
+        var wallpaperURL: URL { folder.appendingPathComponent("wallpaper.png") }
     }
 
     let projectRoot: URL

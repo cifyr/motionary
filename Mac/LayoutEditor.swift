@@ -21,6 +21,7 @@ struct LayoutEditor: View {
     /// Applied to tiles added later, so turning labels off once does not have
     /// to be repeated for every app placed after it.
     @State private var labelsDefault = true
+    @State private var skins: [SkinLibrary.Skin] = []
 
     /// Points per screen pixel, so the canvas is the phone at a readable size.
     static let zoom: CGFloat = 0.62
@@ -78,6 +79,73 @@ struct LayoutEditor: View {
             sidebar.frame(width: Self.sidebarWidth)
         }
         .padding(20)
+        .task { reloadSkins() }
+    }
+
+    private func reloadSkins() {
+        skins = (try? SkinLibrary().all()) ?? []
+    }
+
+    private func importSkins() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .image]
+        panel.allowsMultipleSelection = true
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        try? SkinLibrary().importing(panel.urls)
+        reloadSkins()
+    }
+
+    /// The library, offered for the selected tile.
+    private func skinPicker(index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Skin").font(.caption.weight(.semibold))
+                Spacer()
+                Button("Import...") { importSkins() }.buttonStyle(.link)
+            }
+            if skins.isEmpty {
+                Text("No skins yet. Import icon artwork and it stays available for every design.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(44), spacing: 6), count: 4), spacing: 6) {
+                        Button {
+                            design.tiles[index].skin = nil
+                        } label: {
+                            Image(systemName: "nosign")
+                                .frame(width: 44, height: 44)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .help("No skin - use the tinted plate")
+
+                        ForEach(skins) { skin in
+                            Button {
+                                design.tiles[index].skin = skin.id
+                            } label: {
+                                AsyncSkinThumbnail(url: skin.url)
+                                    .frame(width: 44, height: 44)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .strokeBorder(
+                                                design.tiles[index].skin == skin.id
+                                                    ? Color.accentColor : .clear,
+                                                lineWidth: 2
+                                            )
+                                    }
+                            }
+                            .buttonStyle(.plain)
+                            .help(skin.id)
+                        }
+                    }
+                }
+                .frame(maxHeight: 160)
+            }
+        }
     }
 
     /// Everything is layered as an overlay on a fixed-size black rectangle
@@ -149,7 +217,15 @@ struct LayoutEditor: View {
 
     private func tileView(_ tile: PlacedTile) -> some View {
         let side = tile.size * unit
-        return TileView(tile: tile, side: side, isSelected: selection == tile.id)
+        return TileView(
+            tile: tile,
+            side: side,
+            isSelected: selection == tile.id,
+            iconImage: tile.skin
+                .flatMap { try? SkinLibrary().url(for: $0) }
+                .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(side * 3)) }
+                .map { Image(decorative: $0, scale: 1) }
+        )
             .frame(width: side, height: side)
             .offset(x: tile.rect.minX * unit, y: tile.rect.minY * unit)
             .gesture(tileDrag(tile))
@@ -347,6 +423,8 @@ struct LayoutEditor: View {
                 set: { design.tiles[index].showsLabel = $0 }
             ))
 
+            skinPicker(index: index)
+
             HStack {
                 Button("Remove", role: .destructive) {
                     design.tiles.removeAll { $0.id == tile.id }
@@ -414,5 +492,26 @@ private struct CataloguePicker: View {
         }
         .padding(12)
         .frame(width: 240)
+    }
+}
+
+
+/// A skin thumbnail, decoded once per appearance.
+private struct AsyncSkinThumbnail: View {
+    let url: URL
+
+    @State private var image: Image?
+
+    var body: some View {
+        Group {
+            if let image {
+                image.resizable().interpolation(.high).aspectRatio(contentMode: .fill)
+            } else {
+                Color.gray.opacity(0.2)
+            }
+        }
+        .task(id: url) {
+            image = ImageLoader.load(at: url, maxPixelSize: 132).map { Image(decorative: $0, scale: 1) }
+        }
     }
 }
