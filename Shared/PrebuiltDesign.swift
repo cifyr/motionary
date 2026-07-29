@@ -62,6 +62,18 @@ enum PrebuiltDesign {
         Bundle.main.url(forResource: wallpaperResource, withExtension: "png")
     }
 
+    /// The animation as a video, for the app to play.
+    ///
+    /// The app cannot draw the lane fonts at all - only the widget renderer
+    /// advances timer text - so showing the design full screen means playing
+    /// the same frames back as a film. It is seeked by wall clock, so opening
+    /// the app picks up wherever the widget had got to.
+    static var previewURL: URL? {
+        Bundle.main.url(forResource: previewResource, withExtension: "mp4")
+    }
+
+    static let previewResource = "prebuilt-preview"
+
     /// Whether every lane font declared in `UIAppFonts` actually resolved.
     ///
     /// Bundled fonts are registered by the system before any code runs, so this

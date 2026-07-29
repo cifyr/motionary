@@ -66,6 +66,14 @@ enum HeadlessBuild {
                         loopSeconds: nil,
                         onStage: report
                     )
+                    // `--bundle` stops after writing the design into the
+                    // project, so a build can be prepared and checked in a
+                    // simulator with no phone anywhere near it.
+                    if CommandLine.arguments.contains("--bundle") {
+                        report(.bundling)
+                        try BundleWriter(projectRoot: root)
+                            .install(designFolder: outcome.folder, manifest: outcome.manifest)
+                    }
                 }
                 print("built \(outcome.summary)")
                 print("folder \(outcome.folder.path)")
