@@ -1,6 +1,8 @@
 import CoreGraphics
 import Foundation
+#if os(iOS)
 import WidgetKit
+#endif
 
 /// Which Home Screen widget shape a design is cut for.
 ///
@@ -21,7 +23,9 @@ enum WidgetSizeOption: String, Codable, CaseIterable, Identifiable, Sendable {
         return CGSize(width: pixels.width / DeviceGeometry.scale, height: pixels.height / DeviceGeometry.scale)
     }
 
+#if os(iOS)
     var widgetFamily: WidgetFamily? { WidgetFamilyCompatibility.portraitFamily() }
+#endif
 
     /// Designs saved when small, medium and large existed still name those
     /// sizes. Decoding them strictly would throw, and the store drops designs
@@ -32,26 +36,66 @@ enum WidgetSizeOption: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// Pixel geometry of the one calibrated device, an iPhone 17 Pro at standard
-/// Display Zoom running iOS 27.
+/// A phone a design can be cut for.
 ///
-/// Measured against the physical phone by the Onewheel build: the tall portrait
-/// family is 358x544 points at 3x, beginning 22 points from the left edge in
-/// the top slot. Everything is stated in device pixels because that is what was
-/// measured. Deriving these from Apple's published point sizes put the origin
-/// 7.33pt off, which showed up as the composition sitting ~22px to the right.
-enum DeviceGeometry {
-    static let scale: CGFloat = 3
-    static let screenPixelSize = CGSize(width: 1206, height: 2622)
-    static var screenPointSize: CGSize {
+/// Only devices whose numbers were measured against real hardware belong here.
+/// Deriving them from Apple's published point sizes put the origin 7.33pt out
+/// on the one device that was checked, which showed as the composition sitting
+/// about 22px to the right - so a derived entry would look plausible in the
+/// picker and be visibly wrong on the Home Screen.
+struct DeviceModel: Identifiable, Hashable, Sendable {
+    let id: String
+    let name: String
+    let scale: CGFloat
+    /// Everything is stated in device pixels, because that is what was measured.
+    let screenPixelSize: CGSize
+    let widgetOrigin: CGPoint
+    let widgetPixelSize: CGSize
+
+    var widgetRect: CGRect { CGRect(origin: widgetOrigin, size: widgetPixelSize) }
+
+    var screenPointSize: CGSize {
         CGSize(width: screenPixelSize.width / scale, height: screenPixelSize.height / scale)
     }
 
-    static let origin = CGPoint(x: 66, y: 270)
-    static let pixelSize = CGSize(width: 1074, height: 1632)
+    var widgetPointSize: CGSize {
+        CGSize(width: widgetPixelSize.width / scale, height: widgetPixelSize.height / scale)
+    }
+
+    /// Measured against the physical phone by the Onewheel build: the tall
+    /// portrait family is 358x544 points at 3x, beginning 22 points from the
+    /// left edge in the top slot, at standard Display Zoom on iOS 27.
+    static let iPhone17Pro = DeviceModel(
+        id: "iphone17pro",
+        name: "iPhone 17 Pro",
+        scale: 3,
+        screenPixelSize: CGSize(width: 1206, height: 2622),
+        widgetOrigin: CGPoint(x: 66, y: 270),
+        widgetPixelSize: CGSize(width: 1074, height: 1632)
+    )
+
+    static let all: [DeviceModel] = [.iPhone17Pro]
+    static let `default` = iPhone17Pro
+}
+
+/// Pixel geometry of the device this build is cut for.
+///
+/// Still a set of globals because the iOS app and the extension are compiled
+/// for exactly one phone: the fonts are in the bundle, so the geometry is
+/// settled at build time too. The studio picks the model; this is what the
+/// build was given.
+enum DeviceGeometry {
+    static let model = DeviceModel.default
+
+    static var scale: CGFloat { model.scale }
+    static var screenPixelSize: CGSize { model.screenPixelSize }
+    static var screenPointSize: CGSize { model.screenPointSize }
+
+    static var origin: CGPoint { model.widgetOrigin }
+    static var pixelSize: CGSize { model.widgetPixelSize }
 
     /// The widget's pixel rect on the calibrated screen, before any nudge.
-    static var widgetRect: CGRect { CGRect(origin: origin, size: pixelSize) }
+    static var widgetRect: CGRect { model.widgetRect }
 
     /// Widget rect with the design's manual correction applied and clamped to
     /// the screen, so a large nudge can never crop outside the composition.

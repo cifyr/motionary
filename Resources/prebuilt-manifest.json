@@ -2,11 +2,11 @@
   "animationCrop" : [
     [
       66,
-      607
+      475
     ],
     [
-      862,
-      690
+      1074,
+      1086
     ]
   ],
   "backdropRect" : [
@@ -20,9 +20,9 @@
     ]
   ],
   "buildGeneration" : 1,
-  "builtAt" : 807011045.172826,
-  "designID" : "DA05EBC2-7283-4B4E-AAEC-1FB533813410",
-  "fontFamilyBase" : "MFontda05ebc2L",
+  "builtAt" : 807044731.687605,
+  "designID" : "0D83DF77-E5F0-4B71-98ED-F1CD071F203E",
+  "fontFamilyBase" : "MFont0d83df77L",
   "framesPerSecond" : 16,
   "laneCount" : 32,
   "loopFrameCount" : 20,
@@ -30,7 +30,7 @@
     1206,
     2622
   ],
-  "totalFontBytes" : 30198056,
+  "totalFontBytes" : 43672372,
   "wallpaperName" : "wallpaper.png",
   "widgetRect" : [
     [
