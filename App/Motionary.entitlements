@@ -3,4 +3,9 @@
 <plist version="1.0"><dict>
   <key>com.apple.security.application-groups</key>
   <array><string>group.com.caden.Motionary</string></array>
+  <!-- `com.apple.developer.user-fonts` (Xcode's Fonts capability) is
+       deliberately NOT here. It is what CoreText wants before it will honour
+       the persistent font scope, and adding it is self-serve - but it would
+       buy nothing: Apple prohibits installing fonts the app did not ship,
+       which is every font Motionary makes. See PersistentFontProbe. -->
 </dict></plist>

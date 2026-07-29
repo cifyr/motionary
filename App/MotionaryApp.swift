@@ -21,6 +21,7 @@ struct MotionaryApp: App {
             changed = true
         }
         if changed { WidgetCenterBridge.reloadAll() }
+        PersistentFontProbe.installBundledFontIfRequested(arguments: arguments)
     }
 
     var body: some Scene {
@@ -29,6 +30,16 @@ struct MotionaryApp: App {
                 .environmentObject(library)
                 .environmentObject(router)
                 .preferredColorScheme(.dark)
+                // Read back by PersistentFontCrossProcessTests, which has to
+                // confirm the install it is disproving actually happened.
+                .overlay(alignment: .top) {
+                    if let install = PersistentFontProbe.lastInstall {
+                        let copy = PersistentFontProbe.lastCopyInstall
+                        Text("BUNDLE \(install.description) || COPY \(copy?.description ?? "not attempted")")
+                            .font(.caption2)
+                            .accessibilityIdentifier(PersistentFontProbe.resultAccessibilityIdentifier)
+                    }
+                }
                 .onOpenURL { url in
                     router.handle(url)
                 }

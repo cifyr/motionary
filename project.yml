@@ -105,6 +105,9 @@ targets:
     platform: iOS
     sources:
       - UITests
+      # The runner is a second process, which is the only way to ask whether a
+      # persistent font install crossed a process boundary.
+      - path: Shared/PersistentFontProbe.swift
     dependencies:
       - target: Motionary
     settings:
