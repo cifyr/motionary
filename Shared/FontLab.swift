@@ -2,6 +2,7 @@ import CoreGraphics
 import CoreText
 import Foundation
 import SwiftUI
+import UIKit
 import os
 
 /// Draws the same frame through every font-delivery route at once, so the Home
@@ -185,6 +186,33 @@ enum FontLab {
             return Outcome(route: .bundled, note: "\(name) is not in UIAppFonts", font: nil)
         }
         return Outcome(route: .bundled, note: "bundled as \(name)", font: { .custom(name, size: $0) })
+    }
+
+    /// Rasterises one animation glyph with CoreText rather than SwiftUI.
+    ///
+    /// SwiftUI's `Text` draws nothing at all for these fonts outside a widget,
+    /// so this is how the app can tell "the font is unusable here" apart from
+    /// "SwiftUI will not draw it here" - two very different findings that look
+    /// the same on a black screen.
+    static func coreTextProof(route: Route, side: Int) -> UIImage? {
+        let name = route == .bundled
+            ? PrebuiltDesign.manifest.map { LaneFontBuilder.postScriptName(family: $0.fontFamilyBase, lane: 0) }
+            : route.postScriptName
+        guard let name else { return nil }
+
+        let font = CTFontCreateWithName(name as CFString, CGFloat(side), nil)
+        let line = CTLineCreateWithAttributedString(NSAttributedString(
+            string: "10:00",
+            attributes: [.font: font]
+        ))
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
+        return renderer.image { context in
+            let cg = context.cgContext
+            cg.translateBy(x: 0, y: CGFloat(side))
+            cg.scaleBy(x: 1, y: -1)
+            cg.textPosition = CGPoint(x: 0, y: CGFloat(side) / 5)
+            CTLineDraw(line, cg)
+        }
     }
 
     // MARK: - Reporting
