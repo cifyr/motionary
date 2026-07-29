@@ -52,6 +52,9 @@ struct DesignStore {
     /// It also fixes the diagnostics. A locked render could not write its
     /// report either, so the only reports ever seen came from unlocked renders
     /// and always said ok, while the picture on screen came from a failed one.
+    /// Data protection is an iOS notion. On the Mac, where the studio builds
+    /// designs, there is nothing to relax rather than something to get wrong.
+#if os(iOS)
     static let writingOptions: Data.WritingOptions = [.atomic, .noFileProtection]
 
     /// Computed rather than stored: `[FileAttributeKey: Any]` is not Sendable,
@@ -59,6 +62,10 @@ struct DesignStore {
     static var directoryAttributes: [FileAttributeKey: Any] {
         [.protectionKey: FileProtectionType.none]
     }
+#else
+    static let writingOptions: Data.WritingOptions = [.atomic]
+    static var directoryAttributes: [FileAttributeKey: Any] { [:] }
+#endif
 
     /// Relaxes protection on everything already written, so designs built
     /// before this start working without needing a rebuild.

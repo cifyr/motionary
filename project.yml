@@ -54,12 +54,48 @@ targets:
     sources:
       - Tests
       - Shared
+      # The studio's bundling step decides whether a design reaches the widget
+      # at all, and it is plain Foundation, so it is covered here rather than
+      # needing a second test target.
+      - path: Mac/BundleWriter.swift
       - path: Resources
         buildPhase: resources
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.caden.MotionaryTests
+
+  # A design can only reach the Home Screen by being compiled into the widget
+  # extension's bundle, so building one is a toolchain run rather than
+  # something the phone can do to itself. This is that run, with a window on
+  # it. The pipeline is shared verbatim - none of it was ever iOS-only.
+  MotionaryStudio:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - Mac
+      - Shared/Pipeline
+      - Shared/SFNT
+      - path: Shared/DesignDocument.swift
+      - path: Shared/DesignStore.swift
+      - path: Shared/DeviceGeometry.swift
+      - path: Shared/TimerFontSpec.swift
+      - path: Shared/WidgetFamilyCompatibility.swift
+      # A design's tiles carry an icon, so the model drags this in even though
+      # the studio never draws one.
+      - path: Shared/Icons/IconAsset.swift
+      - path: Resources/MotionTemplate-Regular.ttf
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.caden.MotionaryStudio
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        # Runs xcodebuild and devicectl against the project it lives in, which
+        # a sandboxed app cannot do.
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
 
   # Drives SpringBoard from inside the simulator, so the widget can be found
   # and photographed without posting mouse events onto whatever machine is
