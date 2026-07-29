@@ -36,24 +36,37 @@ enum FontLab {
         return nil
     }
 
-    private static let limitKey = "fontLabRouteLimit"
+    private static let selectionKey = "fontLabRouteSelection"
 
-    /// How many routes to draw, or 0 for all of them.
+    /// Which routes to draw, by name, or empty for the default set.
     ///
-    /// WidgetKit rejected the whole lab with `badTimelineData` and drew an
-    /// empty view, so the routes have to be bisected to find which one the
-    /// timeline will not carry. A rebuild per step is a minute; guessing has
-    /// cost rather more than that.
-    static var routeLimit: Int {
-        get { UserDefaults(suiteName: DesignStore.appGroupIdentifier)?.integer(forKey: limitKey) ?? 0 }
-        set { UserDefaults(suiteName: DesignStore.appGroupIdentifier)?.set(newValue, forKey: limitKey) }
+    /// On device a single row referring to a font the renderer cannot find
+    /// invalidates the whole timeline - the widget draws nothing, labels
+    /// included - so the routes cannot be compared side by side there. They
+    /// have to be rendered one at a time, and "did the widget render at all"
+    /// becomes as much of a result as "did the row have a picture in it".
+    static var routeSelection: [Route] {
+        get {
+            let raw = UserDefaults(suiteName: DesignStore.appGroupIdentifier)?
+                .string(forKey: selectionKey) ?? ""
+            let chosen = raw.split(separator: ",").compactMap { Route(rawValue: String($0)) }
+            return chosen.isEmpty ? timelineSafe : chosen
+        }
+        set {
+            UserDefaults(suiteName: DesignStore.appGroupIdentifier)?
+                .set(newValue.map(\.rawValue).joined(separator: ","), forKey: selectionKey)
+        }
     }
 
-    static func launchRouteLimit(in arguments: [String]) -> Int? {
+    /// nil when the arguments say nothing about it, so a launch without the
+    /// flag leaves whatever was chosen before alone.
+    static func launchRouteSelection(in arguments: [String]) -> [Route]? {
         guard let flag = arguments.firstIndex(of: "-MotionaryFontLabRoutes"),
               arguments.index(after: flag) < arguments.endIndex
         else { return nil }
-        return Int(arguments[arguments.index(after: flag)])
+        let raw = arguments[arguments.index(after: flag)]
+        let chosen = raw.split(separator: ",").compactMap { Route(rawValue: String($0)) }
+        return chosen.isEmpty ? timelineSafe : chosen
     }
 
     /// The routes a widget timeline will actually carry.
@@ -65,10 +78,7 @@ enum FontLab {
     /// a time.
     static let timelineSafe: [Route] = [.bundled, .groupProcess, .cachesProcess]
 
-    static var activeRoutes: [Route] {
-        let limit = routeLimit
-        return limit > 0 ? Array(Route.allCases.prefix(limit)) : timelineSafe
-    }
+    static var activeRoutes: [Route] { routeSelection }
 
     /// The routes still worth drawing.
     ///
@@ -80,7 +90,7 @@ enum FontLab {
     /// hand the renderer a font, so drawing them only spent memory the
     /// extension does not have - nine glyphs at 1074x1086 is about 40MB, and
     /// this widget is killed a little above 45.
-    enum Route: String, CaseIterable, Sendable {
+    enum Route: String, CaseIterable, Sendable, Equatable {
         /// The control. Bundled at install time and listed in `UIAppFonts`,
         /// which is the one arrangement already known to animate on device.
         case bundled
@@ -148,7 +158,7 @@ enum FontLab {
     /// per render and rewriting nine multi-megabyte fonts each time would cost
     /// more memory than the extension is allowed.
     static func run(manifest: BuildManifest, store: DesignStore) -> [Outcome] {
-        let key = "\(manifest.designID.uuidString)#\(manifest.buildGeneration)#\(routeLimit)"
+        let key = "\(manifest.designID.uuidString)#\(manifest.buildGeneration)#\(routeSelection.map(\.rawValue).joined(separator: "-"))"
         lock.lock()
         if let cache, cache.key == key {
             lock.unlock()

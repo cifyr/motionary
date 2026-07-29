@@ -12,8 +12,8 @@ struct MotionaryApp: App {
     init() {
         let arguments = ProcessInfo.processInfo.arguments
         var changed = false
-        if let limit = FontLab.launchRouteLimit(in: arguments), limit != FontLab.routeLimit {
-            FontLab.routeLimit = limit
+        if let routes = FontLab.launchRouteSelection(in: arguments), routes != FontLab.routeSelection {
+            FontLab.routeSelection = routes
             changed = true
         }
         if let wanted = FontLab.launchOverride(in: arguments), wanted != FontLab.isEnabled {
