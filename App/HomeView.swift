@@ -1,112 +1,83 @@
 import SwiftUI
 
-/// What the app opens into: the active design filling the screen, so launching
-/// Motionary looks like the Home Screen the widget is imitating.
+/// The design, full screen.
 ///
-/// Tiles launch directly here rather than going through the widget's deep-link
-/// bridge, because the app is already frontmost.
+/// Designs are built on the Mac and compiled into this build, so there is
+/// nothing here to choose, import or configure - the app's whole job is to show
+/// what the widget is showing, and to hand over the wallpaper that has to sit
+/// behind it.
 struct HomeView: View {
-    @EnvironmentObject private var library: DesignLibrary
-    @EnvironmentObject private var router: ExternalAppRouter
+    @State private var saving = false
+    @State private var note: String?
 
-    @State private var showingLibrary = false
-#if DEBUG
-    /// Opens the editor straight away so its canvas can be screenshotted from
-    /// the command line, where sheets cannot be tapped open.
-    @State private var debugEditing: DesignDocument?
-#endif
-    @StateObject private var icons = IconImageLoader(store: try? DesignStore())
+    private var manifest: BuildManifest? { PrebuiltDesign.manifest }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if FontLab.isEnabled, let lab = lab() {
-                // Deliberately the same view the widget puts up. The app draws
-                // its own views, so this is the control for the widget's copy:
-                // a route that draws here and not there is being refused by the
-                // renderer rather than by the font.
-                lab.ignoresSafeArea()
-            } else if let design = library.activeDesign, let store = library.store {
-                composition(design: design, store: store)
+            if let manifest {
+                composition(manifest: manifest)
             } else {
-                WelcomeView(hasStorageFailure: library.loadFailure != nil)
+                EmptyDesignView()
             }
 
-            SettingsButton { showingLibrary = true }
+            SaveButton(saving: saving) { save() }
+            if let note { Toast(text: note) }
         }
         .ignoresSafeArea()
-        .statusBarHidden(library.activeDesign != nil)
+        .statusBarHidden(manifest != nil)
         .persistentSystemOverlays(.hidden)
-#if DEBUG
-        .sheet(item: $debugEditing) { design in
-            EditorView(design: design).environmentObject(library)
-        }
-        .task {
-            guard ProcessInfo.processInfo.arguments.contains("-MotionaryOpenEditor") else { return }
-            debugEditing = library.activeDesign
-        }
-#endif
-        .sheet(isPresented: $showingLibrary) {
-            LibraryView()
-                .environmentObject(library)
-                .environmentObject(router)
-        }
-        .alert("Launch failed", isPresented: Binding(
-            get: { router.lastFailure != nil },
-            set: { if !$0 { router.lastFailure = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(router.lastFailure ?? "")
-        }
     }
 
-    private func lab() -> FontLabView? {
-        guard let store = library.store else { return nil }
-        let imported = library.activeDesign.flatMap { library.manifest(for: $0) }
-        guard let manifest = imported ?? PrebuiltDesign.manifest else { return nil }
-        let outcomes = FontLab.run(manifest: manifest, store: store)
-        FontLab.record(outcomes, store: store)
-        return FontLabView(
-            manifest: manifest,
-            outcomes: outcomes,
-            viewport: DeviceGeometry.widgetRect,
-            usesCoreTextProof: true
-        )
-    }
-
-    private func composition(design: DesignDocument, store: DesignStore) -> some View {
-        let videoURL = store.previewVideoURL(for: design.id)
-        let wallpaperURL = store.wallpaperURL(for: design.id)
-        // Both the widget's glyph selection and this seek are pure functions of
-        // wall-clock time, so opening the app picks the animation up where the
-        // widget had it rather than restarting the loop.
-        let spec = design.spec
-        let loopFrames = design.loopFrameCount
-
+    private func composition(manifest: BuildManifest) -> some View {
+        let spec = TimerFontSpec(laneCount: manifest.laneCount, framesPerSecond: manifest.framesPerSecond)
+        let loop = manifest.loopFrameCount
         return LoopingCompositionView(
-            screenSize: DeviceGeometry.screenPixelSize,
-            viewport: CGRect(origin: .zero, size: DeviceGeometry.screenPixelSize),
-            tiles: design.tiles,
-            videoURL: FileManager.default.fileExists(atPath: videoURL.path) ? videoURL : nil,
-            wallpaper: UIImage(contentsOfFile: wallpaperURL.path).map { Image(uiImage: $0) },
+            screenSize: manifest.screenSize,
+            viewport: CGRect(origin: .zero, size: manifest.screenSize),
+            tiles: [],
+            videoURL: PrebuiltDesign.previewURL,
+            wallpaper: PrebuiltDesign.wallpaperURL
+                .flatMap { UIImage(contentsOfFile: $0.path) }
+                .map { Image(uiImage: $0) },
             scaleMode: .device,
-            startTime: { spec.videoTime(loopFrameCount: loopFrames) }
-        ) { tile, side in
-            Button {
-                router.launch(appID: tile.appID)
-            } label: {
-                TileView(tile: tile, side: side, iconImage: icons.image(for: tile))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open \(AppCatalog.app(id: tile.appID)?.name ?? tile.appID)")
-        }
+            // Both this and the widget's glyph choice are pure functions of
+            // wall clock time, so opening the app continues the loop rather
+            // than restarting it.
+            startTime: { spec.videoTime(loopFrameCount: loop) }
+        ) { _, _ in EmptyView() }
         .ignoresSafeArea()
+    }
+
+    private func save() {
+        guard let url = PrebuiltDesign.wallpaperURL else {
+            note = "This build has no wallpaper in it."
+            return
+        }
+        saving = true
+        Task {
+            do {
+                try await WallpaperExporter.saveToPhotos(url: url)
+                await MainActor.run {
+                    saving = false
+                    note = "Saved to Photos. Set it as your wallpaper, then place the widget over it."
+                }
+            } catch {
+                await MainActor.run {
+                    saving = false
+                    // The reason, not "something went wrong": the usual cause
+                    // is a denied Photos permission, which is fixable only if
+                    // it is named.
+                    note = String(describing: error)
+                }
+            }
+        }
     }
 }
 
-private struct SettingsButton: View {
+private struct SaveButton: View {
+    let saving: Bool
     let action: () -> Void
 
     var body: some View {
@@ -115,15 +86,22 @@ private struct SettingsButton: View {
             HStack {
                 Spacer()
                 Button(action: action) {
-                    Image(systemName: "gearshape.fill")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 46, height: 46)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
-                        .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
+                    Group {
+                        if saving {
+                            ProgressView().controlSize(.small).tint(.white)
+                        } else {
+                            Image(systemName: "square.and.arrow.down")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .frame(width: 46, height: 46)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
                 }
-                .accessibilityLabel("Designs and settings")
+                .disabled(saving)
+                .accessibilityLabel("Save the wallpaper to Photos")
             }
         }
         .padding(.trailing, 20)
@@ -131,9 +109,28 @@ private struct SettingsButton: View {
     }
 }
 
-private struct WelcomeView: View {
-    let hasStorageFailure: Bool
+private struct Toast: View {
+    let text: String
 
+    var body: some View {
+        VStack {
+            Spacer()
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal, 28)
+                .padding(.bottom, 96)
+        }
+        .transition(.opacity)
+        .allowsHitTesting(false)
+    }
+}
+
+private struct EmptyDesignView: View {
     var body: some View {
         VStack(spacing: 14) {
             Image(systemName: "wand.and.stars")
@@ -142,17 +139,11 @@ private struct WelcomeView: View {
             Text("Motionary")
                 .font(.largeTitle.bold())
                 .foregroundStyle(.white)
-            Text(hasStorageFailure
-                 ? "Storage is unavailable. Open settings for details."
-                 : "Import a looping video, place your apps on it, and build an animated Home Screen widget.")
+            Text("No design is built into this app yet. Drop a clip into Motionary Studio on the Mac and install again.")
                 .font(.callout)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.white.opacity(0.7))
                 .padding(.horizontal, 40)
-            Text("Tap the gear to get started")
-                .font(.footnote)
-                .foregroundStyle(.white.opacity(0.45))
-                .padding(.top, 6)
         }
     }
 }
