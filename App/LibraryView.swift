@@ -242,6 +242,20 @@ struct LibraryView: View {
             }
 
             Section {
+                if let active = library.activeDesign {
+                    Toggle("Animate widget", isOn: Binding(
+                        get: { active.animationEnabled },
+                        set: { on in
+                            var updated = active
+                            updated.animationEnabled = on
+                            library.save(updated)
+                            WidgetCenterBridge.reloadAll()
+                        }
+                    ))
+                    Text("Off shows the still picture. If the widget is black with this on and correct with it off, the animated layer is at fault rather than the picture.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+
                 Button {
                     restartWidget()
                 } label: {

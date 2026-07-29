@@ -110,6 +110,11 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     var smoothness: MotionSmoothness = .standard
     var jpegQuality: Double = 0.62
 
+    /// Draws the animated layer at all. Off leaves the still backdrop, which is
+    /// both a usable widget and the way to tell a broken animation layer from a
+    /// broken picture: the two are indistinguishable when the result is black.
+    var animationEnabled: Bool = true
+
     /// Region of the screen the animation replaces, in pixels. Auto-detected at
     /// import and then adjustable.
     var animationCrop: CGRect
@@ -208,6 +213,7 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         widgetNudge = try container.decodeIfPresent(CGPoint.self, forKey: .widgetNudge) ?? .zero
         smoothness = try container.decodeIfPresent(MotionSmoothness.self, forKey: .smoothness) ?? .standard
         jpegQuality = try container.decodeIfPresent(Double.self, forKey: .jpegQuality) ?? 0.62
+        animationEnabled = try container.decodeIfPresent(Bool.self, forKey: .animationEnabled) ?? true
         animationCrop = try container.decode(CGRect.self, forKey: .animationCrop)
         tiles = try container.decodeIfPresent([PlacedTile].self, forKey: .tiles) ?? []
         snapEnabled = try container.decodeIfPresent(Bool.self, forKey: .snapEnabled) ?? true

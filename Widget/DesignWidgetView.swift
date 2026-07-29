@@ -63,7 +63,7 @@ struct DesignWidgetView: View {
                 viewport: loaded.design.widgetRect,
                 wallpaper: loaded.wallpaper,
                 wallpaperRect: loaded.wallpaperRect,
-                isAnimated: loaded.fontsReady
+                isAnimated: loaded.fontsReady && loaded.design.animationEnabled
             ) { tile, side in
                 Link(destination: LaunchLink.url(for: tile.appID)) {
                     TileView(tile: tile, side: side, iconImage: loaded.icons.image(for: tile))
