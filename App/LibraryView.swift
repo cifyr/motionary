@@ -19,6 +19,7 @@ struct LibraryView: View {
     @State private var showingPhotosPicker = false
     @State private var restartNote: String?
     @State private var buildStage: FontSetGenerator.Stage?
+    @State private var fontLabEnabled = FontLab.isEnabled
 
     var body: some View {
         NavigationStack {
@@ -281,6 +282,23 @@ struct LibraryView: View {
                     // environment is not; if it is black here too, the fonts
                     // this app generates are what iOS 27 will not draw.
                     LaneGlyphProbe(store: store, manifest: manifest, design: active)
+                }
+
+                Toggle("Font lab", isOn: Binding(
+                    get: { fontLabEnabled },
+                    set: {
+                        fontLabEnabled = $0
+                        FontLab.isEnabled = $0
+                        WidgetCenterBridge.reloadAll()
+                    }
+                ))
+                Text("Replaces the widget with nine bands of the same frame, one per way of getting the font to the renderer. Bands with a picture are routes that work; black bands are routes that do not.")
+                    .font(.caption2).foregroundStyle(.secondary)
+
+                if let store = library.store, let report = FontLab.report(store: store) {
+                    Text(report)
+                        .font(.system(size: 10, design: .monospaced))
+                        .textSelection(.enabled)
                 }
 
                 Button {
