@@ -340,9 +340,13 @@ struct StudioView: View {
                 }
                 await MainActor.run {
                     self.stage = nil
-                    self.done = device == nil
-                        ? "Built into the app. \(built.summary). Connect the phone and press again to install."
-                        : "Installed. \(built.summary). Add the Motionary widget if it is not already on the Home Screen."
+                    if let warning = built.warning {
+                        self.done = "\(warning) \(built.summary)."
+                    } else {
+                        self.done = device == nil
+                            ? "Built into the app. \(built.summary). Connect the phone and press again to install."
+                            : "Installed. \(built.summary). Add the Motionary widget if it is not already on the Home Screen."
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -379,5 +383,9 @@ private struct EditorWindow: View {
             }
             .padding(16)
         }
+        .frame(
+            width: LayoutEditor.width(for: model),
+            height: LayoutEditor.height(for: model) + 60
+        )
     }
 }

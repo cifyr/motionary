@@ -43,6 +43,9 @@ struct StudioPipeline: Sendable {
         let manifest: BuildManifest
         let folder: URL
         let summary: String
+        /// Set when the design was installed but something after it was not
+        /// clean - a locked phone refusing to open the app, most often.
+        var warning: String?
     }
 
     let projectRoot: URL
@@ -200,7 +203,10 @@ struct StudioPipeline: Sendable {
 
         guard let deviceID else { return built }
 
-        try installer.installAndLaunch(deviceID: deviceID) { onStage(.installing($0)) }
-        return built
+        var installed = built
+        installed.warning = try installer.installAndLaunch(deviceID: deviceID) {
+            onStage(.installing($0))
+        }
+        return installed
     }
 }
