@@ -253,6 +253,80 @@ final class GeometryAndSnapTests: XCTestCase {
         XCTAssertEqual(clamped, CGPoint(x: 100, y: 100))
     }
 
+    func testClampCentresATileLargerThanTheScreen() {
+        // No valid range exists, so the clamp must not invert.
+        let clamped = engine().clamp(center: .zero, tileSize: 9_000)
+        XCTAssertEqual(clamped.x, DeviceGeometry.screenPixelSize.width / 2, accuracy: 0.01)
+    }
+
+    // MARK: - Rotation
+
+    /// A rotated tile's footprint grows, so clamping against the plate side
+    /// alone would let a corner hang off the screen.
+    func testRotatedTileReportsALargerFootprint() {
+        var tile = PlacedTile(appID: "spotify", center: CGPoint(x: 400, y: 400), size: 100)
+        XCTAssertEqual(tile.boundingExtent, 100, accuracy: 0.01)
+
+        tile.rotation = 45
+        XCTAssertEqual(tile.boundingExtent, 100 * sqrt(2), accuracy: 0.01)
+
+        tile.rotation = 90
+        XCTAssertEqual(tile.boundingExtent, 100, accuracy: 0.01, "a quarter turn is square again")
+
+        tile.rotation = -45
+        XCTAssertEqual(tile.boundingExtent, 100 * sqrt(2), accuracy: 0.01, "direction must not matter")
+    }
+
+    func testRotationSnapsToIncrementsWhenClose() {
+        let engine = engine()
+        XCTAssertEqual(engine.snap(rotation: 44), 45, accuracy: 0.001)
+        XCTAssertEqual(engine.snap(rotation: 2), 0, accuracy: 0.001)
+        XCTAssertEqual(engine.snap(rotation: -89), -90, accuracy: 0.001)
+    }
+
+    func testRotationBetweenIncrementsIsLeftAlone() {
+        // 22 is 7 degrees from both 15 and 30, outside the threshold.
+        XCTAssertEqual(engine().snap(rotation: 22), 22, accuracy: 0.001)
+    }
+
+    func testRotationSnapsAcrossTheWrapPoint() {
+        // 359 is one degree from zero, not 359 degrees from it.
+        XCTAssertEqual(engine().snap(rotation: 359), 0, accuracy: 0.001)
+        // Wrapping normalises to (-180, 180], so a half turn is +180.
+        XCTAssertEqual(engine().snap(rotation: 181), 180, accuracy: 0.001)
+    }
+
+    func testAngleWrappingIsStable() {
+        XCTAssertEqual(SnapEngine.wrap(0), 0, accuracy: 0.001)
+        XCTAssertEqual(SnapEngine.wrap(180), 180, accuracy: 0.001)
+        XCTAssertEqual(SnapEngine.wrap(-180), 180, accuracy: 0.001)
+        XCTAssertEqual(SnapEngine.wrap(540), 180, accuracy: 0.001)
+        XCTAssertEqual(SnapEngine.wrap(-370), -10, accuracy: 0.001)
+    }
+
+    func testAngleDifferenceTakesTheShortWayRound() {
+        XCTAssertEqual(SnapEngine.difference(10, 350), 20, accuracy: 0.001)
+        XCTAssertEqual(SnapEngine.difference(350, 10), -20, accuracy: 0.001)
+    }
+
+    func testRotationSurvivesEncoding() throws {
+        var tile = PlacedTile(appID: "spotify", center: CGPoint(x: 1, y: 2), size: 100)
+        tile.rotation = -37.5
+        let decoded = try JSONDecoder().decode(PlacedTile.self, from: JSONEncoder().encode(tile))
+        XCTAssertEqual(decoded.rotation, -37.5, accuracy: 0.001)
+    }
+
+    /// Designs written before rotation existed must still decode.
+    func testTileWithoutRotationDecodesUpright() throws {
+        let json = """
+        {"id":"\(UUID().uuidString)","appID":"spotify","center":[10,20],"size":100,
+         "cornerRadius":0.22,"showsLabel":true,"opacity":1}
+        """
+        let tile = try JSONDecoder().decode(PlacedTile.self, from: Data(json.utf8))
+        XCTAssertEqual(tile.rotation, 0)
+        XCTAssertEqual(tile.boundingExtent, 100, accuracy: 0.01)
+    }
+
     // MARK: - Payload budget
 
     func testBudgetScalesWithLaneCount() {

@@ -17,6 +17,9 @@ struct EditorView: View {
     @State private var wallpaper: Image?
     @State private var showingPreview = false
     @State private var showingIconPicker = false
+    /// Rotation at the start of a rotate gesture, since the gesture reports a
+    /// delta from where the fingers began rather than an absolute angle.
+    @State private var rotationBase: Double = 0
     @StateObject private var icons: IconImageLoader
 
     init(design: DesignDocument) {
@@ -130,7 +133,8 @@ struct EditorView: View {
                             x: tile.center.x * scale,
                             y: tile.center.y * scale
                         )
-                        .gesture(dragGesture(for: tile, scale: scale))
+                        .gesture(dragGesture(for: tile, scale: scale)
+                            .simultaneously(with: rotateGesture(for: tile)))
                         .onTapGesture { selectedTileID = tile.id }
                 }
 
@@ -158,12 +162,39 @@ struct EditorView: View {
             }
     }
 
+    private func rotateGesture(for tile: PlacedTile) -> some Gesture {
+        RotateGesture()
+            .onChanged { value in
+                selectedTileID = tile.id
+                apply(rotation: rotationBase + value.rotation.degrees, to: tile.id, commit: false)
+            }
+            .onEnded { value in
+                apply(rotation: rotationBase + value.rotation.degrees, to: tile.id, commit: true)
+                rotationBase = design.tiles.first { $0.id == tile.id }?.rotation ?? 0
+            }
+    }
+
+    private func apply(rotation: Double, to tileID: UUID, commit: Bool) {
+        guard let index = design.tiles.firstIndex(where: { $0.id == tileID }) else { return }
+        let engine = SnapEngine(widgetRect: design.widgetRect)
+        design.tiles[index].rotation = design.snapEnabled
+            ? engine.snap(rotation: rotation)
+            : SnapEngine.wrap(rotation)
+        // Rotating grows the footprint, so a tile near an edge has to move back
+        // inside rather than letting a corner hang off.
+        design.tiles[index].center = engine.clamp(
+            center: design.tiles[index].center,
+            tileSize: design.tiles[index].boundingExtent
+        )
+        if commit { library.save(design) }
+    }
+
     private func update(tile: PlacedTile, to location: CGPoint, scale: CGFloat, commit: Bool) {
         guard let index = design.tiles.firstIndex(where: { $0.id == tile.id }) else { return }
         let engine = SnapEngine(widgetRect: design.widgetRect)
         // The gesture reports canvas points; the model stores screen pixels.
         let raw = CGPoint(x: location.x / scale, y: location.y / scale)
-        let clamped = engine.clamp(center: raw, tileSize: tile.size)
+        let clamped = engine.clamp(center: raw, tileSize: tile.boundingExtent)
 
         if design.snapEnabled {
             let result = engine.snap(
@@ -262,6 +293,25 @@ struct EditorView: View {
                             library.save(design)
                         }
                     ))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Slider(
+                            value: Binding(
+                                get: { tile.rotation },
+                                set: { apply(rotation: $0, to: tile.id, commit: true) }
+                            ),
+                            in: -180 ... 180,
+                            step: 1
+                        )
+                        HStack {
+                            Text("Rotation \(Int(tile.rotation.rounded()))°")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Reset") { apply(rotation: 0, to: tile.id, commit: true) }
+                                .font(.caption2)
+                                .disabled(tile.rotation == 0)
+                        }
+                    }
                     Toggle("Show label", isOn: Binding(
                         get: { tile.showsLabel },
                         set: { newValue in

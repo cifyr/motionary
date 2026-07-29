@@ -100,11 +100,44 @@ struct SnapEngine {
         return result.map { (value: $0.0, guide: $0.1) }
     }
 
-    /// Keeps a tile inside the screen regardless of snapping.
+    /// Keeps a tile inside the screen regardless of snapping. `tileSize` should
+    /// be the rotated bounding extent, not the plate's side, or a rotated
+    /// corner can still leave the screen.
     func clamp(center: CGPoint, tileSize: CGFloat) -> CGPoint {
-        CGPoint(
-            x: min(max(center.x, tileSize / 2), screenSize.width - tileSize / 2),
-            y: min(max(center.y, tileSize / 2), screenSize.height - tileSize / 2)
+        // A tile larger than the screen has no valid range; centre it rather
+        // than letting the clamp invert.
+        let halfX = min(tileSize / 2, screenSize.width / 2)
+        let halfY = min(tileSize / 2, screenSize.height / 2)
+        return CGPoint(
+            x: min(max(center.x, halfX), screenSize.width - halfX),
+            y: min(max(center.y, halfY), screenSize.height - halfY)
         )
+    }
+
+    /// Angles a rotating tile settles onto, so a tile meant to be square or at
+    /// a clean diagonal does not end up a degree off.
+    static let snapAngles: [Double] = stride(from: -180.0, through: 180.0, by: 15).map { $0 }
+    /// How near an increment a rotation has to be before it locks.
+    var angleThreshold: Double = 4
+
+    func snap(rotation: Double) -> Double {
+        let wrapped = Self.wrap(rotation)
+        guard let nearest = Self.snapAngles.min(by: {
+            abs(Self.difference($0, wrapped)) < abs(Self.difference($1, wrapped))
+        }) else { return wrapped }
+        return abs(Self.difference(nearest, wrapped)) <= angleThreshold ? Self.wrap(nearest) : wrapped
+    }
+
+    /// Normalises to (-180, 180] so 350 and -10 are the same rotation.
+    static func wrap(_ degrees: Double) -> Double {
+        var value = degrees.truncatingRemainder(dividingBy: 360)
+        if value > 180 { value -= 360 }
+        if value <= -180 { value += 360 }
+        return value
+    }
+
+    /// Shortest signed distance between two angles, across the wrap point.
+    static func difference(_ a: Double, _ b: Double) -> Double {
+        wrap(a - b)
     }
 }

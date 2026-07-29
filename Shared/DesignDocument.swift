@@ -18,9 +18,64 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
     var icon: IconAsset?
     /// Overrides the catalogue's brand tint for the plate behind the icon.
     var tintHex: String?
+    /// Clockwise rotation in degrees, so tiles can follow an angled element in
+    /// the footage instead of always sitting square to the screen.
+    var rotation: Double = 0
 
     var rect: CGRect {
         CGRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size)
+    }
+
+    /// Width of the tile's axis-aligned bounding box once rotated. A tile at
+    /// 45 degrees reaches about 1.41x its side, so clamping against `size`
+    /// alone would let a corner hang off the screen.
+    var boundingExtent: CGFloat {
+        let radians = rotation * .pi / 180
+        return size * (abs(cos(radians)) + abs(sin(radians)))
+    }
+
+    init(
+        id: UUID = UUID(),
+        appID: String,
+        center: CGPoint,
+        size: CGFloat,
+        cornerRadius: CGFloat = 0.22,
+        showsLabel: Bool = true,
+        opacity: Double = 1,
+        icon: IconAsset? = nil,
+        tintHex: String? = nil,
+        rotation: Double = 0
+    ) {
+        self.id = id
+        self.appID = appID
+        self.center = center
+        self.size = size
+        self.cornerRadius = cornerRadius
+        self.showsLabel = showsLabel
+        self.opacity = opacity
+        self.icon = icon
+        self.tintHex = tintHex
+        self.rotation = rotation
+    }
+
+    /// Decoded field by field rather than by the synthesised initialiser.
+    ///
+    /// Swift does not fall back to a property's default when a key is absent,
+    /// so a design written before a field existed would fail to decode
+    /// entirely — and the store skips designs it cannot read, which would make
+    /// them disappear from the library rather than fail loudly.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        appID = try container.decode(String.self, forKey: .appID)
+        center = try container.decode(CGPoint.self, forKey: .center)
+        size = try container.decode(CGFloat.self, forKey: .size)
+        cornerRadius = try container.decodeIfPresent(CGFloat.self, forKey: .cornerRadius) ?? 0.22
+        showsLabel = try container.decodeIfPresent(Bool.self, forKey: .showsLabel) ?? true
+        opacity = try container.decodeIfPresent(Double.self, forKey: .opacity) ?? 1
+        icon = try container.decodeIfPresent(IconAsset.self, forKey: .icon)
+        tintHex = try container.decodeIfPresent(String.self, forKey: .tintHex)
+        rotation = try container.decodeIfPresent(Double.self, forKey: .rotation) ?? 0
     }
 }
 

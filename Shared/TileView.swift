@@ -60,6 +60,7 @@ struct TileView: View {
                     .minimumScaleFactor(0.6)
             }
         }
+        .rotationEffect(.degrees(tile.rotation))
         .opacity(tile.opacity)
         .overlay {
             if isSelected {
