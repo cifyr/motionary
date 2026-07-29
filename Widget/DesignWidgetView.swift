@@ -128,9 +128,10 @@ struct DesignWidgetView: View {
     }
 
     private func bundled() -> Source? {
-        guard let manifest = PrebuiltDesign.manifest else { return nil }
+        // Whichever the app last chose, so the Home Screen follows a swipe.
+        guard let entry = PrebuiltDesign.selected(), let manifest = entry.manifest else { return nil }
         let fonts = PrebuiltDesign.fontReport(for: manifest)
-        guard let url = PrebuiltDesign.backdropURL ?? PrebuiltDesign.wallpaperURL else { return nil }
+        guard let url = entry.backdropURL ?? entry.wallpaperURL else { return nil }
         let longest = manifest.backdropRect.map { Int(max($0.width, $0.height)) }
             ?? Int(max(manifest.screenSize.width, manifest.screenSize.height))
         return Source(
@@ -139,7 +140,7 @@ struct DesignWidgetView: View {
             fontsUsable: fonts.resolvable == fonts.requested,
             origin: "bundled",
             scope: "UIAppFonts",
-            name: "Wizard"
+            name: entry.name
         )
     }
 

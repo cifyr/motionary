@@ -280,9 +280,29 @@ struct StudioPipeline: Sendable {
         let built = try await generate(prepared, loopSeconds: loopSeconds, onStage: onStage)
 
         onStage(.bundling)
+        // Every starred design ships, not only the one just edited: the phone
+        // switches between whatever is in the bundle, and a font has to be in
+        // there to draw at all.
+        var bundled: [BundleWriter.Bundled] = [
+            .init(name: prepared.design.name, folder: built.folder, manifest: built.manifest),
+        ]
+        for design in Self.saved()
+        where design.isStarred && design.id != prepared.design.id {
+            guard let manifest = try? prepared.store.loadManifest(id: design.id) else {
+                // Starred but never built, or built before its fonts were
+                // cleared. Skipped rather than failing the build, and said so.
+                onStage(.installing("\(design.name) is starred but has no build yet - skipped"))
+                continue
+            }
+            bundled.append(.init(
+                name: design.name,
+                folder: prepared.store.folder(for: design.id),
+                manifest: manifest
+            ))
+        }
+
         try BundleWriter(projectRoot: projectRoot).install(
-            designFolder: built.folder,
-            manifest: built.manifest,
+            bundled,
             iconsFolder: prepared.store.root.deletingLastPathComponent()
                 .appendingPathComponent("Icons", isDirectory: true)
         )
