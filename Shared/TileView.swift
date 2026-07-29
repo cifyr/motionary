@@ -1,5 +1,9 @@
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#else
+import AppKit
+#endif
 
 /// How a placed app tile is drawn, in both the editor and the widget.
 ///
@@ -100,7 +104,14 @@ extension Color {
     }
 
     var hexString: String? {
-        guard let components = UIColor(self).cgColor.components, components.count >= 3 else { return nil }
+        // The studio edits tints on the Mac and the widget draws them on the
+        // phone, so the bridge to a CGColor has to exist on both.
+#if canImport(UIKit)
+        let native = UIColor(self).cgColor
+#else
+        let native = NSColor(self).cgColor
+#endif
+        guard let components = native.components, components.count >= 3 else { return nil }
         let scaled = components.prefix(3).map { Int(($0 * 255).rounded()) }
         return String(format: "#%02x%02x%02x", scaled[0], scaled[1], scaled[2])
     }

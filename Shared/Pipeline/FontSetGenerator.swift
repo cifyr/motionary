@@ -208,7 +208,8 @@ struct FontSetGenerator {
             wallpaperName: "wallpaper.png",
             totalFontBytes: totalBytes,
             builtAt: Date(),
-            backdropRect: bakedBackdrop
+            backdropRect: bakedBackdrop,
+            tiles: design.tiles
         )
         try store.save(manifest)
 
