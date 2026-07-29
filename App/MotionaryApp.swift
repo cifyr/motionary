@@ -54,9 +54,13 @@ final class DesignLibrary: ObservableObject {
 
     private(set) var store: DesignStore?
 
-    /// What the widget was last told to show, so a reload is pushed on a change
-    /// of identity rather than on every save.
-    private var lastPublishedDesignID: UUID?
+    /// What the widget was last told to show, so a reload is pushed on a real
+    /// change rather than on every save — the editor saves on each tile drag.
+    ///
+    /// Keyed on the build generation as well as the identity: a rebuild leaves
+    /// the id alone, so keying on identity alone meant rebuilding a design
+    /// pushed nothing at all.
+    private var lastPublished: String?
 
     /// Falls back to the most recently edited built design, so the app is never
     /// blank just because nothing was explicitly chosen.
@@ -109,10 +113,11 @@ final class DesignLibrary: ObservableObject {
         // to nothing, and nothing else would ever dislodge it. Pushed on a
         // change of identity rather than on every save, because the editor
         // saves on each tile drag.
-        if activeDesign?.id != lastPublishedDesignID {
-            lastPublishedDesignID = activeDesign?.id
+        let published = activeDesign.map { "\($0.id.uuidString)#\($0.buildGeneration)" }
+        if published != lastPublished {
+            lastPublished = published
             WidgetCenterBridge.reloadAll()
-            Self.logger.info("pushed widget reload for \(resolved, privacy: .public)")
+            Self.logger.info("pushed widget reload for \(published ?? "none", privacy: .public)")
         }
     }
 

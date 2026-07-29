@@ -36,7 +36,11 @@ struct DesignProvider: TimelineProvider {
         // left the widget saying "create a design" for good. An hourly refresh
         // is roughly 24 a day against WidgetKit's budget and costs nothing to
         // serve, since the entry is just a UUID.
-        let retry: TimeInterval = designID == nil ? 300 : 3600
+        // A minute, not five. With nothing to draw the widget says "create a
+        // design", and the window between building one and the widget asking
+        // again is time spent looking at a stale complaint — which is exactly
+        // how this read as broken when it was merely behind.
+        let retry: TimeInterval = designID == nil ? 60 : 3600
         WidgetRenderLog.append("""
         ask  timeline    preview=\(context.isPreview) family=\(context.family.rawValue) \
         size=\(Int(context.displaySize.width))x\(Int(context.displaySize.height)) \
