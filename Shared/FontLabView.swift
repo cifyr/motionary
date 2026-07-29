@@ -21,13 +21,27 @@ struct FontLabView: View {
     /// the widget's rows answer, which is whether the renderer will draw it.
     var usesCoreTextProof = false
 
+    /// How much of full size each row draws at.
+    ///
+    /// One of these glyphs is a 1074x1086 photograph, which costs about 4.7MB
+    /// decoded; nine of them at full size came to roughly 40MB and the
+    /// extension was killed before it drew anything, which looks like a grey
+    /// widget from outside. Drawing them smaller costs the glyph's area, not
+    /// its legibility - the rows only need to show that a picture arrived.
+    private static let renderScale: CGFloat = 0.4
+
     var body: some View {
         GeometryReader { geometry in
-            let height = geometry.size.height / CGFloat(max(1, outcomes.count))
+            let height = geometry.size.height / CGFloat(max(1, outcomes.count) + 1)
             VStack(spacing: 0) {
                 ForEach(Array(outcomes.enumerated()), id: \.element.id) { index, outcome in
                     row(outcome, index: index, width: geometry.size.width, height: height)
                 }
+                Text("\(MemoryFootprint.megabytes)MB, \(outcomes.filter(\.isDrawable).count)/\(outcomes.count) fonts")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .frame(width: geometry.size.width, height: height, alignment: .leading)
+                    .padding(.leading, 6)
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
@@ -62,10 +76,15 @@ struct FontLabView: View {
             }
         } else if let font = outcome.font {
             let window = self.window(size: size)
-            Stage(manifest: manifest, viewport: viewport, font: font)
-                .offset(x: -window.minX, y: -window.minY)
-                .frame(width: size.width, height: size.height, alignment: .topLeading)
-                .clipped()
+            Stage(
+                manifest: manifest,
+                viewport: viewport,
+                magnification: Self.renderScale,
+                font: font
+            )
+            .offset(x: -window.minX, y: -window.minY)
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+            .clipped()
         } else {
             Color.black.frame(width: size.width, height: size.height)
         }
@@ -75,7 +94,7 @@ struct FontLabView: View {
     /// area, so a row is empty only because nothing was drawn rather than
     /// because the picture landed somewhere else.
     private func window(size: CGSize) -> CGRect {
-        let scale = 1 / DeviceGeometry.scale
+        let scale = Self.renderScale / DeviceGeometry.scale
         let centre = CGPoint(
             x: (manifest.animationCrop.midX - viewport.minX) * scale,
             y: (manifest.animationCrop.midY - viewport.minY) * scale
@@ -97,10 +116,14 @@ private struct Stage: View {
 
     let manifest: BuildManifest
     let viewport: CGRect
+    /// Below 1 the whole composition is laid out smaller, so the glyph
+    /// rasterises smaller too. Scaling the finished view instead would
+    /// rasterise at full size first and save nothing.
+    var magnification: CGFloat = 1
     let font: (CGFloat) -> Font
 
     var body: some View {
-        let scale = 1 / max(displayScale, 1)
+        let scale = magnification / max(displayScale, 1)
         SingleLaneGlyph(font: font)
             .frame(
                 width: manifest.screenSize.width * scale,

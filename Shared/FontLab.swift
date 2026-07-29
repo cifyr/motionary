@@ -36,17 +36,23 @@ enum FontLab {
         return nil
     }
 
+    /// The routes still worth drawing.
+    ///
+    /// Four others were tried and measured out, on the simulator and on the
+    /// phone alike: `.persistent` scope is refused with CoreText error 307
+    /// from the app group and from the extension's own Caches,
+    /// `CTFontManagerRegisterFontURLs` persistent reports success and never
+    /// resolves, and `RegisterFontDescriptors` does the same. None of them can
+    /// hand the renderer a font, so drawing them only spent memory the
+    /// extension does not have - nine glyphs at 1074x1086 is about 40MB, and
+    /// this widget is killed a little above 45.
     enum Route: String, CaseIterable, Sendable {
         /// The control. Bundled at install time and listed in `UIAppFonts`,
         /// which is the one arrangement already known to animate on device.
         case bundled
         case groupProcess
-        case groupPersistent
         case cachesProcess
-        case cachesPersistent
-        case urlsPersistent
         case graphicsFont
-        case descriptors
         /// No registry at all: a `CTFont` built straight from the bytes and
         /// handed to SwiftUI. If the view archive carries the font rather than
         /// its name, the renderer never has to look anything up.
@@ -56,12 +62,8 @@ enum FontLab {
             switch self {
             case .bundled: "BUNDLE"
             case .groupProcess: "GRP proc"
-            case .groupPersistent: "GRP pers"
             case .cachesProcess: "CACHE proc"
-            case .cachesPersistent: "CACHE pers"
-            case .urlsPersistent: "URLs pers"
             case .graphicsFont: "CGFont"
-            case .descriptors: "Descriptors"
             case .direct: "Direct CTFont"
             }
         }
@@ -70,12 +72,8 @@ enum FontLab {
             switch self {
             case .bundled: "in the extension bundle, UIAppFonts"
             case .groupProcess: "app group file, RegisterFontsForURL .process"
-            case .groupPersistent: "app group file, RegisterFontsForURL .persistent"
             case .cachesProcess: "copied to the extension's Caches, .process"
-            case .cachesPersistent: "copied to the extension's Caches, .persistent"
-            case .urlsPersistent: "RegisterFontURLs .persistent from Caches"
             case .graphicsFont: "RegisterGraphicsFont from in-memory data"
-            case .descriptors: "RegisterFontDescriptors from in-memory data"
             case .direct: "CTFont from data, never registered, no name lookup"
             }
         }
@@ -160,18 +158,10 @@ enum FontLab {
             return bundledControl()
         case .groupProcess:
             return byURL(route: route, data: renamed, directory: .appGroup, scope: .process)
-        case .groupPersistent:
-            return byURL(route: route, data: renamed, directory: .appGroup, scope: .persistent)
         case .cachesProcess:
             return byURL(route: route, data: renamed, directory: .caches, scope: .process)
-        case .cachesPersistent:
-            return byURL(route: route, data: renamed, directory: .caches, scope: .persistent)
-        case .urlsPersistent:
-            return byURLs(route: route, data: renamed)
         case .graphicsFont:
             return byGraphicsFont(route: route, data: renamed)
-        case .descriptors:
-            return byDescriptors(route: route, data: renamed)
         case .direct:
             return direct(route: route, data: renamed)
         }
@@ -258,18 +248,6 @@ enum FontLab {
         return named(route: route, registered: ok || isAlreadyRegistered(failure), failure: failure, path: url)
     }
 
-    private static func byURLs(route: Route, data: Data) -> Outcome {
-        guard let url = write(data, named: route.family, in: .caches) else {
-            return Outcome(route: route, note: "could not stage the file", font: nil)
-        }
-        // Fires its handler asynchronously, so the name check below is the only
-        // usable verdict rather than a return value.
-        CTFontManagerRegisterFontURLs([url] as CFArray, .persistent, true) { _, done in
-            !done
-        }
-        return named(route: route, registered: true, failure: nil, path: url)
-    }
-
     private static func byGraphicsFont(route: Route, data: Data) -> Outcome {
         guard let provider = CGDataProvider(data: data as CFData), let font = CGFont(provider) else {
             return Outcome(route: route, note: "CGFont would not accept the data", font: nil)
@@ -278,16 +256,6 @@ enum FontLab {
         let ok = CTFontManagerRegisterGraphicsFont(font, &error)
         let failure = error?.takeRetainedValue()
         return named(route: route, registered: ok || isAlreadyRegistered(failure), failure: failure, path: nil)
-    }
-
-    private static func byDescriptors(route: Route, data: Data) -> Outcome {
-        guard let descriptors = CTFontManagerCreateFontDescriptorsFromData(data as CFData) as? [CTFontDescriptor],
-              !descriptors.isEmpty
-        else {
-            return Outcome(route: route, note: "no descriptors came out of the data", font: nil)
-        }
-        CTFontManagerRegisterFontDescriptors(descriptors as CFArray, .process, true) { _, done in !done }
-        return named(route: route, registered: true, failure: nil, path: nil)
     }
 
     private static func direct(route: Route, data: Data) -> Outcome {
