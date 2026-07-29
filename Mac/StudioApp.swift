@@ -106,6 +106,7 @@ struct StudioView: View {
     @State private var done: String?
     @State private var log: [String] = []
     @State private var wallpaper: URL?
+    @State private var saved: [DesignDocument] = []
     @State private var targeting = false
 
     @State private var projectRoot: URL? = ProjectLocator.find()
@@ -117,6 +118,7 @@ struct StudioView: View {
             header
             dropTarget
             settings
+            if !saved.isEmpty { savedDesigns }
             actions
             if let stage { progress(stage) }
             if let done { message(done, tint: .green) }
@@ -132,7 +134,11 @@ struct StudioView: View {
         }
         .padding(24)
         .frame(width: 520)
-        .task { refreshDevices() }
+        .task {
+            refreshDevices()
+            StudioPipeline.migrateLegacyDesigns()
+            saved = StudioPipeline.saved()
+        }
         .sheet(item: Binding(
             get: { prepared.map { EditorSheet(prepared: $0) } },
             set: { if $0 == nil { prepared = nil } }
@@ -140,12 +146,81 @@ struct StudioView: View {
             EditorWindow(
                 prepared: sheet.prepared,
                 model: model,
-                onCancel: { prepared = nil },
+                // Saved on the way out either way: closing the editor should
+                // not be the thing that loses an afternoon's placement.
+                onCancel: { edited in
+                    try? edited.store.save(edited.design)
+                    prepared = nil
+                    saved = StudioPipeline.saved()
+                },
                 onBuild: { edited in
+                    try? edited.store.save(edited.design)
                     prepared = nil
                     install(edited)
                 }
             )
+        }
+    }
+
+    /// Reopening keeps the placement. Deriving a design from the clip again
+    /// would put every tile back in the middle of the frame.
+    private var savedDesigns: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Edit an existing design").font(.caption.weight(.semibold))
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(saved) { design in
+                        Button { reopen(design) } label: {
+                            HStack {
+                                Text(design.name).lineLimit(1)
+                                Spacer()
+                                Text("\(design.tiles.count) app\(design.tiles.count == 1 ? "" : "s")")
+                                    .foregroundStyle(.secondary)
+                                Text(design.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .font(.callout)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Delete", role: .destructive) { delete(design) }
+                        }
+                    }
+                }
+            }
+            .frame(maxHeight: 88)
+        }
+        .disabled(isBusy)
+    }
+
+    private func delete(_ design: DesignDocument) {
+        // Archived rather than removed: a design is somebody's layout, and the
+        // list is long enough to make a mis-click easy.
+        guard let store = try? StudioPipeline.openStore() else { return }
+        try? store.archive(id: design.id)
+        saved = StudioPipeline.saved()
+    }
+
+    private func reopen(_ design: DesignDocument) {
+        guard let projectRoot else { return }
+        done = nil
+        failure = nil
+        stage = .preparing
+        let pipeline = StudioPipeline(projectRoot: projectRoot, model: model)
+        Task {
+            do {
+                let ready = try await pipeline.reopen(design)
+                await MainActor.run {
+                    stage = nil
+                    prepared = ready
+                }
+            } catch {
+                await MainActor.run {
+                    stage = nil
+                    failure = String(describing: error)
+                }
+            }
         }
     }
 
@@ -367,6 +442,7 @@ struct StudioView: View {
                 }
                 await MainActor.run {
                     self.stage = nil
+                    self.saved = StudioPipeline.saved()
                     self.wallpaper = FileManager.default.fileExists(atPath: built.wallpaperURL.path)
                         ? built.wallpaperURL
                         : nil
@@ -398,7 +474,7 @@ private struct EditorSheet: Identifiable {
 private struct EditorWindow: View {
     @State var prepared: StudioPipeline.Prepared
     let model: DeviceModel
-    let onCancel: () -> Void
+    let onCancel: (StudioPipeline.Prepared) -> Void
     let onBuild: (StudioPipeline.Prepared) -> Void
 
     var body: some View {
@@ -406,7 +482,7 @@ private struct EditorWindow: View {
             LayoutEditor(design: $prepared.design, model: model, poster: prepared.poster)
             Divider()
             HStack {
-                Button("Cancel", action: onCancel)
+                Button("Close") { onCancel(prepared) }
                 Spacer()
                 Button("Build and install") { onBuild(prepared) }
                     .keyboardShortcut(.defaultAction)
