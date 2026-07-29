@@ -23,6 +23,43 @@ enum RuntimeFontRegistry {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var registered: Set<String> = []
 
+    /// Which scope actually took, for the report.
+    nonisolated(unsafe) private(set) static var lastScope = "none"
+
+    private enum Registration {
+        case success(String)
+        case failure(String)
+    }
+
+    /// Persistent first, process second.
+    ///
+    /// A widget is rasterised by a separate system process, not by the
+    /// extension that builds the view — `WidgetRenderer_Default` shows up
+    /// alongside the extension in jetsam reports. A font registered with
+    /// `.process` scope exists only inside the extension, so the renderer has
+    /// nothing to draw the glyph with: the name resolves, 32 lanes report
+    /// usable, and the colour glyphs come out empty. Bundled fonts avoid this
+    /// because the renderer can reach the bundle. `.persistent` is the same
+    /// idea for fonts that were not there at install time.
+    private static func registerFont(at url: URL) -> Registration {
+        for scope in [CTFontManagerScope.persistent, .process] {
+            var error: Unmanaged<CFError>?
+            if CTFontManagerRegisterFontsForURL(url as CFURL, scope, &error) {
+                return .success(scope == .persistent ? "persistent" : "process")
+            }
+            let failure = error?.takeRetainedValue()
+            let code = (failure as Error?).map { ($0 as NSError).code } ?? -1
+            // Already registered is a warm process, not a problem.
+            if code == Int(CTFontManagerError.alreadyRegistered.rawValue) {
+                return .success(scope == .persistent ? "persistent" : "process")
+            }
+            if scope == .process {
+                return .failure(failure.map(String.init(describing:)) ?? "unknown error")
+            }
+        }
+        return .failure("no scope accepted the font")
+    }
+
     @discardableResult
     static func register(manifest: BuildManifest, store: DesignStore) -> Report {
         let key = "\(manifest.fontFamilyBase)#\(manifest.buildGeneration)"
@@ -33,6 +70,7 @@ enum RuntimeFontRegistry {
         let blinkFailures = registerBlinkFont()
         var failures = blinkFailures
         var registeredCount = 0
+        var usedScope = "none"
 
         if !alreadyDone {
             for lane in 0 ..< manifest.laneCount {
@@ -45,24 +83,18 @@ enum RuntimeFontRegistry {
                     failures.append("lane \(lane): no file at \(url.lastPathComponent)")
                     continue
                 }
-                var error: Unmanaged<CFError>?
-                if CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) {
+                switch registerFont(at: url) {
+                case .success(let scope):
                     registeredCount += 1
-                } else {
-                    let failure = error?.takeRetainedValue()
-                    let code = (failure as Error?).map { ($0 as NSError).code } ?? -1
-                    // Re-registering the same file is expected on a warm
-                    // process and is not an error worth reporting.
-                    if code == Int(CTFontManagerError.alreadyRegistered.rawValue) {
-                        registeredCount += 1
-                    } else {
-                        failures.append("lane \(lane): \(failure.map(String.init(describing:)) ?? "unknown error")")
-                    }
+                    usedScope = scope
+                case .failure(let message):
+                    failures.append("lane \(lane): \(message)")
                 }
             }
         } else {
             registeredCount = manifest.laneCount
         }
+        if usedScope != "none" { lastScope = usedScope }
 
         // Registration returning true is not proof the font is usable, so each
         // lane is resolved by PostScript name before the widget draws with it.

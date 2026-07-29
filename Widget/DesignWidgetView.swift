@@ -3,14 +3,14 @@ import SwiftUI
 import WidgetKit
 import os
 
-/// Renders the one bundled design.
+/// Renders the current design, preferring one you imported and falling back to
+/// the design bundled with the app.
 ///
-/// Reads nothing the extension did not ship with: the manifest, the backdrop
-/// and the lane fonts are all bundle resources, and the fonts are registered by
-/// the system from `UIAppFonts` before any of this runs. That is the
-/// arrangement the Onewheel build uses on this same phone, and generating and
-/// registering them at runtime instead was the one thing that differed while
-/// the animated layer refused to draw.
+/// The fallback is the point. A widget that draws nothing looks identical to a
+/// widget that is broken, and this one spent a long night black. If an imported
+/// design cannot be drawn — not built yet, fonts that will not register — the
+/// bundled one still can, so the Home Screen always shows something real and
+/// the report says which was used.
 struct DesignWidgetView: View {
     private static let logger = Logger(subsystem: "com.caden.Motionary", category: "Widget")
 
@@ -28,92 +28,133 @@ struct DesignWidgetView: View {
             .containerBackground(for: .widget) { Color.black }
     }
 
+    /// Where a renderable design came from, and everything needed to draw it.
+    private struct Source {
+        let manifest: BuildManifest
+        let backdrop: Image?
+        let fontsUsable: Bool
+        let origin: String
+        let scope: String
+        let name: String
+    }
+
     @ViewBuilder
     private var content: some View {
-        if let manifest = PrebuiltDesign.manifest {
-            let fonts = PrebuiltDesign.fontReport(for: manifest)
-            let backdrop = loadBackdrop(manifest: manifest)
-            let _ = record(manifest: manifest, fonts: fonts, backdropLoaded: backdrop != nil)
-
+        if let source = imported() ?? bundled() {
+            let _ = record(source: source)
             CompositionView(
-                manifest: manifest,
+                manifest: source.manifest,
                 tiles: [],
                 viewport: DeviceGeometry.widgetRect,
-                wallpaper: backdrop,
-                wallpaperRect: manifest.backdropRect,
-                isAnimated: fonts.resolvable == fonts.requested
+                wallpaper: source.backdrop,
+                wallpaperRect: source.manifest.backdropRect,
+                isAnimated: source.fontsUsable
             ) { _, _ in EmptyView() }
         } else {
-            let _ = record(manifest: nil, fonts: (0, 0), backdropLoaded: false)
-            PlaceholderView(message: "The bundled design is missing from this build.")
+            let _ = record(source: nil)
+            PlaceholderView(message: "Open Motionary and add a clip.")
         }
     }
 
-    private func loadBackdrop(manifest: BuildManifest) -> Image? {
+    /// The design chosen in the app, if it is built and its fonts will draw.
+    private func imported() -> Source? {
+        guard let store = try? DesignStore(),
+              let design = ActiveDesign.resolve(in: store),
+              let manifest = try? store.loadManifest(id: design.id)
+        else { return nil }
+
+        let report = RuntimeFontRegistry.register(manifest: manifest, store: store)
+        guard report.isUsable else {
+            Self.logger.error("""
+            imported design \(design.name, privacy: .public) has \
+            \(report.resolvable)/\(report.requested) usable lanes; falling back to the bundled design
+            """)
+            return nil
+        }
+        return Source(
+            manifest: manifest,
+            backdrop: backdrop(manifest: manifest, store: store, designID: design.id),
+            fontsUsable: true,
+            origin: "imported",
+            scope: RuntimeFontRegistry.lastScope,
+            name: design.name
+        )
+    }
+
+    private func bundled() -> Source? {
+        guard let manifest = PrebuiltDesign.manifest else { return nil }
+        let fonts = PrebuiltDesign.fontReport(for: manifest)
         guard let url = PrebuiltDesign.backdropURL ?? PrebuiltDesign.wallpaperURL else { return nil }
         let longest = manifest.backdropRect.map { Int(max($0.width, $0.height)) }
             ?? Int(max(manifest.screenSize.width, manifest.screenSize.height))
+        return Source(
+            manifest: manifest,
+            backdrop: ImageLoader.load(at: url, maxPixelSize: longest).map { Image(decorative: $0, scale: 1) },
+            fontsUsable: fonts.resolvable == fonts.requested,
+            origin: "bundled",
+            scope: "UIAppFonts",
+            name: "Wizard"
+        )
+    }
+
+    private func backdrop(manifest: BuildManifest, store: DesignStore, designID: UUID) -> Image? {
+        let cropped = store.widgetBackdropURL(for: designID)
+        let usesCrop = manifest.backdropRect != nil
+            && FileManager.default.fileExists(atPath: cropped.path)
+        let url = usesCrop ? cropped : store.wallpaperURL(for: designID)
+        let covered = usesCrop
+            ? manifest.backdropRect
+            : CGRect(origin: .zero, size: manifest.screenSize)
+        let longest = Int(max(covered?.width ?? 0, covered?.height ?? 0))
         return ImageLoader.load(at: url, maxPixelSize: longest).map { Image(decorative: $0, scale: 1) }
     }
 
-    /// The report still goes to the shared container, because it is the only
-    /// way to see what the widget did. Nothing needed to draw depends on it.
     @discardableResult
-    private func record(
-        manifest: BuildManifest?,
-        fonts: (resolvable: Int, requested: Int),
-        backdropLoaded: Bool
-    ) -> Bool {
+    private func record(source: Source?) -> Bool {
         var status = WidgetStatus()
-        status.outcome = manifest == nil
-            ? "the bundled design is missing"
-            : (fonts.resolvable == fonts.requested
-                ? (backdropLoaded ? "ok" : "ok, but the bundled picture did not load")
-                : "bundled fonts did not resolve: \(fonts.resolvable)/\(fonts.requested)")
         status.family = "\(family)"
         status.familyRawValue = family.rawValue
         status.renderedSize = Self.lastRenderedSize
         status.containerReachable = (try? DesignStore()) != nil
-        status.storePath = "bundle"
 
         let blinkName = FontSetGenerator.blinkFontResourceName
         status.blinkFontResolved = CTFontCopyPostScriptName(
             CTFontCreateWithName(blinkName as CFString, 12, nil)
         ) as String == blinkName
 
-        if let manifest {
+        if let source {
+            status.outcome = source.backdrop == nil
+                ? "ok, but the picture did not load"
+                : (source.fontsUsable ? "ok" : "ok, but still - the fonts would not draw")
             status.manifestFound = true
-            status.designName = "Wizard (bundled)"
-            status.designID = manifest.designID.uuidString
+            status.designName = "\(source.name) (\(source.origin))"
+            status.designID = source.manifest.designID.uuidString
             status.designSize = WidgetSizeOption.fullScreen.title
-            status.buildGeneration = manifest.buildGeneration
-            status.laneCount = manifest.laneCount
-            status.framesPerSecond = manifest.framesPerSecond
-            status.loopFrameCount = manifest.loopFrameCount
-            status.animationCrop = manifest.animationCrop
+            status.storePath = "\(source.origin) via \(source.scope)"
+            status.buildGeneration = source.manifest.buildGeneration
+            status.laneCount = source.manifest.laneCount
+            status.framesPerSecond = source.manifest.framesPerSecond
+            status.loopFrameCount = source.manifest.loopFrameCount
+            status.animationCrop = source.manifest.animationCrop
             status.widgetRect = DeviceGeometry.widgetRect
-            status.screenSize = manifest.screenSize
-            status.manifestFontBytes = manifest.totalFontBytes
-            status.lanesRequested = fonts.requested
-            status.lanesRegistered = fonts.resolvable
-            status.lanesResolvable = fonts.resolvable
-            status.designFolders = 1
-            status.designsDecoded = 1
-
-            if let url = PrebuiltDesign.backdropURL {
-                status.backdropExists = true
-                status.backdropBytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            }
-            status.wallpaperExists = PrebuiltDesign.wallpaperURL != nil
+            status.screenSize = source.manifest.screenSize
+            status.manifestFontBytes = source.manifest.totalFontBytes
+            status.lanesRequested = source.manifest.laneCount
+            status.lanesResolvable = source.fontsUsable ? source.manifest.laneCount : 0
+            status.lanesRegistered = status.lanesResolvable
+            status.backdropExists = source.backdrop != nil
+        } else {
+            status.outcome = "nothing to draw: no imported design and no bundled one"
         }
 
         status.memoryFootprintMB = MemoryFootprint.megabytes
         WidgetStatusLog.write(status)
         WidgetRenderLog.append("""
         \(status.succeeded ? "OK  " : "FAIL") \(entry.isPreview ? "GALLERY" : "PLACED ") \
-        bundled fonts=\(fonts.resolvable)/\(fonts.requested) backdrop=\(backdropLoaded) \
+        \(source?.origin ?? "none")/\(source?.scope ?? "-") \
+        anim=\(source?.fontsUsable == true) \
         \(Int(Self.lastRenderedSize.width))x\(Int(Self.lastRenderedSize.height)) \
-        \(status.memoryFootprintMB)MB \(status.succeeded ? "" : status.outcome.prefix(48))
+        \(status.memoryFootprintMB)MB
         """)
         return true
     }
@@ -139,8 +180,6 @@ private struct PlaceholderView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
-        // Redaction turns text into a grey bar, which is how this failure first
-        // appeared: unreadable rather than merely unhappy.
         .unredacted()
     }
 }
