@@ -207,13 +207,16 @@ struct LibraryView: View {
             let extractor = MediaFrameExtractor(url: destination)
             let summary = try await extractor.summary()
             let spec = design.spec
-            let available = max(1, min(summary.frameCount - 1, 64))
+            // Loop length counts frames at the design's rate, not the
+            // source's, so a 60fps clip does not report twice as many.
+            let available = max(1, min(Int(summary.duration * Double(spec.framesPerSecond)) - 1, 64))
             design.loopFrameCount = spec.seamlessLoopLengths(maximum: available).last ?? 1
             design.loopStartFrame = 0
 
             let sample = try await extractor.composedFrames(
                 startFrame: 0,
-                count: min(design.loopFrameCount, 16)
+                count: min(design.loopFrameCount, 16),
+                frameRate: spec.framesPerSecond
             )
             let detection = MotionCropDetector().detect(frames: sample, screenSize: DeviceGeometry.screenPixelSize)
             design.animationCrop = detection.crop.isEmpty

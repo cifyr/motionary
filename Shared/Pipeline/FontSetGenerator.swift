@@ -102,6 +102,7 @@ struct FontSetGenerator {
         let frames = try await extractor.composedFrames(
             startFrame: design.loopStartFrame,
             count: design.loopFrameCount,
+            frameRate: spec.framesPerSecond,
             progress: { onStage(.decoding(progress: $0)) }
         )
 

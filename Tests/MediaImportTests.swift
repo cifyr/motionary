@@ -103,7 +103,7 @@ final class MediaImportTests: XCTestCase {
 
     func testGIFFramesAreComposedToScreenSize() async throws {
         let url = try writeGIF(named: "two.gif", frames: [colour(1, 0, 0), colour(0, 0, 1)])
-        let frames = try await MediaFrameExtractor(url: url).composedFrames(startFrame: 0, count: 4)
+        let frames = try await MediaFrameExtractor(url: url).composedFrames(startFrame: 0, count: 4, frameRate: 16)
 
         XCTAssertEqual(frames.count, 4)
         for frame in frames {
@@ -113,20 +113,61 @@ final class MediaImportTests: XCTestCase {
     }
 
     /// Sampling has to advance through the source, not return frame 0 forever.
+    ///
+    /// Samples are spaced at the design's rate, so a source slower than that
+    /// repeats a frame for several samples. Crossing a source frame boundary is
+    /// what must change the picture.
     func testGIFResamplingAdvancesThroughTheSource() async throws {
         let url = try writeGIF(
             named: "alternating.gif",
             frames: [colour(1, 0, 0), colour(0, 0, 1)],
             delay: 0.5
         )
-        let frames = try await MediaFrameExtractor(url: url).composedFrames(startFrame: 0, count: 2)
-        XCTAssertNotEqual(centrePixel(frames[0]), centrePixel(frames[1]), "consecutive samples must differ")
+        // At 16fps a 0.5s source frame spans 8 samples, so 0 and 8 straddle it.
+        let frames = try await MediaFrameExtractor(url: url)
+            .composedFrames(startFrame: 0, count: 9, frameRate: 16)
+        XCTAssertEqual(centrePixel(frames[0]), centrePixel(frames[7]), "still inside the first source frame")
+        XCTAssertNotEqual(centrePixel(frames[0]), centrePixel(frames[8]), "crossing into the second must change")
+    }
+
+    /// The bug this guards: frames were sampled on the source's timeline and
+    /// replayed on the design's, so a source whose rate differed from the
+    /// design's played at the wrong speed. Sampling at the target rate means a
+    /// given sample index always lands at the same wall-clock moment in the
+    /// source, whatever the source's own rate is.
+    func testSamplingIsRealTimeRegardlessOfSourceRate() async throws {
+        // Two GIFs of the same total duration but different frame rates.
+        let slow = try writeGIF(
+            named: "slow.gif",
+            frames: [colour(1, 0, 0), colour(0, 0, 1)],
+            delay: 0.5
+        )
+        let fast = try writeGIF(
+            named: "fast.gif",
+            frames: [colour(1, 0, 0), colour(1, 0, 0), colour(0, 0, 1), colour(0, 0, 1)],
+            delay: 0.25
+        )
+
+        for rate in [8, 16, 32] {
+            let count = rate  // one second of samples
+            let slowFrames = try await MediaFrameExtractor(url: slow)
+                .composedFrames(startFrame: 0, count: count, frameRate: rate)
+            let fastFrames = try await MediaFrameExtractor(url: fast)
+                .composedFrames(startFrame: 0, count: count, frameRate: rate)
+
+            // Both sources switch colour halfway through their one second, so
+            // both must switch at the same sample index whatever the rate.
+            let slowSwitch = slowFrames.firstIndex { centrePixel($0) != centrePixel(slowFrames[0]) }
+            let fastSwitch = fastFrames.firstIndex { centrePixel($0) != centrePixel(fastFrames[0]) }
+            XCTAssertEqual(slowSwitch, count / 2, "slow source at \(rate)fps")
+            XCTAssertEqual(fastSwitch, count / 2, "fast source at \(rate)fps")
+        }
     }
 
     func testGIFSamplingWrapsRatherThanRunningOut() async throws {
         let url = try writeGIF(named: "short.gif", frames: [colour(1, 0, 0), colour(0, 0, 1)])
         // Asking for more frames than the GIF holds must loop, not fail.
-        let frames = try await MediaFrameExtractor(url: url).composedFrames(startFrame: 0, count: 8)
+        let frames = try await MediaFrameExtractor(url: url).composedFrames(startFrame: 0, count: 8, frameRate: 16)
         XCTAssertEqual(frames.count, 8)
     }
 
@@ -136,11 +177,11 @@ final class MediaImportTests: XCTestCase {
         let url = try writeGIF(named: "scale.gif", frames: [colour(1, 0, 0), colour(0, 1, 0)])
 
         let full = try await MediaFrameExtractor(url: url)
-            .composedFrames(startFrame: 0, count: 1)[0]
+            .composedFrames(startFrame: 0, count: 1, frameRate: 16)[0]
         let shrunk = try await MediaFrameExtractor(
             url: url,
             transform: MediaTransform(scale: 0.4, offset: .zero, fillsBackground: false)
-        ).composedFrames(startFrame: 0, count: 1)[0]
+        ).composedFrames(startFrame: 0, count: 1, frameRate: 16)[0]
 
         // A corner is inside the source at full scale and outside it at 0.4.
         let corner = CGPoint(x: 20, y: 20)
@@ -153,11 +194,11 @@ final class MediaImportTests: XCTestCase {
         let centred = try await MediaFrameExtractor(
             url: url,
             transform: MediaTransform(scale: 0.3, offset: .zero, fillsBackground: false)
-        ).composedFrames(startFrame: 0, count: 1)[0]
+        ).composedFrames(startFrame: 0, count: 1, frameRate: 16)[0]
         let moved = try await MediaFrameExtractor(
             url: url,
             transform: MediaTransform(scale: 0.3, offset: CGPoint(x: 0, y: -700), fillsBackground: false)
-        ).composedFrames(startFrame: 0, count: 1)[0]
+        ).composedFrames(startFrame: 0, count: 1, frameRate: 16)[0]
 
         let high = CGPoint(x: DeviceGeometry.screenPixelSize.width / 2, y: 500)
         XCTAssertEqual(pixel(at: high, in: centred)[0], 0, "nothing there when centred")
@@ -227,7 +268,7 @@ final class MediaImportTests: XCTestCase {
         XCTAssertGreaterThan(placed.midY, DeviceGeometry.screenPixelSize.height / 2, "placement says lower")
 
         let frame = try await MediaFrameExtractor(url: url, transform: down)
-            .composedFrames(startFrame: 0, count: 1)[0]
+            .composedFrames(startFrame: 0, count: 1, frameRate: 16)[0]
         let low = CGPoint(x: DeviceGeometry.screenPixelSize.width / 2, y: placed.midY)
         let high = CGPoint(x: DeviceGeometry.screenPixelSize.width / 2, y: 2 * placed.midY - placed.maxY - 100)
         XCTAssertGreaterThan(pixel(at: low, in: frame)[0], 100, "the source should be drawn low")

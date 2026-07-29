@@ -593,7 +593,8 @@ struct EditorView: View {
         let url = store.sourceVideoURL(for: design)
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         do {
-            sourceFrame = try await MediaFrameExtractor(url: url).posterFrame(at: design.loopStartFrame)
+            sourceFrame = try await MediaFrameExtractor(url: url)
+                .posterFrame(at: design.loopStartFrame, frameRate: design.spec.framesPerSecond)
         } catch {
             Self.logger.error("could not load a source frame: \(String(describing: error), privacy: .public)")
         }

@@ -91,10 +91,14 @@ enum DemoSeeder {
 
             let extractor = MediaFrameExtractor(url: store.sourceVideoURL(for: design), transform: design.mediaTransform)
             let summary = try await extractor.summary()
-            let available = max(1, min(summary.frameCount - 1, 32))
+            let available = max(1, min(Int(summary.duration * Double(design.spec.framesPerSecond)) - 1, 32))
             design.loopFrameCount = design.spec.seamlessLoopLengths(maximum: available).last ?? 1
 
-            let sample = try await extractor.composedFrames(startFrame: 0, count: min(8, design.loopFrameCount))
+            let sample = try await extractor.composedFrames(
+                startFrame: 0,
+                count: min(8, design.loopFrameCount),
+                frameRate: design.spec.framesPerSecond
+            )
             let detection = MotionCropDetector().detect(frames: sample, screenSize: DeviceGeometry.screenPixelSize)
             design.animationCrop = detection.crop.isEmpty
                 ? CGRect(origin: .zero, size: DeviceGeometry.screenPixelSize)

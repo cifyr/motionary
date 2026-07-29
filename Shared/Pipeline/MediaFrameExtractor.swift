@@ -111,15 +111,16 @@ struct MediaFrameExtractor {
     ///
     /// The editor needs the raw pixels so it can apply the placement live while
     /// the user drags, rather than showing the last build's baked wallpaper.
-    func posterFrame(at index: Int = 0) async throws -> CGImage {
+    func posterFrame(at index: Int = 0, frameRate: Int = 30) async throws -> CGImage {
+        let rate = Double(max(frameRate, 1))
         switch kind {
         case .video:
-            guard let frame = try await videoFrames(startFrame: index, count: 1, progress: nil).first else {
+            guard let frame = try await videoFrames(startFrame: index, count: 1, rate: rate, progress: nil).first else {
                 throw MediaImportError.emptySource(url: url)
             }
             return frame
         case .gif:
-            guard let frame = try gifFrames(startFrame: index, count: 1, progress: nil).first else {
+            guard let frame = try gifFrames(startFrame: index, count: 1, rate: rate, progress: nil).first else {
                 throw MediaImportError.emptySource(url: url)
             }
             return frame
@@ -197,19 +198,27 @@ struct MediaFrameExtractor {
         )
     }
 
-    /// Decodes `count` consecutive frames starting at `startFrame`, each
-    /// composed onto the calibrated screen.
+    /// Decodes `count` frames starting at `startFrame`, each composed onto the
+    /// calibrated screen.
+    ///
+    /// `frameRate` is the design's rate, not the source's. Sampling on the
+    /// source's timeline and replaying on the design's would rescale time: a
+    /// 24fps clip in a 32fps design ran a third too fast, a 60fps clip half
+    /// speed. Sampling at the target rate keeps playback real-time whatever
+    /// was imported, and makes `startFrame` mean the same thing for both.
     func composedFrames(
         startFrame: Int,
         count: Int,
+        frameRate: Int,
         progress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> [CGImage] {
+        let rate = Double(max(frameRate, 1))
         let raw: [CGImage]
         switch kind {
         case .video:
-            raw = try await videoFrames(startFrame: startFrame, count: count, progress: progress)
+            raw = try await videoFrames(startFrame: startFrame, count: count, rate: rate, progress: progress)
         case .gif:
-            raw = try gifFrames(startFrame: startFrame, count: count, progress: progress)
+            raw = try gifFrames(startFrame: startFrame, count: count, rate: rate, progress: progress)
         }
 
         guard raw.count == count else {
@@ -246,14 +255,13 @@ struct MediaFrameExtractor {
     private func videoFrames(
         startFrame: Int,
         count: Int,
+        rate: Double,
         progress: (@Sendable (Double) -> Void)?
     ) async throws -> [CGImage] {
         let asset = AVURLAsset(url: url)
-        guard let track = try await asset.loadTracks(withMediaType: .video).first else {
+        guard try await asset.loadTracks(withMediaType: .video).first != nil else {
             throw MediaImportError.noVideoTrack(url: url)
         }
-        let rate = try await track.load(.nominalFrameRate)
-        let fps = rate > 0 ? Double(rate) : 30
 
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
@@ -264,7 +272,7 @@ struct MediaFrameExtractor {
         var frames: [CGImage] = []
         frames.reserveCapacity(count)
         for index in 0 ..< count {
-            let time = CMTime(seconds: Double(startFrame + index) / fps, preferredTimescale: 600)
+            let time = CMTime(seconds: Double(startFrame + index) / rate, preferredTimescale: 600)
             do {
                 let (image, _) = try await generator.image(at: time)
                 frames.append(image)
@@ -316,6 +324,7 @@ struct MediaFrameExtractor {
     private func gifFrames(
         startFrame: Int,
         count: Int,
+        rate: Double,
         progress: (@Sendable (Double) -> Void)?
     ) throws -> [CGImage] {
         let source = try imageSource()
@@ -324,7 +333,6 @@ struct MediaFrameExtractor {
 
         let delays = frameDelays(in: source)
         let duration = max(delays.reduce(0, +), 0.0001)
-        let sourceFPS = Double(total) / duration
 
         // Cumulative start time of each frame, for mapping a sample time back
         // to whichever frame is on screen then.
@@ -338,7 +346,7 @@ struct MediaFrameExtractor {
         var frames: [CGImage] = []
         frames.reserveCapacity(count)
         for index in 0 ..< count {
-            let time = Double(startFrame + index) / sourceFPS
+            let time = Double(startFrame + index) / rate
             let wrapped = duration > 0 ? time.truncatingRemainder(dividingBy: duration) : 0
             let frameIndex = starts.lastIndex { $0 <= wrapped } ?? 0
             guard let image = CGImageSourceCreateImageAtIndex(source, frameIndex, nil) else {
@@ -347,7 +355,7 @@ struct MediaFrameExtractor {
             frames.append(image)
             progress?(Double(index + 1) / Double(count))
         }
-        Self.logger.info("decoded \(frames.count) GIF frames from \(total) source frames over \(duration)s")
+        Self.logger.info("decoded \(frames.count) GIF samples at \(rate)fps from \(total) source frames over \(duration)s")
         return frames
     }
 
