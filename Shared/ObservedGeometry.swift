@@ -9,9 +9,25 @@ import os
 /// table is a guess about someone else's device and OS, so the widget records
 /// the size it was actually given and the app prefers that from then on.
 struct ObservedGeometry: Codable, Equatable, Sendable {
+    /// Bumped when the meaning of a recording changes, so entries learned under
+    /// older rules are discarded rather than trusted. Version 1 keyed off the
+    /// widget family enum, which iOS 27 reports inconsistently.
+    static let currentVersion = 2
+
     /// Point sizes keyed by `WidgetSizeOption.rawValue`.
     var sizes: [String: CGSize] = [:]
+    var version = ObservedGeometry.currentVersion
     var updatedAt = Date()
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sizes = try container.decodeIfPresent([String: CGSize].self, forKey: .sizes) ?? [:]
+        // Absent means version 1, written before versioning existed.
+        version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+    }
 
     func size(for option: WidgetSizeOption) -> CGSize? {
         guard let points = sizes[option.rawValue], points.width > 1, points.height > 1,
@@ -41,7 +57,8 @@ enum ObservedGeometryStore {
     static func load() -> ObservedGeometry {
         guard let store = try? DesignStore(),
               let data = try? Data(contentsOf: url(in: store)),
-              let observed = try? JSONDecoder().decode(ObservedGeometry.self, from: data)
+              let observed = try? JSONDecoder().decode(ObservedGeometry.self, from: data),
+              observed.version == ObservedGeometry.currentVersion
         else { return ObservedGeometry() }
         return observed
     }

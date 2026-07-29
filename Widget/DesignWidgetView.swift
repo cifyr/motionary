@@ -91,8 +91,8 @@ struct DesignWidgetView: View {
         var outcome: String {
             if !backdropLoaded { return "ok, but the backdrop image did not load" }
             if !familyMatches {
-                return "ok, but this design is cut for \(design.widgetSize.title); "
-                    + "set the design to this widget's size and rebuild for an exact fit"
+                return "ok, but this design was cut for a different size than the widget "
+                    + "it is in. Rebuild it now that the real size has been measured."
             }
             return "ok"
         }
@@ -196,12 +196,17 @@ struct DesignWidgetView: View {
                 return .failure("\"\(design.name)\" has not been built yet. Open Motionary, open the design, and tap Build widget.")
             }
 
-            // A design cut for another family still draws: the composition is
-            // positioned in screen space, so a different family is a different
-            // sized window onto it. Refusing produced a blank widget, which is
-            // worse than a window that does not quite line up.
-            let expected = WidgetFamilyCompatibility.sizeOption(for: family)
-            let familyMatches = design.widgetSize == expected
+            // Whether the design fits is judged by comparing its rect against
+            // the size actually rendered, not by the family enum, which has
+            // reported two different families for one widget on iOS 27.
+            let expected = design.widgetRect.size
+            let actual = CGSize(
+                width: Self.lastRenderedSize.width * DeviceGeometry.scale,
+                height: Self.lastRenderedSize.height * DeviceGeometry.scale
+            )
+            let familyMatches = actual.width < 1 || actual.height < 1
+                || (abs(expected.width - actual.width) < expected.width * 0.05
+                    && abs(expected.height - actual.height) < expected.height * 0.05)
 
             let report = RuntimeFontRegistry.register(manifest: manifest, store: store)
 

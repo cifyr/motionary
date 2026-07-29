@@ -30,14 +30,20 @@ struct DesignProvider: TimelineProvider {
     }
 
     /// `displaySize` is the size the system will draw at, stated rather than
-    /// inferred, and `isPreview` marks the widget gallery — whose smaller,
-    /// squarer preview would otherwise be learned as the real family size.
+    /// inferred, and `isPreview` marks the gallery, whose preview would
+    /// otherwise be learned as a real size.
+    ///
+    /// Recorded against the size the design was cut for rather than the family
+    /// enum: on iOS 27 one physical widget has reported both systemLarge and
+    /// systemMedium while rendering at an identical 359x548, so the enum cannot
+    /// be trusted to say which slot the user actually filled. What they chose
+    /// in the editor can be.
     private func learn(from context: Context) {
-        guard !context.isPreview else { return }
-        ObservedGeometryStore.record(
-            size: context.displaySize,
-            for: WidgetFamilyCompatibility.sizeOption(for: context.family)
-        )
+        guard !context.isPreview,
+              let store = try? DesignStore(),
+              let design = ActiveDesign.resolve(in: store)
+        else { return }
+        ObservedGeometryStore.record(size: context.displaySize, for: design.widgetSize)
     }
 
     private func resolvedID() -> UUID? {
