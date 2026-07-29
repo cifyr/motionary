@@ -105,6 +105,7 @@ struct StudioView: View {
     @State private var failure: String?
     @State private var done: String?
     @State private var log: [String] = []
+    @State private var wallpaper: URL?
     @State private var targeting = false
 
     @State private var projectRoot: URL? = ProjectLocator.find()
@@ -119,6 +120,14 @@ struct StudioView: View {
             actions
             if let stage { progress(stage) }
             if let done { message(done, tint: .green) }
+            if let wallpaper {
+                HStack(spacing: 12) {
+                    Button("Save wallpaper...") { exportWallpaper(wallpaper) }
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([wallpaper])
+                    }
+                }
+            }
             if let failure { message(failure, tint: .red) }
         }
         .padding(24)
@@ -263,6 +272,24 @@ struct StudioView: View {
         if panel.runModal() == .OK { source = panel.url }
     }
 
+    /// Copies the wallpaper out rather than moving it: the built folder is
+    /// scratch and gets replaced by the next build.
+    private func exportWallpaper(_ source: URL) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        panel.nameFieldStringValue = "Motionary wallpaper.png"
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        guard panel.runModal() == .OK, let target = panel.url else { return }
+        do {
+            if FileManager.default.fileExists(atPath: target.path) {
+                try FileManager.default.removeItem(at: target)
+            }
+            try FileManager.default.copyItem(at: source, to: target)
+        } catch {
+            failure = "Could not save the wallpaper: \(error)"
+        }
+    }
+
     private func chooseProject() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -340,6 +367,9 @@ struct StudioView: View {
                 }
                 await MainActor.run {
                     self.stage = nil
+                    self.wallpaper = FileManager.default.fileExists(atPath: built.wallpaperURL.path)
+                        ? built.wallpaperURL
+                        : nil
                     if let warning = built.warning {
                         self.done = "\(warning) \(built.summary)."
                     } else {
