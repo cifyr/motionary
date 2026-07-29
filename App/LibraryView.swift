@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 import os
 
 struct LibraryView: View {
@@ -13,6 +14,7 @@ struct LibraryView: View {
     @State private var importing = false
     @State private var importFailure: String?
     @State private var editing: DesignDocument?
+    @State private var showingFileImporter = false
 
     var body: some View {
         NavigationStack {
@@ -32,15 +34,41 @@ struct LibraryView: View {
                     Button("Done") { dismiss() }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    PhotosPicker(selection: $pickerItem, matching: .videos, photoLibrary: .shared()) {
-                        Label("Add video", systemImage: "plus")
+                    Menu {
+                        PhotosPicker(
+                            selection: $pickerItem,
+                            matching: .any(of: [.videos, .images]),
+                            photoLibrary: .shared()
+                        ) {
+                            Label("From Photos", systemImage: "photo.on.rectangle")
+                        }
+                        Button {
+                            showingFileImporter = true
+                        } label: {
+                            Label("From Files", systemImage: "folder")
+                        }
+                    } label: {
+                        Label("Add", systemImage: "plus")
                     }
                     .disabled(importing || library.loadFailure != nil)
                 }
             }
             .overlay {
                 if importing {
-                    ProgressOverlay(caption: "Importing video")
+                    ProgressOverlay(caption: "Importing")
+                }
+            }
+            .fileImporter(
+                isPresented: $showingFileImporter,
+                allowedContentTypes: [.movie, .video, .gif],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    Task { await importFile(at: url) }
+                case .failure(let error):
+                    importFailure = String(describing: error)
                 }
             }
             .sheet(item: $editing) { design in
@@ -67,7 +95,7 @@ struct LibraryView: View {
             }
             .onChange(of: pickerItem) { _, item in
                 guard let item else { return }
-                Task { await importVideo(item) }
+                Task { await importPicked(item) }
             }
         }
     }
@@ -128,28 +156,55 @@ struct LibraryView: View {
         .listStyle(.insetGrouped)
     }
 
-    private func importVideo(_ item: PhotosPickerItem) async {
+    private func importPicked(_ item: PhotosPickerItem) async {
         importing = true
         defer {
             importing = false
             pickerItem = nil
         }
+        guard let data = try? await item.loadTransferable(type: Data.self) else {
+            importFailure = String(describing: ImportError.noMediaData)
+            return
+        }
+        await ingest(data: data)
+    }
 
+    /// A file chosen in Files is security scoped, so it has to be copied while
+    /// access is held rather than referenced later.
+    private func importFile(at url: URL) async {
+        importing = true
+        defer { importing = false }
+
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            await ingest(data: try Data(contentsOf: url), preferredName: url.lastPathComponent)
+        } catch {
+            importFailure = String(describing: error)
+        }
+    }
+
+    private func ingest(data: Data, preferredName: String? = nil) async {
         guard let store = library.store else { return }
         do {
-            guard let data = try await item.loadTransferable(type: Data.self) else {
-                throw ImportError.noVideoData
-            }
+            // GIF and video take different decode paths, so the extension has
+            // to reflect what the bytes actually are.
+            let isGIF = data.starts(with: Data("GIF8".utf8))
+            let filename = isGIF ? "source.gif" : "source.mov"
 
-            var design = DesignDocument.new(name: "Design \(library.designs.count + 1)", sourceVideoName: "source.mov")
+            var design = DesignDocument.new(
+                name: preferredName.map { ($0 as NSString).deletingPathExtension }
+                    ?? "Design \(library.designs.count + 1)",
+                sourceVideoName: filename
+            )
             try store.createFolder(for: design.id)
             let destination = store.sourceVideoURL(for: design)
             try data.write(to: destination, options: .atomic)
-            Self.logger.info("imported \(data.count) bytes to \(destination.lastPathComponent, privacy: .public)")
+            Self.logger.info("imported \(data.count) bytes as \(filename, privacy: .public)")
 
             // Sample the head of the clip to pick a default loop and to find
             // what actually moves, so the editor opens on something usable.
-            let extractor = VideoFrameExtractor(url: destination)
+            let extractor = MediaFrameExtractor(url: destination)
             let summary = try await extractor.summary()
             let spec = design.spec
             let available = max(1, min(summary.frameCount - 1, 64))
@@ -176,8 +231,10 @@ struct LibraryView: View {
     }
 
     private enum ImportError: Error, CustomStringConvertible {
-        case noVideoData
-        var description: String { "The picked item did not provide any video data." }
+        case noMediaData
+        var description: String {
+            "The picked item did not provide any data. Choose a video or an animated GIF."
+        }
     }
 }
 

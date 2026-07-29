@@ -20,6 +20,8 @@ struct EditorView: View {
     /// Rotation at the start of a rotate gesture, since the gesture reports a
     /// delta from where the fingers began rather than an absolute angle.
     @State private var rotationBase: Double = 0
+    /// Size at the start of a pinch, for the same reason.
+    @State private var sizeBase: CGFloat = 160
     @StateObject private var icons: IconImageLoader
 
     init(design: DesignDocument) {
@@ -134,8 +136,13 @@ struct EditorView: View {
                             y: tile.center.y * scale
                         )
                         .gesture(dragGesture(for: tile, scale: scale)
-                            .simultaneously(with: rotateGesture(for: tile)))
-                        .onTapGesture { selectedTileID = tile.id }
+                            .simultaneously(with: rotateGesture(for: tile))
+                            .simultaneously(with: magnifyGesture(for: tile)))
+                        .onTapGesture {
+                            selectedTileID = tile.id
+                            rotationBase = tile.rotation
+                            sizeBase = tile.size
+                        }
                 }
 
                 ForEach(activeGuides) { guide in
@@ -162,6 +169,18 @@ struct EditorView: View {
             }
     }
 
+    private func magnifyGesture(for tile: PlacedTile) -> some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                selectedTileID = tile.id
+                apply(size: sizeBase * value.magnification, to: tile.id, commit: false)
+            }
+            .onEnded { value in
+                apply(size: sizeBase * value.magnification, to: tile.id, commit: true)
+                sizeBase = design.tiles.first { $0.id == tile.id }?.size ?? sizeBase
+            }
+    }
+
     private func rotateGesture(for tile: PlacedTile) -> some Gesture {
         RotateGesture()
             .onChanged { value in
@@ -172,6 +191,18 @@ struct EditorView: View {
                 apply(rotation: rotationBase + value.rotation.degrees, to: tile.id, commit: true)
                 rotationBase = design.tiles.first { $0.id == tile.id }?.rotation ?? 0
             }
+    }
+
+    private func apply(size: CGFloat, to tileID: UUID, commit: Bool) {
+        guard let index = design.tiles.firstIndex(where: { $0.id == tileID }) else { return }
+        design.tiles[index].size = max(20, size)
+        let engine = SnapEngine(widgetRect: design.widgetRect)
+        // Growing a tile can push it past an edge, so re-clamp after resizing.
+        design.tiles[index].center = engine.clamp(
+            center: design.tiles[index].center,
+            tileSize: design.tiles[index].boundingExtent
+        )
+        if commit { library.save(design) }
     }
 
     private func apply(rotation: Double, to tileID: UUID, commit: Bool) {
@@ -296,6 +327,19 @@ struct EditorView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Slider(
                             value: Binding(
+                                get: { tile.size },
+                                set: { apply(size: $0, to: tile.id, commit: true) }
+                            ),
+                            in: 60 ... 480,
+                            step: 2
+                        )
+                        Text("Size \(Int(tile.size.rounded())) px")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Slider(
+                            value: Binding(
                                 get: { tile.rotation },
                                 set: { apply(rotation: $0, to: tile.id, commit: true) }
                             ),
@@ -360,6 +404,48 @@ struct EditorView: View {
                     .foregroundStyle(.orange)
                 }
                 Toggle("Snap to guides", isOn: $design.snapEnabled)
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 2) {
+                    Slider(value: Binding(
+                        get: { design.mediaTransform.scale },
+                        set: { design.mediaTransform.scale = $0; library.save(design) }
+                    ), in: 0.2 ... 3, step: 0.01)
+                    Text("Scale \(String(format: "%.2f", design.mediaTransform.scale))x")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Slider(value: Binding(
+                        get: { design.mediaTransform.offset.x },
+                        set: { design.mediaTransform.offset.x = $0; library.save(design) }
+                    ), in: -600 ... 600, step: 2)
+                    Text("Horizontal \(Int(design.mediaTransform.offset.x)) px")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Slider(value: Binding(
+                        get: { design.mediaTransform.offset.y },
+                        set: { design.mediaTransform.offset.y = $0; library.save(design) }
+                    ), in: -1200 ... 1200, step: 2)
+                    Text("Vertical \(Int(design.mediaTransform.offset.y)) px")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Toggle("Fill gaps with the source", isOn: Binding(
+                    get: { design.mediaTransform.fillsBackground },
+                    set: { design.mediaTransform.fillsBackground = $0; library.save(design) }
+                ))
+                if !design.mediaTransform.isIdentity {
+                    Button("Reset placement") {
+                        design.mediaTransform = .identity
+                        library.save(design)
+                    }
+                    .font(.caption)
+                }
+            } header: {
+                Text("Source placement")
+            } footer: {
+                Text("A clip shot in portrait already fills the screen; a square GIF does not. Rebuild to apply.")
             }
 
             Section("Quality") {

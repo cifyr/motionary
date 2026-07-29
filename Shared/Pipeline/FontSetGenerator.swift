@@ -98,7 +98,7 @@ struct FontSetGenerator {
         """)
 
         onStage(.decoding(progress: 0))
-        let extractor = VideoFrameExtractor(url: store.sourceVideoURL(for: design))
+        let extractor = MediaFrameExtractor(url: store.sourceVideoURL(for: design), transform: design.mediaTransform)
         let frames = try await extractor.composedFrames(
             startFrame: design.loopStartFrame,
             count: design.loopFrameCount,

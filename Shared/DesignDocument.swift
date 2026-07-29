@@ -86,8 +86,10 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     var createdAt: Date
     var updatedAt: Date
 
-    /// Filename of the imported source video inside the design's folder.
+    /// Filename of the imported source inside the design's folder.
     var sourceVideoName: String
+    /// How the imported media is fitted to the screen before rendering.
+    var mediaTransform: MediaTransform = .identity
 
     // Loop selection
     var loopStartFrame: Int = 0
@@ -142,6 +144,46 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
             sourceVideoName: sourceVideoName,
             animationCrop: CGRect(origin: .zero, size: DeviceGeometry.screenPixelSize)
         )
+    }
+
+    /// Tolerant of absent keys for the same reason `PlacedTile` is: a design
+    /// written before a field existed must still open, because the store skips
+    /// designs it cannot decode and they would quietly leave the library.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try container.decode(String.self, forKey: .name)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+        sourceVideoName = try container.decode(String.self, forKey: .sourceVideoName)
+        mediaTransform = try container.decodeIfPresent(MediaTransform.self, forKey: .mediaTransform) ?? .identity
+        loopStartFrame = try container.decodeIfPresent(Int.self, forKey: .loopStartFrame) ?? 0
+        loopFrameCount = try container.decodeIfPresent(Int.self, forKey: .loopFrameCount) ?? 32
+        widgetSize = try container.decodeIfPresent(WidgetSizeOption.self, forKey: .widgetSize) ?? .fullScreen
+        widgetSlot = try container.decodeIfPresent(WidgetSlot.self, forKey: .widgetSlot) ?? .topLeft
+        widgetNudge = try container.decodeIfPresent(CGPoint.self, forKey: .widgetNudge) ?? .zero
+        smoothness = try container.decodeIfPresent(MotionSmoothness.self, forKey: .smoothness) ?? .standard
+        jpegQuality = try container.decodeIfPresent(Double.self, forKey: .jpegQuality) ?? 0.62
+        animationCrop = try container.decode(CGRect.self, forKey: .animationCrop)
+        tiles = try container.decodeIfPresent([PlacedTile].self, forKey: .tiles) ?? []
+        snapEnabled = try container.decodeIfPresent(Bool.self, forKey: .snapEnabled) ?? true
+        buildGeneration = try container.decodeIfPresent(Int.self, forKey: .buildGeneration) ?? 0
+    }
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        createdAt: Date,
+        updatedAt: Date,
+        sourceVideoName: String,
+        animationCrop: CGRect
+    ) {
+        self.id = id
+        self.name = name
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.sourceVideoName = sourceVideoName
+        self.animationCrop = animationCrop
     }
 }
 

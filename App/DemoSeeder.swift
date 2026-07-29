@@ -14,6 +14,7 @@ import os
 enum DemoSeeder {
     private static let logger = Logger(subsystem: "com.caden.Motionary", category: "Demo")
     static let sourceName = "demo-source.mov"
+    static let gifSourceName = "demo-source.gif"
     private static let launchFlag = "-MotionaryDemoSeed"
 
     static var isRequested: Bool {
@@ -63,7 +64,7 @@ enum DemoSeeder {
     static func run(store: DesignStore) async -> Outcome {
         // Reuse an already-built demo so repeated launches exercise the render
         // path without paying for a full regeneration each time.
-        if var existing = store.loadAll().first(where: { $0.name == "Demo" }),
+        if var existing = store.loadAll().first(where: { $0.name == (FileManager.default.fileExists(atPath: store.root.deletingLastPathComponent().appendingPathComponent(gifSourceName).path) ? "Demo GIF" : "Demo") }),
            let manifest = try? store.loadManifest(id: existing.id) {
             logger.info("reusing demo design \(existing.id.uuidString, privacy: .public)")
             await attachIcons(to: &existing, store: store)
@@ -72,19 +73,23 @@ enum DemoSeeder {
             return .success(manifest)
         }
 
-        let source = store.root.deletingLastPathComponent().appendingPathComponent(sourceName)
+        let root = store.root.deletingLastPathComponent()
+        let gif = root.appendingPathComponent(gifSourceName)
+        let movie = root.appendingPathComponent(sourceName)
+        let usesGIF = FileManager.default.fileExists(atPath: gif.path)
+        let source = usesGIF ? gif : movie
         guard FileManager.default.fileExists(atPath: source.path) else {
             return .failure("no demo clip at \(source.path)")
         }
 
         do {
-            var design = DesignDocument.new(name: "Demo", sourceVideoName: "source.mov")
+            var design = DesignDocument.new(name: usesGIF ? "Demo GIF" : "Demo", sourceVideoName: usesGIF ? "source.gif" : "source.mov")
             design.widgetSize = .large
             design.smoothness = .light
             try store.createFolder(for: design.id)
             try FileManager.default.copyItem(at: source, to: store.sourceVideoURL(for: design))
 
-            let extractor = VideoFrameExtractor(url: store.sourceVideoURL(for: design))
+            let extractor = MediaFrameExtractor(url: store.sourceVideoURL(for: design), transform: design.mediaTransform)
             let summary = try await extractor.summary()
             let available = max(1, min(summary.frameCount - 1, 32))
             design.loopFrameCount = design.spec.seamlessLoopLengths(maximum: available).last ?? 1
