@@ -20,6 +20,37 @@ enum BundleWriterError: Error, CustomStringConvertible {
     }
 }
 
+/// Finds the Motionary project this studio builds.
+///
+/// Launched from Finder the working directory is `/`, so deriving the project
+/// from it works from a terminal and fails everywhere else. The build products
+/// live inside the project, so walking up from the app itself finds it in a
+/// normal run, and anything else is a question for the user.
+enum ProjectLocator {
+    static let bookmarkKey = "projectRoot"
+
+    static func isProject(_ url: URL) -> Bool {
+        FileManager.default.fileExists(atPath: url.appendingPathComponent("project.yml").path)
+    }
+
+    static func find(from start: URL = Bundle.main.bundleURL) -> URL? {
+        if let stored = UserDefaults.standard.url(forKey: bookmarkKey), isProject(stored) {
+            return stored
+        }
+        var candidate = start.resolvingSymlinksInPath()
+        while candidate.path != "/" {
+            if isProject(candidate) { return candidate }
+            candidate = candidate.deletingLastPathComponent()
+        }
+        let working = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        return isProject(working) ? working : nil
+    }
+
+    static func remember(_ url: URL) {
+        UserDefaults.standard.set(url, forKey: bookmarkKey)
+    }
+}
+
 /// Copies a freshly generated design into the iOS project's `Resources` and
 /// lists its fonts in `UIAppFonts` on both targets.
 ///

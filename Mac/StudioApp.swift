@@ -38,7 +38,10 @@ enum HeadlessBuild {
     }
 
     static func run(source: URL) -> Never {
-        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        guard let root = ProjectLocator.find() else {
+            FileHandle.standardError.write(Data("failed: no Motionary project found\n".utf8))
+            exit(1)
+        }
         let pipeline = StudioPipeline(projectRoot: root, model: .default)
         let deviceID = device(in: CommandLine.arguments)
         let semaphore = DispatchSemaphore(value: 0)
@@ -96,12 +99,7 @@ struct StudioView: View {
     @State private var log: [String] = []
     @State private var targeting = false
 
-    private var projectRoot: URL {
-        // The studio lives in the project it builds, so its own bundle is the
-        // reference point in a normal run; the picker covers the rest.
-        if let override = UserDefaults.standard.url(forKey: "projectRoot") { return override }
-        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-    }
+    @State private var projectRoot: URL? = ProjectLocator.find()
 
     private var isBusy: Bool { stage != nil }
 
@@ -207,6 +205,9 @@ struct StudioView: View {
             Button("Build and install") { start() }
                 .keyboardShortcut(.defaultAction)
                 .disabled(source == nil || deviceID == nil || isBusy)
+            if projectRoot == nil {
+                Button("Choose project folder") { chooseProject() }
+            }
             Spacer()
             if !log.isEmpty {
                 Text(log.last ?? "")
@@ -240,7 +241,26 @@ struct StudioView: View {
         if panel.runModal() == .OK { source = panel.url }
     }
 
+    private func chooseProject() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard ProjectLocator.isProject(url) else {
+            failure = "\(url.lastPathComponent) has no project.yml in it."
+            return
+        }
+        ProjectLocator.remember(url)
+        projectRoot = url
+        failure = nil
+        refreshDevices()
+    }
+
     private func refreshDevices() {
+        guard let projectRoot else {
+            failure = "No Motionary project found. Choose the folder holding project.yml."
+            return
+        }
         do {
             devices = try DeviceInstaller(projectRoot: projectRoot).connectedDevices()
             if deviceID == nil { deviceID = devices.first?.id }
@@ -250,7 +270,7 @@ struct StudioView: View {
     }
 
     private func start() {
-        guard let source, let deviceID else { return }
+        guard let source, let deviceID, let projectRoot else { return }
         self.done = nil
         self.failure = nil
         log = []
