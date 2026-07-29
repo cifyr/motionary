@@ -547,6 +547,15 @@ struct EditorView: View {
                         .foregroundStyle(.secondary)
                 }
                 LabeledContent("Animated area", value: sizeCaption)
+                if let estimate {
+                    LabeledContent("Estimated payload", value: estimate.formattedEstimate)
+                        .foregroundStyle(estimate.isWithinRecommended ? .primary : .orange)
+                    if !estimate.isWithinRecommended {
+                        Text("Above the size a widget extension comfortably holds. Lower quality, shrink the animated area, or drop Smoothness.")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+                }
             }
 
             Section {
@@ -583,6 +592,33 @@ struct EditorView: View {
         design.spec
             .seamlessLoopLengths(maximum: 240)
             .min { abs($0 - design.loopFrameCount) < abs($1 - design.loopFrameCount) }
+    }
+
+    /// Estimated from the real crop at the real quality, so the number shown
+    /// is the one a build would produce rather than a guess.
+    private var estimate: PayloadBudget? {
+        guard let sourceFrame else { return nil }
+        let crop = design.effectiveCrop
+        guard crop.width >= 2, crop.height >= 2 else { return nil }
+
+        // The source frame is raw; the crop is in composed screen space, so
+        // scale a sample of equivalent area rather than cropping the wrong box.
+        let composedArea = crop.width * crop.height
+        let sourceArea = CGFloat(sourceFrame.width * sourceFrame.height)
+        guard sourceArea > 0 else { return nil }
+        let sampleSide = (min(composedArea, sourceArea)).squareRoot()
+        let sampleRect = CGRect(
+            x: 0, y: 0,
+            width: min(CGFloat(sourceFrame.width), sampleSide),
+            height: min(CGFloat(sourceFrame.height), sampleSide)
+        ).integral
+        guard let sample = sourceFrame.cropping(to: sampleRect),
+              let data = FrameEncoder.jpegData(sample, quality: design.jpegQuality)
+        else { return nil }
+
+        let perPixel = Double(data.count) / Double(max(1, sampleRect.width * sampleRect.height))
+        let bytes = Int(perPixel * Double(composedArea))
+        return PayloadBudget(spec: design.spec, averageEncodedFrameBytes: bytes)
     }
 
     private var sizeCaption: String {

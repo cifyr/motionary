@@ -91,8 +91,13 @@ enum DemoSeeder {
 
             let extractor = MediaFrameExtractor(url: store.sourceVideoURL(for: design), transform: design.mediaTransform)
             let summary = try await extractor.summary()
-            let available = max(1, min(Int(summary.duration * Double(design.spec.framesPerSecond)) - 1, 32))
-            design.loopFrameCount = design.spec.seamlessLoopLengths(maximum: available).last ?? 1
+            design.sourceDuration = summary.duration
+            let natural = max(1, Int((summary.duration * Double(design.spec.framesPerSecond)).rounded()))
+            design.loopFrameCount = design.spec.seamlessLoopLength(nearest: natural, maximum: 96)
+            design.mediaTransform = MediaTransform.suggested(
+                sourceSize: summary.naturalSize,
+                screenSize: DeviceGeometry.screenPixelSize
+            )
 
             let sample = try await extractor.composedFrames(
                 startFrame: 0,
