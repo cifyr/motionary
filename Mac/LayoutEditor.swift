@@ -23,7 +23,7 @@ struct LayoutEditor: View {
     @State private var labelsDefault = true
 
     /// Points per screen pixel, so the canvas is the phone at a readable size.
-    private static let zoom: CGFloat = 0.62
+    static let zoom: CGFloat = 0.62
 
     private var canvas: CGSize {
         CGSize(
@@ -58,17 +58,55 @@ struct LayoutEditor: View {
         )
     }
 
+    /// Wide enough for the canvas and the sidebar together.
+    ///
+    /// Without it the sheet inherited the studio window's 520pt width and cut
+    /// the sidebar and the Build button off the right edge.
+    static func width(for model: DeviceModel) -> CGFloat {
+        model.screenPointSize.width * zoom + sidebarWidth + 60
+    }
+
+    static func height(for model: DeviceModel) -> CGFloat {
+        model.screenPointSize.height * zoom + 40
+    }
+
+    private static let sidebarWidth: CGFloat = 240
+
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
             screen
-            sidebar.frame(width: 220)
+            sidebar.frame(width: Self.sidebarWidth)
         }
         .padding(20)
     }
 
+    /// Everything is layered as an overlay on a fixed-size black rectangle
+    /// rather than stacked in a `ZStack`.
+    ///
+    /// The backdrop fill is deliberately larger than the screen, and inside a
+    /// `ZStack` an oversized child grows the stack - so every `topLeading`
+    /// offset ends up measured from a box bigger than the visible canvas and
+    /// the whole composition shifts, widget frame included. An overlay adopts
+    /// its base's size and cannot enlarge it, so the offsets stay honest.
     private var screen: some View {
+        Color.black
+            .frame(width: canvas.width, height: canvas.height)
+            .overlay(alignment: .topLeading) { layers }
+            .clipShape(RoundedRectangle(cornerRadius: 34 * Self.zoom, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 34 * Self.zoom, style: .continuous)
+                    .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+            )
+            .gesture(clipDrag)
+            .simultaneousGesture(clipZoom)
+            .onTapGesture { selection = nil }
+    }
+
+    private var layers: some View {
         ZStack(alignment: .topLeading) {
-            Color.black
+            // Zero-sized anchor: it fixes the stack's origin at the canvas's
+            // top left so the offsets below are measured from there.
+            Color.clear.frame(width: 0, height: 0)
             if let poster {
                 // The generator fills whatever the clip does not cover with a
                 // dimmed blow-up of the same frame rather than black. Drawing
@@ -96,15 +134,6 @@ struct LayoutEditor: View {
                 tileView(tile)
             }
         }
-        .frame(width: canvas.width, height: canvas.height)
-        .clipShape(RoundedRectangle(cornerRadius: 34 * Self.zoom, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 34 * Self.zoom, style: .continuous)
-                .strokeBorder(.white.opacity(0.15), lineWidth: 1)
-        )
-        .gesture(clipDrag)
-        .simultaneousGesture(clipZoom)
-        .onTapGesture { selection = nil }
     }
 
     /// The animated region, drawn so the clip can be positioned against it

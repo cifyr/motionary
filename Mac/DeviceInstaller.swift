@@ -118,11 +118,13 @@ struct DeviceInstaller {
         try run("/usr/bin/env", ["xcodegen", "generate"])
     }
 
-    /// Builds for the device, installs, and launches.
+    /// Builds for the device, installs, and launches. Returns a warning when
+    /// the design landed but something after that did not.
+    @discardableResult
     func installAndLaunch(
         deviceID: String,
         progress: @escaping @Sendable (String) -> Void
-    ) throws {
+    ) throws -> String? {
         progress("Building for the device")
         try run("/usr/bin/xcrun", [
             "xcodebuild",
@@ -147,14 +149,26 @@ struct DeviceInstaller {
         ])
 
         progress("Launching")
-        // The font lab is sticky - it lives in the app group's defaults - and
-        // a studio install should always land on the design it just built
-        // rather than on whatever was last being diagnosed.
-        try run("/usr/bin/xcrun", [
-            "devicectl", "device", "process", "launch",
-            "--device", deviceID,
-            "com.caden.Motionary",
-            "--", "-MotionaryFontLabOff",
-        ])
+        // Not fatal. The design is already installed by this point, and a
+        // locked phone refuses to open anything - reporting that as a failed
+        // build would be wrong about the one thing that mattered.
+        //
+        // The font lab is sticky, living in the app group's defaults, so the
+        // launch is also what puts a studio install back on the design it just
+        // built rather than on whatever was last being diagnosed.
+        do {
+            try run("/usr/bin/xcrun", [
+                "devicectl", "device", "process", "launch",
+                "--device", deviceID,
+                "com.caden.Motionary",
+                "--", "-MotionaryFontLabOff",
+            ])
+            return nil
+        } catch {
+            let locked = "\(error)".contains("Locked") || "\(error)".contains("not be, unlocked")
+            return locked
+                ? "Installed, but the phone was locked so the app could not be opened. Unlock it and open Motionary once."
+                : "Installed, but the app would not launch: \(error)"
+        }
     }
 }
