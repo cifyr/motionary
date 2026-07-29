@@ -129,6 +129,16 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         return max(1, Int(frames.rounded()))
     }
 
+    /// Re-sizes the loop to the source's own length at the current frame rate.
+    ///
+    /// Changing smoothness changes the frame rate, so a loop chosen under the
+    /// old one plays at the wrong speed — 40 frames is 1.25s at 32fps but 2.5s
+    /// at 16fps, and the same clip suddenly runs at half speed.
+    mutating func retuneLoop(maximum: Int = 96) {
+        guard sourceDuration > 0 else { return }
+        loopFrameCount = spec.seamlessLoopLength(nearest: naturalLoopFrames, maximum: maximum)
+    }
+
     /// How long the built loop runs on screen.
     var loopDuration: TimeInterval {
         Double(loopFrameCount) / Double(spec.framesPerSecond)

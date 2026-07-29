@@ -126,6 +126,31 @@ final class GeometryAndSnapTests: XCTestCase {
         XCTAssertEqual(DesignDocument.usableCrop(screen, in: widget), widget.integral)
     }
 
+    /// A loop is measured in frames, so changing smoothness changes how long
+    /// it lasts. 40 frames is 1.25s at 32fps but 2.5s at 16fps — the same clip
+    /// at half speed, which is exactly what the optimiser used to produce.
+    func testRetuningTheLoopKeepsTheSourceDuration() {
+        var design = DesignDocument.new(name: "test", sourceVideoName: "source.gif")
+        design.sourceDuration = 1.2
+
+        design.smoothness = .standard
+        design.retuneLoop()
+        let smooth = design.loopDuration
+        XCTAssertEqual(smooth, 1.2, accuracy: 0.2, "should track the 1.2s source")
+
+        design.smoothness = .light
+        design.retuneLoop()
+        XCTAssertEqual(design.loopDuration, 1.2, accuracy: 0.2, "still 1.2s at a lower frame rate")
+        XCTAssertEqual(design.loopDuration, smooth, accuracy: 0.2, "smoothness must not change the speed")
+    }
+
+    func testRetuningLeavesTheLoopAloneWithoutAKnownDuration() {
+        var design = DesignDocument.new(name: "test", sourceVideoName: "source.gif")
+        design.loopFrameCount = 32
+        design.retuneLoop()
+        XCTAssertEqual(design.loopFrameCount, 32)
+    }
+
     // MARK: - Timer spec
 
     func testSeamlessLoopLengthsDivideTheCycle() {

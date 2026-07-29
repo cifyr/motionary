@@ -93,6 +93,25 @@ struct MediaTransform: Codable, Equatable, Sendable {
         return fill > 0 ? Double(fit / fill) : 1
     }
 
+    /// Sits the whole source inside a target rect — the widget frame — rather
+    /// than inside the screen.
+    ///
+    /// Only the widget frame is ever seen, so fitting to the screen wastes
+    /// picture: a 240x320 poster fitted to a 1206x2622 screen comes out 1206
+    /// wide, and the widget then crops 66px off each side because it is only
+    /// 1074 wide. Fitting to the frame keeps all of it and loses nothing that
+    /// would have shown.
+    static func fitting(sourceSize: CGSize, inside target: CGRect, screenSize: CGSize) -> MediaTransform {
+        guard sourceSize.width > 0, sourceSize.height > 0, !target.isEmpty else { return .identity }
+        let fill = max(screenSize.width / sourceSize.width, screenSize.height / sourceSize.height)
+        let wanted = min(target.width / sourceSize.width, target.height / sourceSize.height)
+        return MediaTransform(
+            scale: fill > 0 ? Double(wanted / fill) : 1,
+            offset: CGPoint(x: target.midX - screenSize.width / 2, y: target.midY - screenSize.height / 2),
+            fillsBackground: true
+        )
+    }
+
     /// Chosen at import. A phone-shaped clip should fill the screen, but a
     /// source far from the screen's proportions loses most of itself that way:
     /// a 240x320 GIF on a 1206x2622 screen is magnified 8x and cropped by 39%,

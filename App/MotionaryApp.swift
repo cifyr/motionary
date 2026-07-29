@@ -15,6 +15,9 @@ struct MotionaryApp: App {
                 .onOpenURL { url in
                     router.handle(url)
                 }
+                .task {
+                    await library.seedBundledDesignIfNeeded()
+                }
 #if DEBUG
                 .task {
                     if DemoSeeder.isRequested {
@@ -139,6 +142,21 @@ final class DesignLibrary: ObservableObject {
             reload()
         } catch {
             operationFailure = "Could not remove \"\(design.name)\": \(error)"
+        }
+    }
+
+    /// Builds the bundled design on a fresh install, so the widget works
+    /// before anyone has touched the editor.
+    func seedBundledDesignIfNeeded() async {
+        guard let store, designs.isEmpty else { return }
+        switch await BundledDesignSeeder.seedIfEmpty(store: store, existing: designs) {
+        case .seeded:
+            activeDesignID = ActiveDesign.identifier
+            reload()
+        case .skipped:
+            break
+        case .failed(let message):
+            operationFailure = "Could not prepare the bundled design: \(message)"
         }
     }
 

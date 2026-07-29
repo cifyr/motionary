@@ -126,20 +126,21 @@ struct PayloadBudget {
     /// keeps JPEG quality respectable wins. Below that threshold, trading
     /// frames per second for image quality reads better on a wallpaper than
     /// the reverse — a crisp 16fps loop beats a mushy 32fps one.
-    static func bestPlan(sample: CGImage, crop: CGRect) -> QualityPlan? {
+    static func bestPlan(samples: [CGImage], crop: CGRect) -> QualityPlan? {
+        guard !samples.isEmpty else { return nil }
         var fallback: QualityPlan?
         for smoothness in [MotionSmoothness.standard, .balanced, .light] {
             let spec = TimerFontSpec(smoothness: smoothness)
-            guard let quality = suggestedQuality(spec: spec, sample: sample, crop: crop, startingAt: 0.88),
-                  let cropped = sample.cropping(to: crop),
-                  let data = FrameEncoder.jpegData(cropped, quality: quality)
-            else { continue }
+            guard let quality = suggestedQuality(
+                spec: spec, samples: samples, crop: crop, startingAt: 0.88
+            ) else { continue }
 
             let plan = QualityPlan(
                 smoothness: smoothness,
                 quality: quality,
                 estimatedBytes: PayloadBudget(
-                    spec: spec, averageEncodedFrameBytes: data.count
+                    spec: spec,
+                    averageEncodedFrameBytes: averageBytes(of: samples, crop: crop, quality: quality)
                 ).estimatedTotalBytes
             )
             if quality >= 0.55 { return plan }
@@ -148,20 +149,40 @@ struct PayloadBudget {
         return fallback
     }
 
+    /// Averaged over several frames rather than taken from one.
+    ///
+    /// A single frame is a poor estimate: if the one sampled happens to be
+    /// busier than the rest, every setting looks more expensive than it is and
+    /// the planner gives away frame rate it did not need to.
+    private static func averageBytes(of samples: [CGImage], crop: CGRect, quality: Double) -> Int {
+        var total = 0
+        var counted = 0
+        for sample in samples {
+            guard let cropped = sample.cropping(to: crop),
+                  let data = FrameEncoder.jpegData(cropped, quality: quality)
+            else { continue }
+            total += data.count
+            counted += 1
+        }
+        return counted > 0 ? total / counted : 0
+    }
+
     /// Largest JPEG quality that keeps a crop inside the recommended budget,
     /// or nil when the crop itself has to shrink instead.
     static func suggestedQuality(
         spec: TimerFontSpec,
-        sample: CGImage,
+        samples: [CGImage],
         crop: CGRect,
         startingAt quality: Double = 0.62
     ) -> Double? {
-        guard let cropped = sample.cropping(to: crop) else { return nil }
+        guard !samples.isEmpty else { return nil }
         var candidate = quality
         while candidate >= 0.3 {
-            guard let data = FrameEncoder.jpegData(cropped, quality: candidate) else { return nil }
-            let budget = PayloadBudget(spec: spec, averageEncodedFrameBytes: data.count)
-            if budget.isWithinRecommended { return candidate }
+            let average = averageBytes(of: samples, crop: crop, quality: candidate)
+            guard average > 0 else { return nil }
+            if PayloadBudget(spec: spec, averageEncodedFrameBytes: average).isWithinRecommended {
+                return candidate
+            }
             candidate -= 0.06
         }
         return nil

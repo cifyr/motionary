@@ -588,7 +588,7 @@ final class QualityPlanTests: XCTestCase {
             let height = side * 3 / 2
             for image in [gradient(width: side, height: height), noise(width: side, height: height)] {
                 let crop = CGRect(x: 0, y: 0, width: side, height: height)
-                if let plan = PayloadBudget.bestPlan(sample: image, crop: crop) {
+                if let plan = PayloadBudget.bestPlan(samples: [image], crop: crop) {
                     XCTAssertLessThanOrEqual(
                         plan.estimatedBytes, PayloadBudget.recommendedMaximumBytes,
                         "\(side)x\(height) produced an over-budget plan"
@@ -602,7 +602,7 @@ final class QualityPlanTests: XCTestCase {
     func testATinyCropGetsTheSmoothestSetting() throws {
         let image = gradient(width: 200, height: 200)
         let plan = try XCTUnwrap(
-            PayloadBudget.bestPlan(sample: image, crop: CGRect(x: 0, y: 0, width: 200, height: 200))
+            PayloadBudget.bestPlan(samples: [image], crop: CGRect(x: 0, y: 0, width: 200, height: 200))
         )
         XCTAssertEqual(plan.smoothness, .standard, "a small crop has room to spare")
     }
@@ -611,7 +611,7 @@ final class QualityPlanTests: XCTestCase {
     func testAFullFrameCropOfOrdinaryFootageFits() throws {
         let image = gradient(width: 1074, height: 1632)
         let plan = try XCTUnwrap(
-            PayloadBudget.bestPlan(sample: image, crop: CGRect(x: 0, y: 0, width: 1074, height: 1632))
+            PayloadBudget.bestPlan(samples: [image], crop: CGRect(x: 0, y: 0, width: 1074, height: 1632))
         )
         XCTAssertLessThanOrEqual(plan.estimatedBytes, PayloadBudget.recommendedMaximumBytes)
     }
@@ -621,7 +621,7 @@ final class QualityPlanTests: XCTestCase {
     func testAnImpossibleCropRefusesRatherThanOverspending() {
         let image = noise(width: 1206, height: 2622)
         let crop = CGRect(x: 0, y: 0, width: 1206, height: 2622)
-        if let plan = PayloadBudget.bestPlan(sample: image, crop: crop) {
+        if let plan = PayloadBudget.bestPlan(samples: [image], crop: crop) {
             XCTAssertLessThanOrEqual(plan.estimatedBytes, PayloadBudget.recommendedMaximumBytes)
         }
     }

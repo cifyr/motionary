@@ -663,11 +663,10 @@ struct EditorView: View {
                 url: store.sourceVideoURL(for: design), transform: design.mediaTransform
             )
             let sample = try await extractor.composedFrames(
-                startFrame: design.loopStartFrame, count: 1,
+                startFrame: design.loopStartFrame, count: min(design.loopFrameCount, 12),
                 frameRate: design.spec.framesPerSecond, speed: design.playbackSpeed
             )
-            guard let frame = sample.first,
-                  let plan = PayloadBudget.bestPlan(sample: frame, crop: design.effectiveCrop)
+            guard let plan = PayloadBudget.bestPlan(samples: sample, crop: design.effectiveCrop)
             else {
                 buildFailure = "Could not find settings that fit. Shrink the animated area and try again."
                 buildStage = nil
@@ -675,6 +674,7 @@ struct EditorView: View {
             }
             design.smoothness = plan.smoothness
             design.jpegQuality = plan.quality
+            design.retuneLoop()
             library.save(design)
             Self.logger.info("optimised to \(plan.summary, privacy: .public)")
             optimisedNote = "Set to \(plan.summary)"
