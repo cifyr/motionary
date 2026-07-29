@@ -207,7 +207,8 @@ struct StudioPipeline: Sendable {
                     maxPixelSize: Int(model.screenPixelSize.height)
                 )
             },
-            clipRect: design.backgroundName == nil ? nil : design.widgetRect
+            clipRect: design.backgroundName == nil ? nil : design.widgetRect,
+            clipCornerRadius: design.effectiveCornerRadius
         )
         let sample = try await extractor.composedFrames(
             startFrame: 0,

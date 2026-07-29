@@ -195,3 +195,38 @@ final class ClipConfinementTests: XCTestCase {
         XCTAssertGreaterThan(result.outside, Self.present, "unconfined, the clip covers the background")
     }
 }
+
+/// The widget's corners are rounded, so a square confinement leaves the clip
+/// showing in the corners of the wallpaper where the background should be.
+final class CornerRadiusTests: XCTestCase {
+    func testTheCornerIsRoundedAwayFromTheClip() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 200, height: 400)
+        let radius: CGFloat = 40
+        let path = CGPath(
+            roundedRect: bounds,
+            cornerWidth: radius,
+            cornerHeight: radius,
+            transform: nil
+        )
+        // Just inside the corner of the bounding box, which a square clip would
+        // have included and a rounded one must not.
+        XCTAssertFalse(path.contains(CGPoint(x: 2, y: 2)))
+        XCTAssertFalse(path.contains(CGPoint(x: bounds.maxX - 2, y: bounds.maxY - 2)))
+        XCTAssertTrue(path.contains(CGPoint(x: bounds.midX, y: bounds.midY)))
+        XCTAssertTrue(path.contains(CGPoint(x: bounds.midX, y: 2)), "the straight edge must still be included")
+    }
+
+    /// A radius past half the short side would invert the shape.
+    func testRadiusIsCappedAtHalfTheShortSide() {
+        let bounds = CGRect(x: 0, y: 0, width: 100, height: 400)
+        let capped = min(CGFloat(500), min(bounds.width, bounds.height) / 2)
+        XCTAssertEqual(capped, 50)
+    }
+
+    func testTheDesignFallsBackToTheModelRadius() {
+        var design = DesignDocument.new(name: "Test", sourceVideoName: "source.gif")
+        XCTAssertEqual(design.effectiveCornerRadius, DeviceGeometry.model.widgetCornerRadius)
+        design.widgetCornerRadius = 40
+        XCTAssertEqual(design.effectiveCornerRadius, 40)
+    }
+}
