@@ -378,6 +378,67 @@ final class MediaImportTests: XCTestCase {
         XCTAssertEqual(placed, .zero)
     }
 
+    // MARK: - Import defaults
+
+    /// A phone-shaped clip should still fill the screen.
+    func testPhoneShapedSourceStillFills() {
+        let suggested = MediaTransform.suggested(
+            sourceSize: CGSize(width: 1080, height: 1920),
+            screenSize: screen
+        )
+        XCTAssertTrue(suggested.isIdentity, "a 9:16 clip loses little and should fill")
+    }
+
+    /// The case that prompted this: a 240x320 GIF on a 1206x2622 screen is
+    /// magnified 8x and loses 39% of its width, showing a strip of the middle
+    /// rather than the picture.
+    func testSquarishSourceFitsInsteadOfBeingCropped() {
+        let source = CGSize(width: 240, height: 320)
+        XCTAssertGreaterThan(
+            MediaTransform.croppedFraction(sourceSize: source, screenSize: screen), 0.35,
+            "filling this source throws away most of its width"
+        )
+
+        let suggested = MediaTransform.suggested(sourceSize: source, screenSize: screen)
+        XCTAssertFalse(suggested.isIdentity)
+        XCTAssertTrue(suggested.fillsBackground, "the uncovered screen needs something behind it")
+
+        // At the suggested scale the whole source is on screen.
+        let placed = MediaFrameExtractor.placement(
+            sourceSize: source, screenSize: screen, transform: suggested
+        )
+        XCTAssertLessThanOrEqual(placed.width, screen.width + 0.5)
+        XCTAssertLessThanOrEqual(placed.height, screen.height + 0.5)
+        XCTAssertEqual(max(placed.width / screen.width, placed.height / screen.height), 1, accuracy: 0.01)
+    }
+
+    func testCroppedFractionIsZeroWhenAspectsMatch() {
+        XCTAssertEqual(
+            MediaTransform.croppedFraction(sourceSize: CGSize(width: 1206, height: 2622), screenSize: screen),
+            0, accuracy: 0.0001
+        )
+    }
+
+    /// Truncating to the largest divisor below the natural length cut the last
+    /// sixth of this GIF and jumped at the wrap.
+    func testLoopLengthLandsOnTheNearestSeamlessDivisor() {
+        let spec = TimerFontSpec(smoothness: .standard)
+        // 1.2s at 32fps is 38 frames; 40 divides 960 and is closer than 32.
+        XCTAssertEqual(spec.seamlessLoopLength(nearest: 38, maximum: 96), 40)
+        XCTAssertEqual(spec.seamlessLoopLength(nearest: 32, maximum: 96), 32)
+        XCTAssertEqual(spec.seamlessLoopLength(nearest: 61, maximum: 96), 60)
+    }
+
+    func testNearestLoopLengthAlwaysDividesTheCycle() {
+        for smoothness in MotionSmoothness.allCases {
+            let spec = TimerFontSpec(smoothness: smoothness)
+            for natural in 1 ... 120 {
+                let chosen = spec.seamlessLoopLength(nearest: natural, maximum: 96)
+                XCTAssertTrue(spec.divides(loopFrameCount: chosen), "\(smoothness) natural \(natural) -> \(chosen)")
+            }
+        }
+    }
+
     func testIdentityTransformIsTheDefault() {
         let design = DesignDocument.new(name: "t", sourceVideoName: "source.gif")
         XCTAssertTrue(design.mediaTransform.isIdentity)

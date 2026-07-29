@@ -111,4 +111,19 @@ struct TimerFontSpec: Equatable, Sendable {
     func seamlessLoopLengths(maximum: Int) -> [Int] {
         (1 ... max(1, maximum)).filter { totalFrames % $0 == 0 }
     }
+
+    /// The seamless length closest to a source's natural loop.
+    ///
+    /// Taking the largest divisor below the natural length truncates: a 1.2s
+    /// GIF at 32fps is 38 frames, and the largest divisor under that is 32,
+    /// which cuts the last sixth of the loop and jumps at the wrap. 40 is a
+    /// closer fit, and since sampling wraps, overshooting a looping source
+    /// costs nothing.
+    func seamlessLoopLength(nearest natural: Int, maximum: Int = 240) -> Int {
+        let candidates = seamlessLoopLengths(maximum: max(maximum, 1))
+        guard !candidates.isEmpty else { return 1 }
+        return candidates.min {
+            (abs($0 - natural), $0) < (abs($1 - natural), $1)
+        } ?? 1
+    }
 }

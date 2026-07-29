@@ -74,6 +74,40 @@ struct MediaTransform: Codable, Equatable, Sendable {
     static let identity = MediaTransform()
 
     var isIdentity: Bool { self == .identity }
+
+    /// Fraction of the source that aspect-filling would crop away.
+    static func croppedFraction(sourceSize: CGSize, screenSize: CGSize) -> Double {
+        guard sourceSize.width > 0, sourceSize.height > 0 else { return 0 }
+        let fill = max(screenSize.width / sourceSize.width, screenSize.height / sourceSize.height)
+        let drawn = CGSize(width: sourceSize.width * fill, height: sourceSize.height * fill)
+        let overflowX = max(0, drawn.width - screenSize.width) / drawn.width
+        let overflowY = max(0, drawn.height - screenSize.height) / drawn.height
+        return Double(max(overflowX, overflowY))
+    }
+
+    /// The scale at which the whole source is visible rather than cropped.
+    static func fittingScale(sourceSize: CGSize, screenSize: CGSize) -> Double {
+        guard sourceSize.width > 0, sourceSize.height > 0 else { return 1 }
+        let fill = max(screenSize.width / sourceSize.width, screenSize.height / sourceSize.height)
+        let fit = min(screenSize.width / sourceSize.width, screenSize.height / sourceSize.height)
+        return fill > 0 ? Double(fit / fill) : 1
+    }
+
+    /// Chosen at import. A phone-shaped clip should fill the screen, but a
+    /// source far from the screen's proportions loses most of itself that way:
+    /// a 240x320 GIF on a 1206x2622 screen is magnified 8x and cropped by 39%,
+    /// which shows a strip of the middle rather than the picture. Past a
+    /// quarter lost, fit instead and let the backdrop cover the rest.
+    static func suggested(sourceSize: CGSize, screenSize: CGSize) -> MediaTransform {
+        guard croppedFraction(sourceSize: sourceSize, screenSize: screenSize) > 0.25 else {
+            return .identity
+        }
+        return MediaTransform(
+            scale: fittingScale(sourceSize: sourceSize, screenSize: screenSize),
+            offset: .zero,
+            fillsBackground: true
+        )
+    }
 }
 
 /// Decodes a video or an animated GIF into full-screen composed frames.

@@ -254,10 +254,17 @@ struct LibraryView: View {
             let summary = try await extractor.summary()
             let spec = design.spec
             // Loop length counts frames at the design's rate, not the
-            // source's, so a 60fps clip does not report twice as many.
-            let available = max(1, min(Int(summary.duration * Double(spec.framesPerSecond)) - 1, 64))
-            design.loopFrameCount = spec.seamlessLoopLengths(maximum: available).last ?? 1
+            // source's, and lands on the divisor nearest the natural loop.
+            let natural = max(1, Int((summary.duration * Double(spec.framesPerSecond)).rounded()))
+            design.loopFrameCount = spec.seamlessLoopLength(nearest: natural, maximum: 96)
             design.loopStartFrame = 0
+            design.mediaTransform = MediaTransform.suggested(
+                sourceSize: summary.naturalSize,
+                screenSize: DeviceGeometry.screenPixelSize
+            )
+            Self.logger.info(
+                "source \(Int(summary.naturalSize.width))x\(Int(summary.naturalSize.height)) at \(summary.nominalFrameRate)fps; loop \(design.loopFrameCount) frames; scale \(design.mediaTransform.scale)"
+            )
 
             let sample = try await extractor.composedFrames(
                 startFrame: 0,
