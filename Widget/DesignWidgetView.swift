@@ -292,6 +292,16 @@ private struct PlaceholderView: View {
             Text(message)
                 .font(.system(size: 12, weight: .medium))
                 .multilineTextAlignment(.center)
+                // Stamped so a screenshot says whether this picture is the
+                // current render or an archived one. A failure recorded no
+                // report at all when the container was locked, so the report
+                // alone could not tell the two apart.
+                .overlay(alignment: .bottom) {
+                    Text("render \(Date().formatted(date: .omitted, time: .standard))")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .offset(y: 22)
+                }
                 // White, not `.secondary`: grey on the black container
                 // background is unreadable, which turns a diagnosable failure
                 // into a blank rectangle.

@@ -147,7 +147,7 @@ struct FontSetGenerator {
                     familyBase: design.fontFamilyBase,
                     encodedFrames: encodedFrames
                 )
-                try data.write(to: url, options: .atomic)
+                try data.write(to: url, options: DesignStore.writingOptions)
                 totalBytes += data.count
             } catch {
                 throw GeneratorError.laneWriteFailed(lane: lane, path: url.path, underlying: error)
@@ -159,7 +159,7 @@ struct FontSetGenerator {
 
         onStage(.writingWallpaper)
         let wallpaper = try FrameEncoder.pngData(frames[0])
-        try wallpaper.write(to: store.wallpaperURL(for: design.id), options: .atomic)
+        try wallpaper.write(to: store.wallpaperURL(for: design.id), options: DesignStore.writingOptions)
 
         // A 1206x2622 PNG costs about 12.6MB decompressed, and a widget
         // extension has far less headroom than that once 30MB of fonts are
@@ -169,7 +169,7 @@ struct FontSetGenerator {
         if let cropped = frames[0].cropping(to: widgetRect) {
             let data = try FrameEncoder.jpegData(cropped, quality: 0.9)
                 ?? FrameEncoder.pngData(cropped)
-            try data.write(to: store.widgetBackdropURL(for: design.id), options: .atomic)
+            try data.write(to: store.widgetBackdropURL(for: design.id), options: DesignStore.writingOptions)
             Self.logger.info("widget backdrop \(Int(widgetRect.width))x\(Int(widgetRect.height)), \(data.count) bytes")
         }
 

@@ -88,6 +88,12 @@ final class DesignLibrary: ObservableObject {
 
     func reload() {
         guard let store else { return }
+        // Files written before the protection class was pinned are unreadable
+        // to a render that happens while the phone is locked, which is most of
+        // them. Relaxing on every load is cheap and spares a rebuild.
+        let relaxed = DesignStore.relaxProtection(at: store.root)
+        Self.logger.info("relaxed file protection on \(relaxed) items")
+
         designs = store.loadAll()
         // Designs built before the widget-sized backdrop existed would make the
         // extension decode a full-screen image; cropping one here is cheaper

@@ -39,7 +39,7 @@ struct IconCache {
 
     init(store: DesignStore) throws {
         root = store.root.deletingLastPathComponent().appendingPathComponent("Icons", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: DesignStore.directoryAttributes)
     }
 
     func url(for icon: IconAsset) -> URL {
@@ -52,7 +52,7 @@ struct IconCache {
 
     func store(_ image: CGImage, for icon: IconAsset) throws {
         let data = try FrameEncoder.pngData(image)
-        try data.write(to: url(for: icon), options: .atomic)
+        try data.write(to: url(for: icon), options: DesignStore.writingOptions)
         Self.logger.info("cached \(icon.id, privacy: .public) (\(data.count) bytes)")
     }
 

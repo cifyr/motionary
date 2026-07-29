@@ -67,7 +67,7 @@ enum BackdropMigration {
             else { continue }
 
             do {
-                try data.write(to: backdrop, options: .atomic)
+                try data.write(to: backdrop, options: DesignStore.writingOptions)
                 created += 1
                 logger.info("backfilled backdrop for \(design.id.uuidString, privacy: .public), \(data.count) bytes")
             } catch {

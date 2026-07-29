@@ -149,7 +149,7 @@ enum WidgetStatusLog {
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
-            try encoder.encode(status).write(to: url(in: store), options: .atomic)
+            try encoder.encode(status).write(to: url(in: store), options: DesignStore.writingOptions)
             logger.info("widget status: \(status.outcome, privacy: .public)")
         } catch {
             logger.error("could not record widget status: \(String(describing: error), privacy: .public)")

@@ -35,13 +35,50 @@ struct DesignStore {
 
     private static let logger = Logger(subsystem: "com.caden.Motionary", category: "DesignStore")
 
+    /// The widget is refreshed while the phone is locked, so everything the
+    /// extension reads has to survive that.
+    ///
+    /// A file written under the `complete` protection class simply is not
+    /// there for a locked-device render. That is exactly how this behaved: the
+    /// widget found no design and drew the placeholder, then a later render
+    /// with the phone in hand read the same design and reported ok. The report
+    /// and the picture disagreed because they were made under different locks.
+    static let writingOptions: Data.WritingOptions = [
+        .atomic, .completeFileProtectionUntilFirstUserAuthentication,
+    ]
+
+    /// Computed rather than stored: `[FileAttributeKey: Any]` is not Sendable,
+    /// so a static instance of it cannot be shared across concurrency domains.
+    static var directoryAttributes: [FileAttributeKey: Any] {
+        [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
+    }
+
+    /// Relaxes protection on everything already written, so designs built
+    /// before this start working without needing a rebuild.
+    @discardableResult
+    static func relaxProtection(at url: URL) -> Int {
+        let manager = FileManager.default
+        let nested = manager.enumerator(at: url, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL } ?? []
+        var changed = 0
+        for target in [url] + nested {
+            do {
+                try manager.setAttributes(directoryAttributes, ofItemAtPath: target.path)
+                changed += 1
+            } catch {
+                logger.error("could not relax \(target.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        }
+        return changed
+    }
+
     let root: URL
 
     /// Roots the store at an arbitrary directory. Tests use this; the app and
     /// the extension always go through the app group.
     init(containerURL: URL) throws {
         let designsRoot = containerURL.appendingPathComponent("Designs", isDirectory: true)
-        try FileManager.default.createDirectory(at: designsRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: designsRoot, withIntermediateDirectories: true, attributes: Self.directoryAttributes)
         root = designsRoot
     }
 
@@ -52,7 +89,7 @@ struct DesignStore {
             throw DesignStoreError.appGroupUnavailable(identifier: appGroupIdentifier)
         }
         let designsRoot = container.appendingPathComponent("Designs", isDirectory: true)
-        try FileManager.default.createDirectory(at: designsRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: designsRoot, withIntermediateDirectories: true, attributes: Self.directoryAttributes)
         root = designsRoot
         Self.logger.debug("design store rooted at \(designsRoot.path, privacy: .public)")
     }
@@ -99,7 +136,7 @@ struct DesignStore {
     // MARK: - Designs
 
     func createFolder(for id: UUID) throws {
-        try FileManager.default.createDirectory(at: fontsFolder(for: id), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: fontsFolder(for: id), withIntermediateDirectories: true, attributes: Self.directoryAttributes)
     }
 
     func save(_ design: DesignDocument) throws {
@@ -109,7 +146,7 @@ struct DesignStore {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(updated)
-        try data.write(to: designURL(for: design.id), options: .atomic)
+        try data.write(to: designURL(for: design.id), options: Self.writingOptions)
         Self.logger.info("saved design \(design.id.uuidString, privacy: .public) (\(data.count) bytes)")
     }
 
@@ -148,7 +185,7 @@ struct DesignStore {
             .deletingLastPathComponent()
             .appendingPathComponent("Archive", isDirectory: true)
             .appendingPathComponent(stamp, isDirectory: true)
-        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true, attributes: Self.directoryAttributes)
         try FileManager.default.moveItem(to: destination.appendingPathComponent(id.uuidString), from: source)
         Self.logger.info("archived design \(id.uuidString, privacy: .public) to \(destination.path, privacy: .public)")
     }
@@ -159,7 +196,7 @@ struct DesignStore {
         try createFolder(for: manifest.designID)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(manifest).write(to: manifestURL(for: manifest.designID), options: .atomic)
+        try encoder.encode(manifest).write(to: manifestURL(for: manifest.designID), options: Self.writingOptions)
     }
 
     func loadManifest(id: UUID) throws -> BuildManifest {
@@ -177,7 +214,7 @@ struct DesignStore {
         if FileManager.default.fileExists(atPath: folder.path) {
             try FileManager.default.removeItem(at: folder)
         }
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: Self.directoryAttributes)
     }
 
     private func decode<T: Decodable>(_ type: T.Type, from url: URL) throws -> T {
