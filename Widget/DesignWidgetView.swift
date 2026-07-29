@@ -3,10 +3,14 @@ import SwiftUI
 import WidgetKit
 import os
 
-/// Renders one design inside whatever family the system asked for.
+/// Renders the one bundled design.
 ///
-/// Everything comes from the shared container at render time, which is what
-/// lets a single installed extension present designs it never shipped with.
+/// Reads nothing the extension did not ship with: the manifest, the backdrop
+/// and the lane fonts are all bundle resources, and the fonts are registered by
+/// the system from `UIAppFonts` before any of this runs. That is the
+/// arrangement the Onewheel build uses on this same phone, and generating and
+/// registering them at runtime instead was the one thing that differed while
+/// the animated layer refused to draw.
 struct DesignWidgetView: View {
     private static let logger = Logger(subsystem: "com.caden.Motionary", category: "Widget")
 
@@ -17,9 +21,6 @@ struct DesignWidgetView: View {
         content
             .background {
                 GeometryReader { geometry in
-                    // Reported, not learned: the provider records the size,
-                    // because only it can tell a real widget from a gallery
-                    // preview.
                     Color.clear.onAppear { Self.lastRenderedSize = geometry.size }
                 }
             }
@@ -29,283 +30,96 @@ struct DesignWidgetView: View {
 
     @ViewBuilder
     private var content: some View {
-        switch load() {
-        case .success(let loaded) where !loaded.backdropLoaded:
-            // Recorded while the body is evaluated, never from `.onAppear`:
-            // WidgetKit renders to a snapshot and does not reliably run
-            // appearance callbacks, so a failure recorded there never
-            // overwrote the last success. The report then said "ok" while the
-            // widget on screen showed an error.
-            let _ = record(
-                outcome: loaded.outcome, design: loaded.design, manifest: loaded.manifest,
-                report: loaded.report, backdrop: loaded.backdropFacts
-            )
-            PlaceholderView(
-                message: "Could not load the picture for \"\(loaded.design.name)\". Open Motionary and rebuild this design."
-            )
+        if let manifest = PrebuiltDesign.manifest {
+            let fonts = PrebuiltDesign.fontReport(for: manifest)
+            let backdrop = loadBackdrop(manifest: manifest)
+            let _ = record(manifest: manifest, fonts: fonts, backdropLoaded: backdrop != nil)
 
-        case .success(let loaded):
-            let _ = Self.logger.info(
-                "WIDGET OK design=\(loaded.design.name, privacy: .public) family=\(family.rawValue) fonts=\(loaded.fontsReady)"
-            )
-            let _ = record(
-                outcome: loaded.outcome, design: loaded.design, manifest: loaded.manifest,
-                report: loaded.report, backdrop: loaded.backdropFacts
-            )
             CompositionView(
-                manifest: loaded.manifest,
-                tiles: loaded.design.tiles,
-                // The design's current rect, not the one baked at build time,
-                // so a calibration fix or a nudge takes effect immediately
-                // instead of requiring every font to be regenerated. The glyphs
-                // place the animated crop in screen coordinates, so moving the
-                // viewport moves the whole composition together.
-                viewport: loaded.design.widgetRect,
-                wallpaper: loaded.wallpaper,
-                wallpaperRect: loaded.wallpaperRect,
-                isAnimated: loaded.fontsReady && loaded.design.animationEnabled
-            ) { tile, side in
-                Link(destination: LaunchLink.url(for: tile.appID)) {
-                    TileView(tile: tile, side: side, iconImage: loaded.icons.image(for: tile))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Open \(AppCatalog.app(id: tile.appID)?.name ?? tile.appID)")
-            }
-        case .failure(let message):
-            let _ = Self.logger.error("WIDGET FAILURE: \(message, privacy: .public)")
-            let _ = record(outcome: message, design: nil, manifest: nil, report: nil)
-            PlaceholderView(message: message)
+                manifest: manifest,
+                tiles: [],
+                viewport: DeviceGeometry.widgetRect,
+                wallpaper: backdrop,
+                wallpaperRect: manifest.backdropRect,
+                isAnimated: fonts.resolvable == fonts.requested
+            ) { _, _ in EmptyView() }
+        } else {
+            let _ = record(manifest: nil, fonts: (0, 0), backdropLoaded: false)
+            PlaceholderView(message: "The bundled design is missing from this build.")
         }
     }
 
-    private struct Loaded {
-        let design: DesignDocument
-        let manifest: BuildManifest
-        let wallpaper: Image?
-        let fontsReady: Bool
-        let icons: IconImageProvider
-        let report: RuntimeFontRegistry.Report
-        let usesCroppedBackdrop: Bool
-        let wallpaperRect: CGRect?
-        let backdropLoaded: Bool
-        let sizeMatches: Bool
-        let backdropFacts: (exists: Bool, bytes: Int, decoded: CGSize)
-
-        var outcome: String {
-            if !backdropLoaded { return "ok, but the backdrop image did not load" }
-            if !sizeMatches {
-                return "ok, but the frame the system gave this widget is not the calibrated "
-                    + "tall portrait size. The composition is scaled to fit it."
-            }
-            return "ok"
-        }
+    private func loadBackdrop(manifest: BuildManifest) -> Image? {
+        guard let url = PrebuiltDesign.backdropURL ?? PrebuiltDesign.wallpaperURL else { return nil }
+        let longest = manifest.backdropRect.map { Int(max($0.width, $0.height)) }
+            ?? Int(max(manifest.screenSize.width, manifest.screenSize.height))
+        return ImageLoader.load(at: url, maxPixelSize: longest).map { Image(decorative: $0, scale: 1) }
     }
 
+    /// The report still goes to the shared container, because it is the only
+    /// way to see what the widget did. Nothing needed to draw depends on it.
     @discardableResult
     private func record(
-        outcome: String,
-        design: DesignDocument?,
         manifest: BuildManifest?,
-        report: RuntimeFontRegistry.Report?,
-        backdrop: (exists: Bool, bytes: Int, decoded: CGSize)? = nil
+        fonts: (resolvable: Int, requested: Int),
+        backdropLoaded: Bool
     ) -> Bool {
         var status = WidgetStatus()
-        status.outcome = outcome
+        status.outcome = manifest == nil
+            ? "the bundled design is missing"
+            : (fonts.resolvable == fonts.requested
+                ? (backdropLoaded ? "ok" : "ok, but the bundled picture did not load")
+                : "bundled fonts did not resolve: \(fonts.resolvable)/\(fonts.requested)")
         status.family = "\(family)"
         status.familyRawValue = family.rawValue
         status.renderedSize = Self.lastRenderedSize
+        status.containerReachable = (try? DesignStore()) != nil
+        status.storePath = "bundle"
 
         let blinkName = FontSetGenerator.blinkFontResourceName
         status.blinkFontResolved = CTFontCopyPostScriptName(
             CTFontCreateWithName(blinkName as CFString, 12, nil)
         ) as String == blinkName
 
-        if let store = try? DesignStore() {
-            status.containerReachable = true
-            status.activeSelection = ActiveDesign.identifier?.uuidString
-            status.storePath = store.root.path
-            let folders = ((try? FileManager.default.contentsOfDirectory(atPath: store.root.path)) ?? [])
-                .compactMap { UUID(uuidString: $0) }
-            status.designFolders = folders.count
-
-            // Swept on every render, not only on failure. Skipping it left
-            // "folders 1, decoded 0" on a perfectly good render, which reads as
-            // a store full of unreadable designs. A handful of small JSON files
-            // is worth an honest number.
-            for id in folders {
-                do {
-                    _ = try store.load(id: id)
-                    status.designsDecoded += 1
-                } catch {
-                    let reason = String(describing: error).prefix(120)
-                    status.decodeErrors.append("\(id.uuidString.prefix(8)) \(reason)")
-                }
-            }
-            status.decodeErrors = Array(status.decodeErrors.prefix(3))
-
-            if let design {
-                status.designID = design.id.uuidString
-                status.designName = design.name
-                status.designSize = design.widgetSize.title
-                status.buildGeneration = design.buildGeneration
-                status.widgetRect = design.widgetRect
-
-                let fonts = (try? FileManager.default.contentsOfDirectory(
-                    at: store.fontsFolder(for: design.id), includingPropertiesForKeys: [.fileSizeKey]
-                )) ?? []
-                status.fontFilesOnDisk = fonts.count
-                status.fontBytesOnDisk = fonts.reduce(0) {
-                    $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-                }
-
-                let wallpaper = store.wallpaperURL(for: design.id)
-                status.wallpaperExists = FileManager.default.fileExists(atPath: wallpaper.path)
-                status.wallpaperBytes = fileSize(wallpaper)
-            }
-        }
-
         if let manifest {
             status.manifestFound = true
+            status.designName = "Wizard (bundled)"
+            status.designID = manifest.designID.uuidString
+            status.designSize = WidgetSizeOption.fullScreen.title
+            status.buildGeneration = manifest.buildGeneration
             status.laneCount = manifest.laneCount
             status.framesPerSecond = manifest.framesPerSecond
             status.loopFrameCount = manifest.loopFrameCount
             status.animationCrop = manifest.animationCrop
+            status.widgetRect = DeviceGeometry.widgetRect
             status.screenSize = manifest.screenSize
             status.manifestFontBytes = manifest.totalFontBytes
-            if status.widgetRect == .zero { status.widgetRect = manifest.widgetRect }
-        }
+            status.lanesRequested = fonts.requested
+            status.lanesRegistered = fonts.resolvable
+            status.lanesResolvable = fonts.resolvable
+            status.designFolders = 1
+            status.designsDecoded = 1
 
-        if let report {
-            status.lanesRequested = report.requested
-            status.lanesRegistered = report.registered
-            status.lanesResolvable = report.resolvable
-            status.fontFailures = Array(report.failures.prefix(4))
-        }
-
-        if let backdrop {
-            status.backdropExists = backdrop.exists
-            status.backdropBytes = backdrop.bytes
-            status.backdropDecoded = backdrop.decoded
+            if let url = PrebuiltDesign.backdropURL {
+                status.backdropExists = true
+                status.backdropBytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            }
+            status.wallpaperExists = PrebuiltDesign.wallpaperURL != nil
         }
 
         status.memoryFootprintMB = MemoryFootprint.megabytes
         WidgetStatusLog.write(status)
-
-        // Appended as well as written, so a later good render cannot erase the
-        // record of a bad one. `entry` versus `design` is the telling pair: a
-        // nil entry with a design present means the timeline is stale, and
-        // folders without decodes means the files were unreadable.
-        let entryID = entry.designID.map { String($0.uuidString.prefix(8)) } ?? "nil"
-        let drawnID = design.map { String($0.id.uuidString.prefix(8)) } ?? "nil"
         WidgetRenderLog.append("""
         \(status.succeeded ? "OK  " : "FAIL") \(entry.isPreview ? "GALLERY" : "PLACED ") \
-        entry=\(entryID) drew=\(drawnID) \
-        folders=\(status.designFolders) decoded=\(status.designsDecoded) \
+        bundled fonts=\(fonts.resolvable)/\(fonts.requested) backdrop=\(backdropLoaded) \
         \(Int(Self.lastRenderedSize.width))x\(Int(Self.lastRenderedSize.height)) \
         \(status.memoryFootprintMB)MB \(status.succeeded ? "" : status.outcome.prefix(48))
         """)
         return true
     }
 
-    private func fileSize(_ url: URL) -> Int {
-        (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-    }
-
-    /// The real size the system gave the widget, captured while drawing so the
-    /// report can compare it against the geometry table.
+    /// The real size the system gave the widget, captured while drawing.
     nonisolated(unsafe) static var lastRenderedSize: CGSize = .zero
-
-    private enum LoadOutcome {
-        case success(Loaded)
-        case failure(String)
-    }
-
-    private func load() -> LoadOutcome {
-        do {
-            let store = try DesignStore()
-
-            // The entry only records which design was current when the timeline
-            // was built, which may be long ago and may have been nothing at
-            // all. Trusting it meant one nil entry pinned the widget to
-            // "create a design" no matter what the store held afterwards, even
-            // across a remove and re-add. Resolving here costs one directory
-            // read and always reflects the container as it is now.
-            let design: DesignDocument
-            if let id = entry.designID, let fromEntry = try? store.load(id: id) {
-                design = fromEntry
-            } else if let resolved = ActiveDesign.resolve(in: store) {
-                Self.logger.info("entry had no usable design; resolved \(resolved.id.uuidString, privacy: .public) live")
-                design = resolved
-            } else {
-                return .failure("Open Motionary to create a design.")
-            }
-
-            let designID = design.id
-            guard let manifest = try? store.loadManifest(id: designID) else {
-                return .failure("\"\(design.name)\" has not been built yet. Open Motionary, open the design, and tap Build widget.")
-            }
-
-            // Reported by measurement, never by the family enum, which on iOS 27
-            // has named two different families for one widget rendering at an
-            // identical size. Only the tall portrait family is advertised now,
-            // so this is a sanity check rather than a branch: it should only
-            // fail on a system old enough to fall back to the large square.
-            let expected = design.widgetRect.size
-            let actual = CGSize(
-                width: Self.lastRenderedSize.width * DeviceGeometry.scale,
-                height: Self.lastRenderedSize.height * DeviceGeometry.scale
-            )
-            let sizeMatches = actual.width < 1 || actual.height < 1
-                || (abs(expected.width - actual.width) < expected.width * 0.05
-                    && abs(expected.height - actual.height) < expected.height * 0.05)
-
-            let report = RuntimeFontRegistry.register(manifest: manifest, store: store)
-
-            // The baked crop when this design has one, because decoding the
-            // full screen costs about 12.6MB and the widget shows only its own
-            // frame. On this phone the extension peaked at 46.7MB against a
-            // working reference of 43.3MB and the system dropped its render,
-            // which is what a black widget looks like from outside. The crop is
-            // padded at build time so it still covers the slightly larger frame
-            // the system actually hands over.
-            let backdropURL = store.widgetBackdropURL(for: designID)
-            let backdropRect = manifest.backdropRect
-            let usesBackdrop = backdropRect != nil
-                && FileManager.default.fileExists(atPath: backdropURL.path)
-            let imageURL = usesBackdrop ? backdropURL : store.wallpaperURL(for: designID)
-            let covered = usesBackdrop
-                ? backdropRect
-                : CGRect(origin: .zero, size: manifest.screenSize)
-            let maxPixels = Int(max(covered?.width ?? 0, covered?.height ?? 0))
-            let loadedImage = ImageLoader.load(at: imageURL, maxPixelSize: maxPixels)
-            let wallpaper = loadedImage.map { Image(decorative: $0, scale: 1) }
-            Self.logger.info("""
-            backdrop=\(usesBackdrop ? "cropped" : "fullscreen", privacy: .public) \
-            loaded=\(loadedImage != nil) \
-            size=\(loadedImage?.width ?? 0)x\(loadedImage?.height ?? 0)
-            """)
-
-            return .success(Loaded(
-                design: design,
-                manifest: manifest,
-                wallpaper: wallpaper,
-                fontsReady: report.isUsable,
-                icons: IconImageProvider(store: store),
-                report: report,
-                usesCroppedBackdrop: usesBackdrop,
-                wallpaperRect: covered,
-                backdropLoaded: loadedImage != nil,
-                sizeMatches: sizeMatches,
-                backdropFacts: (
-                    exists: FileManager.default.fileExists(atPath: imageURL.path),
-                    bytes: (try? imageURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0,
-                    decoded: CGSize(width: loadedImage?.width ?? 0, height: loadedImage?.height ?? 0)
-                )
-            ))
-        } catch {
-            return .failure(String(describing: error))
-        }
-    }
 }
 
 private struct PlaceholderView: View {
@@ -319,27 +133,14 @@ private struct PlaceholderView: View {
             Text(message)
                 .font(.system(size: 12, weight: .medium))
                 .multilineTextAlignment(.center)
-                // Stamped so a screenshot says whether this picture is the
-                // current render or an archived one. A failure recorded no
-                // report at all when the container was locked, so the report
-                // alone could not tell the two apart.
-                .overlay(alignment: .bottom) {
-                    Text("render \(Date().formatted(date: .omitted, time: .standard))")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .offset(y: 22)
-                }
-                // White, not `.secondary`: grey on the black container
-                // background is unreadable, which turns a diagnosable failure
-                // into a blank rectangle.
                 .foregroundStyle(.white)
                 .minimumScaleFactor(0.6)
                 .padding(.horizontal, 10)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
-        // Redaction turns text into a grey bar and an icon into a grey square,
-        // which is exactly how this failure looked on device: unreadable.
+        // Redaction turns text into a grey bar, which is how this failure first
+        // appeared: unreadable rather than merely unhappy.
         .unredacted()
     }
 }

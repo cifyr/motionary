@@ -571,47 +571,44 @@ struct ProgressOverlay: View {
     }
 }
 
-/// Renders the widget's own composition, animated, inside the app.
+/// Renders the widget's own composition, animated, from the bundle.
 ///
-/// Deliberately not a hand-built probe. Two of those have now pointed at the
-/// wrong thing because their glyph offsets were mine rather than the real
-/// ones. This is the production CompositionView with the production manifest
-/// and registry, so the only difference from the Home Screen is the process it
-/// runs in — which is exactly the variable worth isolating.
-///
-/// The widget preview elsewhere in the app plays the preview MP4 instead, so it
-/// never exercised the lane fonts at all.
+/// Same manifest, same fonts, same CompositionView the extension uses — the
+/// only difference is the process. The fonts come from `UIAppFonts` rather than
+/// runtime registration, which is the arrangement the Onewheel build uses on
+/// this phone and the one thing that differed while the animated layer refused
+/// to draw.
 private struct LaneGlyphProbe: View {
     let store: DesignStore
     let manifest: BuildManifest
     var design: DesignDocument?
 
-    @State private var report: RuntimeFontRegistry.Report?
     @State private var wallpaper: Image?
 
     private static let previewScale: CGFloat = 0.5
 
+    private var bundled: BuildManifest? { PrebuiltDesign.manifest }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Animated composition, drawn here in the app")
+            Text("Bundled animation, drawn here in the app")
                 .font(.caption.weight(.semibold))
 
-            if let report {
-                let viewport = design?.widgetRect ?? manifest.widgetRect
+            if let bundled {
+                let viewport = DeviceGeometry.widgetRect
                 let points = CGSize(
                     width: viewport.width / DeviceGeometry.scale,
                     height: viewport.height / DeviceGeometry.scale
                 )
+                let fonts = PrebuiltDesign.fontReport(for: bundled)
                 CompositionView(
-                    manifest: manifest,
-                    tiles: design?.tiles ?? [],
+                    manifest: bundled,
+                    tiles: [],
                     viewport: viewport,
                     wallpaper: wallpaper,
-                    wallpaperRect: manifest.backdropRect,
-                    isAnimated: report.isUsable
-                ) { tile, side in
-                    TileView(tile: tile, side: side, iconImage: nil)
-                }
+                    wallpaperRect: bundled.backdropRect,
+                    isAnimated: fonts.resolvable == fonts.requested
+                ) { _, _ in EmptyView() }
                 .frame(width: points.width, height: points.height)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .scaleEffect(Self.previewScale, anchor: .topLeading)
@@ -620,34 +617,20 @@ private struct LaneGlyphProbe: View {
                     height: points.height * Self.previewScale,
                     alignment: .topLeading
                 )
+                Text("Bundled fonts \(fonts.resolvable)/\(fonts.requested) resolvable.")
+                    .font(.caption2).foregroundStyle(.secondary)
             } else {
-                ProgressView().frame(height: 80)
+                Text("No bundled design in this build.")
+                    .font(.caption2).foregroundStyle(.orange)
             }
-
-            Text(caption).font(.caption2).foregroundStyle(.secondary)
         }
-        .task {
-            report = RuntimeFontRegistry.register(manifest: manifest, store: store)
-            loadBackdrop()
-        }
+        .task { loadBackdrop() }
     }
 
     private func loadBackdrop() {
-        let url = manifest.backdropRect == nil
-            ? store.wallpaperURL(for: manifest.designID)
-            : store.widgetBackdropURL(for: manifest.designID)
-        let longest = manifest.backdropRect.map { Int(max($0.width, $0.height)) }
-            ?? Int(max(manifest.screenSize.width, manifest.screenSize.height))
-        wallpaper = ImageLoader.load(at: url, maxPixelSize: longest)
-            .map { Image(decorative: $0, scale: 1) }
-    }
-
-    private var caption: String {
-        guard let report else { return "Registering…" }
-        guard report.isUsable else {
-            return "Fonts unusable here too: \(report.resolvable)/\(report.requested) resolvable."
-        }
-        return "Animating here means the fonts are sound and the widget's process is the problem. "
-            + "Still or black here means the fonts are, and the widget was never the issue."
+        guard let bundled, let url = PrebuiltDesign.backdropURL ?? PrebuiltDesign.wallpaperURL else { return }
+        let longest = bundled.backdropRect.map { Int(max($0.width, $0.height)) }
+            ?? Int(max(bundled.screenSize.width, bundled.screenSize.height))
+        wallpaper = ImageLoader.load(at: url, maxPixelSize: longest).map { Image(decorative: $0, scale: 1) }
     }
 }
