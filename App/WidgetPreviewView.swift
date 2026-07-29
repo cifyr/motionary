@@ -22,12 +22,13 @@ struct WidgetPreviewView: View {
             VStack(spacing: 16) {
                 if let manifest, let report {
                     GeometryReader { geometry in
-                        let aspect = manifest.widgetRect.width / manifest.widgetRect.height
+                        let viewport = design.widgetRect
+                        let aspect = viewport.width / viewport.height
                         let width = min(geometry.size.width, geometry.size.height * aspect)
 
                         LoopingCompositionView(
                             screenSize: manifest.screenSize,
-                            viewport: manifest.widgetRect,
+                            viewport: viewport,
                             tiles: design.tiles,
                             videoURL: store.previewVideoURL(for: design.id),
                             wallpaper: wallpaper

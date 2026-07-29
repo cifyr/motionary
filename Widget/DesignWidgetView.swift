@@ -22,7 +22,12 @@ struct DesignWidgetView: View {
             CompositionView(
                 manifest: loaded.manifest,
                 tiles: loaded.design.tiles,
-                viewport: loaded.manifest.widgetRect,
+                // The design's current rect, not the one baked at build time,
+                // so a calibration fix or a nudge takes effect immediately
+                // instead of requiring every font to be regenerated. The glyphs
+                // place the animated crop in screen coordinates, so moving the
+                // viewport moves the whole composition together.
+                viewport: loaded.design.widgetRect,
                 wallpaper: loaded.wallpaper,
                 isAnimated: loaded.fontsReady
             ) { tile, side in

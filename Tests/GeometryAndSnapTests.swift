@@ -53,17 +53,45 @@ final class GeometryAndSnapTests: XCTestCase {
         XCTAssertEqual(DeviceGeometry.screenPixelSize.height * pointsPerPixel, 874, accuracy: 0.001)
     }
 
-    /// If a family's tabulated width were wrong, width-derived scaling would
-    /// drift content by this much over the widget's height. The test documents
-    /// the sensitivity that motivated pinning the scale.
-    func testWidthErrorWouldDriftContentSignificantly() {
-        let tabulated = WidgetSizeOption.large.pointSize.width
-        let measuredPortraitWidth = WidgetSizeOption.fullScreen.pointSize.width
-        let ratio = measuredPortraitWidth / tabulated
-        XCTAssertLessThan(ratio, 1, "the portrait family is narrower than the tabulated standard families")
+    /// Measured from a placed large widget on an iPhone 17 Pro. Apple's
+    /// documented 364x382 at a 19pt margin is wrong for this device, and the
+    /// 7.33pt origin error showed up as the composition sitting ~22px right.
+    func testLargeWidgetMatchesTheMeasuredRect() {
+        let rect = DeviceGeometry.widgetRect(size: .large, slot: .topLeft)
+        XCTAssertEqual(rect.minX, 79)
+        XCTAssertEqual(rect.minY, 272)
+        XCTAssertEqual(rect.width, 1049)
+        XCTAssertEqual(rect.height, 1090)
 
-        let drift = WidgetSizeOption.large.pointSize.height * (1 - ratio)
-        XCTAssertGreaterThan(drift, 5, "a width error this size is visible, so scale must not depend on it")
+        XCTAssertEqual(rect.minX / DeviceGeometry.scale, 26.33, accuracy: 0.01)
+        XCTAssertNotEqual(rect.minX / DeviceGeometry.scale, 19, "the documented margin is not this device's")
+    }
+
+    /// Side margins should come out symmetric; an asymmetric result means the
+    /// measured width and margin disagree.
+    func testStandardFamiliesAreHorizontallyCentred() {
+        for size in [WidgetSizeOption.medium, .large] {
+            let rect = DeviceGeometry.widgetRect(size: size, slot: .topLeft)
+            let rightMargin = DeviceGeometry.screenPixelSize.width - rect.maxX
+            XCTAssertEqual(rect.minX, rightMargin, accuracy: 1, "\(size.title) is not centred")
+        }
+    }
+
+    /// The two small slots must mirror each other and not overlap.
+    func testSmallSlotsMirrorWithoutOverlapping() {
+        let left = DeviceGeometry.widgetRect(size: .small, slot: WidgetSlot(column: 0, row: 0))
+        let right = DeviceGeometry.widgetRect(size: .small, slot: WidgetSlot(column: 1, row: 0))
+        XCTAssertLessThan(left.maxX, right.minX)
+        XCTAssertEqual(left.minX, DeviceGeometry.screenPixelSize.width - right.maxX, accuracy: 1)
+    }
+
+    /// Large spans two grid units vertically, so two stacked small slots plus
+    /// the gutter must reconstruct its measured height exactly.
+    func testGridUnitsReconstructTheMeasuredLargeHeight() {
+        let small = DeviceGeometry.widgetRect(size: .small, slot: WidgetSlot(column: 0, row: 0))
+        let secondRow = DeviceGeometry.widgetRect(size: .small, slot: WidgetSlot(column: 0, row: 1))
+        let large = DeviceGeometry.widgetRect(size: .large, slot: .topLeft)
+        XCTAssertEqual(secondRow.maxY - small.minY, large.height, accuracy: 0.01)
     }
 
     // MARK: - Crop derivation

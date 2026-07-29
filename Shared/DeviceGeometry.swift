@@ -22,12 +22,8 @@ enum WidgetSizeOption: String, Codable, CaseIterable, Identifiable, Sendable {
 
     /// Point size of the widget on the calibrated device.
     var pointSize: CGSize {
-        switch self {
-        case .small: CGSize(width: 170, height: 170)
-        case .medium: CGSize(width: 364, height: 170)
-        case .large: CGSize(width: 364, height: 382)
-        case .fullScreen: CGSize(width: 358, height: 544)
-        }
+        let pixels = DeviceGeometry.pixelSize(of: self)
+        return CGSize(width: pixels.width / DeviceGeometry.scale, height: pixels.height / DeviceGeometry.scale)
     }
 
     /// How many slot positions exist across and down the Home Screen.
@@ -61,13 +57,15 @@ struct WidgetSlot: Codable, Equatable, Hashable, Sendable {
     static let topLeft = WidgetSlot(column: 0, row: 0)
 }
 
-/// Pixel geometry of the one calibrated device.
+/// Pixel geometry of the one calibrated device, an iPhone 17 Pro at standard
+/// Display Zoom.
 ///
-/// Only the full-screen slot is measured: it is inherited from the Onewheel
-/// build that was verified against a physical iPhone 17 Pro. Every other family
-/// is derived from Apple's published point sizes for a 402x874pt screen and
-/// should be treated as a starting point, which is why each design carries its
-/// own nudge offset.
+/// Everything here is in device pixels because that is what was measured.
+/// Apple's published widget point sizes do not match this device: the large
+/// family measures 349.67x363.33pt against a documented 364x382, and sits
+/// 26.33pt from the edge rather than 19. Using the documented numbers put the
+/// origin 7.33pt too far left, which showed up as the composition sitting about
+/// 22px to the right inside the widget.
 enum DeviceGeometry {
     static let scale: CGFloat = 3
     static let screenPixelSize = CGSize(width: 1206, height: 2622)
@@ -75,21 +73,38 @@ enum DeviceGeometry {
         CGSize(width: screenPixelSize.width / scale, height: screenPixelSize.height / scale)
     }
 
-    /// Measured origin of the tall portrait widget in the top slot, in pixels.
+    /// Measured against a physical iPhone 17 Pro by the Onewheel build.
     static let fullScreenOrigin = CGPoint(x: 66, y: 270)
+    private static let fullScreenSize = CGSize(width: 1074, height: 1632)
 
-    /// Horizontal inset of the standard families, in points.
-    private static let standardSideMargin: CGFloat = 19
-    /// Vertical distance between consecutive widget rows, in points. Derived
-    /// from a 170pt small widget plus the Home Screen's inter-widget gap.
-    private static let rowPitch: CGFloat = 191
-    /// Top of the first widget row, in points, shared with the measured
-    /// full-screen origin.
-    private static var firstRowTop: CGFloat { fullScreenOrigin.y / scale }
+    /// Measured from a placed large widget on the simulator: the dark widget
+    /// body against the system wallpaper, edge to edge.
+    private static let standardSideMargin: CGFloat = 79
+    private static let firstRowTop: CGFloat = 272
+    private static let largeSize = CGSize(width: 1049, height: 1090)
+
+    /// Derived from the large measurement by treating the large family as two
+    /// grid units in each axis. `largeWidth = 2*unit + horizontalGutter` and
+    /// `largeHeight = 2*unit + verticalGutter`, taking the horizontal gutter to
+    /// equal the side margin as iOS layouts generally do. Small and medium are
+    /// therefore predictions, not measurements, and remain nudgeable.
+    private static let horizontalGutter: CGFloat = standardSideMargin
+    private static var unit: CGFloat { (largeSize.width - horizontalGutter) / 2 }
+    private static var verticalGutter: CGFloat { largeSize.height - 2 * unit }
+    private static var rowPitch: CGFloat { unit + verticalGutter }
+
+    static func pixelSize(of size: WidgetSizeOption) -> CGSize {
+        switch size {
+        case .small: CGSize(width: unit, height: unit)
+        case .medium: CGSize(width: largeSize.width, height: unit)
+        case .large: largeSize
+        case .fullScreen: fullScreenSize
+        }
+    }
 
     /// The widget's pixel rect on the calibrated screen, before any nudge.
     static func widgetRect(size: WidgetSizeOption, slot: WidgetSlot) -> CGRect {
-        let points = size.pointSize
+        let pixels = pixelSize(of: size)
         let grid = size.slotGrid
 
         let column = min(max(slot.column, 0), grid.columns - 1)
@@ -98,26 +113,21 @@ enum DeviceGeometry {
         let x: CGFloat
         switch size {
         case .fullScreen:
-            x = fullScreenOrigin.x / scale
+            x = fullScreenOrigin.x
         case .small:
-            // Two horizontal positions: flush left column pair, or right pair.
+            // Two horizontal positions: flush to the left margin or the right.
             x = column == 0
                 ? standardSideMargin
-                : screenPointSize.width - standardSideMargin - points.width
+                : screenPixelSize.width - standardSideMargin - pixels.width
         case .medium, .large:
             x = standardSideMargin
         }
 
         let y: CGFloat = size == .fullScreen
-            ? fullScreenOrigin.y / scale
+            ? fullScreenOrigin.y
             : firstRowTop + CGFloat(row) * rowPitch
 
-        return CGRect(
-            x: x * scale,
-            y: y * scale,
-            width: points.width * scale,
-            height: points.height * scale
-        )
+        return CGRect(origin: CGPoint(x: x, y: y), size: pixels)
     }
 
     /// Widget rect with the design's manual correction applied and clamped to
