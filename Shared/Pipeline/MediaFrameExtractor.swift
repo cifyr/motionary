@@ -150,19 +150,25 @@ struct MediaFrameExtractor {
     /// that was picked rather than the clip bleeding past the edges of the one
     /// place it is ever seen.
     let clipRect: CGRect?
+    /// Corner radius of `clipRect`, in screen pixels. The widget's corners are
+    /// rounded, so a square confinement leaves the clip showing in the corners
+    /// of the wallpaper where the background should be.
+    let clipCornerRadius: CGFloat
 
     init(
         url: URL,
         screenSize: CGSize = DeviceGeometry.screenPixelSize,
         transform: MediaTransform = .identity,
         background: CGImage? = nil,
-        clipRect: CGRect? = nil
+        clipRect: CGRect? = nil,
+        clipCornerRadius: CGFloat = 0
     ) {
         self.url = url
         self.screenSize = screenSize
         self.transform = transform
         self.background = background
         self.clipRect = clipRect
+        self.clipCornerRadius = clipCornerRadius
     }
 
     var kind: MediaKind { MediaKind.detect(at: url) }
@@ -499,7 +505,14 @@ struct MediaFrameExtractor {
 
         if let clipRect {
             context.saveGState()
-            context.clip(to: flipped(clipRect))
+            let bounds = flipped(clipRect)
+            let radius = min(clipCornerRadius, min(bounds.width, bounds.height) / 2)
+            if radius > 0 {
+                context.addPath(CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil))
+                context.clip()
+            } else {
+                context.clip(to: bounds)
+            }
             context.draw(image, in: flipped(placed))
             context.restoreGState()
         } else {

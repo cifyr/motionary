@@ -237,7 +237,7 @@ struct LayoutEditor: View {
                 if background == nil {
                     Rectangle()
                 } else {
-                    Rectangle()
+                    RoundedRectangle(cornerRadius: design.effectiveCornerRadius * unit, style: .continuous)
                         .frame(width: frame.width * unit, height: frame.height * unit)
                         .offset(x: frame.minX * unit, y: frame.minY * unit)
                 }
@@ -287,7 +287,7 @@ struct LayoutEditor: View {
     /// rather than against the whole screen.
     private var widgetFrame: some View {
         let rect = design.widgetRect
-        return RoundedRectangle(cornerRadius: 24 * Self.zoom, style: .continuous)
+        return RoundedRectangle(cornerRadius: design.effectiveCornerRadius * unit, style: .continuous)
             .strokeBorder(.white.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
             .frame(width: rect.width * unit, height: rect.height * unit)
             .offset(x: rect.minX * unit, y: rect.minY * unit)
@@ -454,6 +454,27 @@ struct LayoutEditor: View {
                         set: { design.mediaTransform.fillsBackground = $0 }
                     ))
                 }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Corner radius")
+                    Spacer()
+                    Text("\(Int(design.effectiveCornerRadius))px")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                Slider(
+                    value: Binding(
+                        get: { design.effectiveCornerRadius },
+                        set: { design.widgetCornerRadius = $0 }
+                    ),
+                    in: 0 ... 160
+                )
+                Text("iOS does not publish the widget's corner radius. Match it here if the clip shows in the corners.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Toggle("Snap to grid", isOn: $design.snapEnabled)
