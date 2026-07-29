@@ -109,6 +109,9 @@ struct BundleWriter {
         try copy(designFolder.appendingPathComponent("manifest.json"), to: "prebuilt-manifest.json")
         try copy(designFolder.appendingPathComponent("widget-backdrop.jpg"), to: "prebuilt-backdrop.jpg")
         try copy(designFolder.appendingPathComponent("wallpaper.png"), to: "prebuilt-wallpaper.png")
+        // The app plays this rather than drawing the lane fonts: only the
+        // widget renderer advances timer text.
+        try copy(designFolder.appendingPathComponent("preview.mp4"), to: "prebuilt-preview.mp4")
 
         let names = fonts.map(\.lastPathComponent)
         try rewriteAppFonts(at: projectRoot.appendingPathComponent("Widget/Info.plist"), fonts: names)
