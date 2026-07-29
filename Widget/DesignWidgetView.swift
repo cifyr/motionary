@@ -196,7 +196,8 @@ struct DesignWidgetView: View {
         let entryID = entry.designID.map { String($0.uuidString.prefix(8)) } ?? "nil"
         let drawnID = design.map { String($0.id.uuidString.prefix(8)) } ?? "nil"
         WidgetRenderLog.append("""
-        \(status.succeeded ? "OK  " : "FAIL") entry=\(entryID) drew=\(drawnID) \
+        \(status.succeeded ? "OK  " : "FAIL") \(entry.isPreview ? "GALLERY" : "PLACED ") \
+        entry=\(entryID) drew=\(drawnID) \
         folders=\(status.designFolders) decoded=\(status.designsDecoded) \
         \(Int(Self.lastRenderedSize.width))x\(Int(Self.lastRenderedSize.height)) \
         \(status.memoryFootprintMB)MB \(status.succeeded ? "" : status.outcome.prefix(48))
