@@ -81,10 +81,12 @@ struct FontSetGenerator {
         guard crop.width >= 2, crop.height >= 2 else {
             throw GeneratorError.emptyCrop(design: design.name)
         }
-        guard spec.divides(loopFrameCount: design.loopFrameCount) else {
-            throw GeneratorError.loopDoesNotDivideCycle(
-                loopFrames: design.loopFrameCount,
-                totalFrames: spec.totalFrames
+        // A loop that does not divide the cycle is not an error: it costs one
+        // jump every 30 seconds at the wrap, which is often invisible. Say so
+        // and carry on rather than refusing to build.
+        if !spec.divides(loopFrameCount: design.loopFrameCount) {
+            Self.logger.warning(
+                "loop of \(design.loopFrameCount) does not divide \(spec.totalFrames); the 30s wrap will jump"
             )
         }
         guard let templateURL = bundle.url(forResource: Self.templateResourceName, withExtension: "ttf") else {
@@ -157,6 +159,18 @@ struct FontSetGenerator {
         onStage(.writingWallpaper)
         let wallpaper = try FrameEncoder.pngData(frames[0])
         try wallpaper.write(to: store.wallpaperURL(for: design.id), options: .atomic)
+
+        // A 1206x2622 PNG costs about 12.6MB decompressed, and a widget
+        // extension has far less headroom than that once 30MB of fonts are
+        // mapped. The widget never draws anything outside its own frame, so
+        // bake that crop and let it decode a fraction of the pixels.
+        let widgetRect = design.widgetRect.integral
+        if let cropped = frames[0].cropping(to: widgetRect) {
+            let data = try FrameEncoder.jpegData(cropped, quality: 0.9)
+                ?? FrameEncoder.pngData(cropped)
+            try data.write(to: store.widgetBackdropURL(for: design.id), options: .atomic)
+            Self.logger.info("widget backdrop \(Int(widgetRect.width))x\(Int(widgetRect.height)), \(data.count) bytes")
+        }
 
         // The in-app preview plays this rather than the lane fonts: only the
         // system widget renderer advances timer text fast enough for those.

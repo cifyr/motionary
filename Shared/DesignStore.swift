@@ -77,6 +77,12 @@ struct DesignStore {
         folder(for: id).appendingPathComponent("wallpaper.png")
     }
 
+    /// The wallpaper cropped to the widget's frame, so the extension decodes
+    /// only the pixels it draws.
+    func widgetBackdropURL(for id: UUID) -> URL {
+        folder(for: id).appendingPathComponent("widget-backdrop.jpg")
+    }
+
     func previewVideoURL(for id: UUID) -> URL {
         folder(for: id).appendingPathComponent("preview.mp4")
     }

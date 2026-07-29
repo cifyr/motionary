@@ -41,7 +41,11 @@ struct DesignWidgetView: View {
             let _ = Self.logger.info(
                 "WIDGET OK design=\(loaded.design.name, privacy: .public) family=\(family.rawValue) fonts=\(loaded.fontsReady)"
             )
-            let _ = record(outcome: "ok", design: loaded.design, report: loaded.report)
+            let _ = record(
+                outcome: loaded.backdropLoaded ? "ok" : "ok, but the backdrop image did not load",
+                design: loaded.design,
+                report: loaded.report
+            )
             CompositionView(
                 manifest: loaded.manifest,
                 tiles: loaded.design.tiles,
@@ -52,6 +56,7 @@ struct DesignWidgetView: View {
                 // viewport moves the whole composition together.
                 viewport: loaded.design.widgetRect,
                 wallpaper: loaded.wallpaper,
+                wallpaperIsWidgetSized: loaded.usesCroppedBackdrop,
                 isAnimated: loaded.fontsReady
             ) { tile, side in
                 Link(destination: LaunchLink.url(for: tile.appID)) {
@@ -76,6 +81,8 @@ struct DesignWidgetView: View {
         let fontsReady: Bool
         let icons: IconImageProvider
         let report: RuntimeFontRegistry.Report
+        let usesCroppedBackdrop: Bool
+        let backdropLoaded: Bool
     }
 
     @discardableResult
@@ -129,8 +136,17 @@ struct DesignWidgetView: View {
             }
 
             let report = RuntimeFontRegistry.register(manifest: manifest, store: store)
-            let wallpaperURL = store.wallpaperURL(for: designID)
-            let wallpaper = UIImage(contentsOfFile: wallpaperURL.path).map { Image(uiImage: $0) }
+
+            let backdropURL = store.widgetBackdropURL(for: designID)
+            let usesBackdrop = FileManager.default.fileExists(atPath: backdropURL.path)
+            let imageURL = usesBackdrop ? backdropURL : store.wallpaperURL(for: designID)
+            let loadedImage = UIImage(contentsOfFile: imageURL.path)
+            let wallpaper = loadedImage.map { Image(uiImage: $0) }
+            Self.logger.info("""
+            backdrop=\(usesBackdrop ? "cropped" : "fullscreen", privacy: .public) \
+            loaded=\(loadedImage != nil) \
+            size=\(Int(loadedImage?.size.width ?? 0))x\(Int(loadedImage?.size.height ?? 0))
+            """)
 
             return .success(Loaded(
                 design: design,
@@ -138,7 +154,9 @@ struct DesignWidgetView: View {
                 wallpaper: wallpaper,
                 fontsReady: report.isUsable,
                 icons: IconImageProvider(store: store),
-                report: report
+                report: report,
+                usesCroppedBackdrop: usesBackdrop,
+                backdropLoaded: loadedImage != nil
             ))
         } catch {
             return .failure(String(describing: error))
