@@ -18,6 +18,9 @@ struct LayoutEditor: View {
     @State private var scaleBase: Double?
     @State private var tileBase: CGPoint?
     @State private var showingCatalogue = false
+    /// Applied to tiles added later, so turning labels off once does not have
+    /// to be repeated for every app placed after it.
+    @State private var labelsDefault = true
 
     /// Points per screen pixel, so the canvas is the phone at a readable size.
     private static let zoom: CGFloat = 0.62
@@ -67,6 +70,21 @@ struct LayoutEditor: View {
         ZStack(alignment: .topLeading) {
             Color.black
             if let poster {
+                // The generator fills whatever the clip does not cover with a
+                // dimmed blow-up of the same frame rather than black. Drawing
+                // black here instead - which this did - meant the wallpaper
+                // that came out did not look like the one that was positioned.
+                if design.mediaTransform.fillsBackground {
+                    let fill = MediaFrameExtractor.backdropPlacement(
+                        sourceSize: sourceSize,
+                        screenSize: model.screenPixelSize
+                    )
+                    Image(decorative: poster, scale: 1)
+                        .resizable()
+                        .opacity(MediaFrameExtractor.backdropOpacity)
+                        .frame(width: fill.width * unit, height: fill.height * unit)
+                        .offset(x: fill.minX * unit, y: fill.minY * unit)
+                }
                 let rect = placement
                 Image(decorative: poster, scale: 1)
                     .resizable()
@@ -231,7 +249,21 @@ struct LayoutEditor: View {
                 .buttonStyle(.link)
             }
 
+            Toggle("Fill behind the clip", isOn: Binding(
+                get: { design.mediaTransform.fillsBackground },
+                set: { design.mediaTransform.fillsBackground = $0 }
+            ))
+
             Toggle("Snap to grid", isOn: $design.snapEnabled)
+
+            Toggle("Icon labels", isOn: Binding(
+                get: { design.tiles.allSatisfy(\.showsLabel) && !design.tiles.isEmpty },
+                set: { on in
+                    labelsDefault = on
+                    for index in design.tiles.indices { design.tiles[index].showsLabel = on }
+                }
+            ))
+            .disabled(design.tiles.isEmpty)
 
             if let selection, let index = design.tiles.firstIndex(where: { $0.id == selection }) {
                 Divider()
@@ -299,6 +331,7 @@ struct LayoutEditor: View {
             center: CGPoint(x: frame.midX, y: frame.midY),
             size: 180
         )
+        tile.showsLabel = labelsDefault
         design.tiles.append(tile)
         selection = tile.id
     }
