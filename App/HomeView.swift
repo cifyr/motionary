@@ -37,6 +37,7 @@ struct HomeView: View {
             EditorView(design: design).environmentObject(library)
         }
         .task {
+            library.enableDiagnosticsIfRequested()
             guard ProcessInfo.processInfo.arguments.contains("-MotionaryOpenEditor") else { return }
             debugEditing = library.activeDesign
         }

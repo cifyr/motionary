@@ -148,6 +148,52 @@ struct LibraryView: View {
                 Text("Tap a design to edit it. Swipe right to show it on the home and in the widget.")
             }
 
+#if DEBUG
+            Section {
+                Toggle("Widget diagnostics", isOn: Binding(
+                    get: { library.diagnosticsEnabled },
+                    set: { library.diagnosticsEnabled = $0 }
+                ))
+            } footer: {
+                Text("Overlays font-resolution state on the widget. Debug builds only.")
+            }
+#endif
+
+            Section {
+                if let store = library.store, let status = WidgetStatusLog.read(store: store) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(
+                            status.succeeded ? "Widget rendered" : "Widget could not render",
+                            systemImage: status.succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+                        )
+                        .foregroundStyle(status.succeeded ? .green : .orange)
+                        .font(.subheadline.weight(.semibold))
+
+                        Text(status.summary)
+                            .font(.footnote)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text("\(status.family) · \(status.recordedAt.formatted(date: .omitted, time: .standard))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                        ForEach(status.failures, id: \.self) { failure in
+                            Text(failure).font(.caption2).monospaced().foregroundStyle(.red)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                } else {
+                    Text("No widget has rendered yet. Add a Motionary widget to the Home Screen.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Widget status")
+            } footer: {
+                Text("Reported by the widget itself the last time the system drew it.")
+            }
+
             Section("About") {
                 LabeledContent("Version", value: Bundle.main.shortVersion)
                 LabeledContent("Designs", value: "\(library.designs.count)")

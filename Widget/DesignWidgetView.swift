@@ -1,12 +1,15 @@
 import CoreText
 import SwiftUI
 import WidgetKit
+import os
 
 /// Renders one design inside whatever family the system asked for.
 ///
 /// Everything comes from the shared container at render time, which is what
 /// lets a single installed extension present designs it never shipped with.
 struct DesignWidgetView: View {
+    private static let logger = Logger(subsystem: "com.caden.Motionary", category: "Widget")
+
     @Environment(\.widgetFamily) private var family
     let entry: DesignEntry
 
@@ -14,9 +17,7 @@ struct DesignWidgetView: View {
         content
             .overlay(alignment: .bottom) {
 #if DEBUG
-                if ProcessInfo.processInfo.environment["MOTIONARY_DIAGNOSE"] != nil || diagnosticsEnabled {
-                    FontDiagnostics(entry: entry)
-                }
+                FontDiagnostics(entry: entry)
 #endif
             }
             .widgetAccentable(false)
@@ -37,6 +38,10 @@ struct DesignWidgetView: View {
     private var content: some View {
         switch load() {
         case .success(let loaded):
+            let _ = Self.logger.info(
+                "WIDGET OK design=\(loaded.design.name, privacy: .public) family=\(family.rawValue) fonts=\(loaded.fontsReady)"
+            )
+            let _ = record(outcome: "ok", design: loaded.design, report: loaded.report)
             CompositionView(
                 manifest: loaded.manifest,
                 tiles: loaded.design.tiles,
@@ -57,6 +62,10 @@ struct DesignWidgetView: View {
             }
         case .failure(let message):
             PlaceholderView(message: message)
+                .onAppear {
+                    Self.logger.error("WIDGET FAILURE: \(message, privacy: .public)")
+                    record(outcome: message, design: nil, report: nil)
+                }
         }
     }
 
@@ -66,6 +75,32 @@ struct DesignWidgetView: View {
         let wallpaper: Image?
         let fontsReady: Bool
         let icons: IconImageProvider
+        let report: RuntimeFontRegistry.Report
+    }
+
+    @discardableResult
+    private func record(
+        outcome: String,
+        design: DesignDocument?,
+        report: RuntimeFontRegistry.Report?
+    ) -> Bool {
+        let blinkResolved = CTFontCopyPostScriptName(
+            CTFontCreateWithName(FontSetGenerator.blinkFontResourceName as CFString, 12, nil)
+        ) as String == FontSetGenerator.blinkFontResourceName
+
+        WidgetStatusLog.write(WidgetStatus(
+            recordedAt: Date(),
+            family: "\(family)",
+            outcome: outcome,
+            designName: design?.name,
+            designSize: design?.widgetSize.title,
+            laneFontResolved: (report?.resolvable ?? 0) > 0,
+            blinkFontResolved: blinkResolved,
+            lanesRequested: report?.requested ?? 0,
+            lanesResolvable: report?.resolvable ?? 0,
+            failures: Array((report?.failures ?? []).prefix(3))
+        ))
+        return true
     }
 
     private enum LoadOutcome {
@@ -86,7 +121,11 @@ struct DesignWidgetView: View {
             // silently mis-cropped widget is harder to diagnose than a label.
             let expected = WidgetFamilyCompatibility.sizeOption(for: family)
             guard design.widgetSize == expected else {
-                return .failure("\"\(design.name)\" is cut for \(design.widgetSize.title). Add the \(design.widgetSize.title) widget instead.")
+                return .failure(
+                    "\"\(design.name)\" is cut for \(design.widgetSize.title), but this is the "
+                    + "\(expected.title) widget. Remove this one and add a \(design.widgetSize.title) "
+                    + "widget, or change the design's size and rebuild."
+                )
             }
 
             let report = RuntimeFontRegistry.register(manifest: manifest, store: store)
@@ -98,7 +137,8 @@ struct DesignWidgetView: View {
                 manifest: manifest,
                 wallpaper: wallpaper,
                 fontsReady: report.isUsable,
-                icons: IconImageProvider(store: store)
+                icons: IconImageProvider(store: store),
+                report: report
             ))
         } catch {
             return .failure(String(describing: error))
@@ -110,17 +150,22 @@ private struct PlaceholderView: View {
     let message: String
 
     var body: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "wand.and.sparkles")
-                .font(.title2)
-                .foregroundStyle(.secondary)
+        VStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.title3)
+                .foregroundStyle(.yellow)
             Text(message)
-                .font(.caption2)
+                .font(.system(size: 12, weight: .medium))
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
+                // White, not `.secondary`: grey on the black container
+                // background is unreadable, which turns a diagnosable failure
+                // into a blank rectangle.
+                .foregroundStyle(.white)
+                .minimumScaleFactor(0.6)
+                .padding(.horizontal, 10)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
     }
 }
 
@@ -134,24 +179,54 @@ private struct FontDiagnostics: View {
 
     var body: some View {
         let reference = TimerFontSpec.cycleAlignedReference()
-        VStack(spacing: 1) {
+        VStack(spacing: 2) {
             Text(reference, style: .timer)
-                .font(.system(size: 15, weight: .bold, design: .monospaced))
+                .font(.system(size: 22, weight: .bold, design: .monospaced))
                 .foregroundStyle(.green)
 
             if let name = laneFontName {
+                // Drawn in a lane font, so this glyph IS an animation frame.
+                // If it changes between two screenshots the animation is
+                // advancing; if it is frozen, nothing is driving the timer.
                 Text(reference, style: .timer)
-                    .font(.custom(name, size: 15))
+                    .font(.custom(name, size: 90))
                     .foregroundStyle(.yellow)
-                Text(resolves(name) ? "R" : "X")
-                    .font(.system(size: 11, weight: .heavy))
-                    .foregroundStyle(resolves(name) ? .green : .red)
+                    .frame(height: 90)
+
+                // The blink font drives sub-second lane switching. If it falls
+                // back, the picture can only step once per glyph — two seconds
+                // — which reads as barely animating.
+                Text(reference, style: .timer)
+                    .font(.custom(FontSetGenerator.blinkFontResourceName, size: 22))
+                    .foregroundStyle(.cyan)
+
+                HStack(spacing: 6) {
+                    flag("L", ok: resolves(name))
+                    flag("B", ok: resolves(FontSetGenerator.blinkFontResourceName))
+                    Text("\(laneCount) lanes")
+                        .font(.system(size: 15, weight: .heavy))
+                        .foregroundStyle(.white)
+                }
             } else {
                 Text("no manifest").font(.system(size: 10)).foregroundStyle(.red)
             }
         }
         .padding(3)
         .background(.black.opacity(0.75))
+    }
+
+    private func flag(_ label: String, ok: Bool) -> some View {
+        Text("\(label):\(ok ? "R" : "X")")
+            .font(.system(size: 15, weight: .heavy))
+            .foregroundStyle(ok ? .green : .red)
+    }
+
+    private var laneCount: Int {
+        guard let id = entry.designID,
+              let store = try? DesignStore(),
+              let manifest = try? store.loadManifest(id: id)
+        else { return 0 }
+        return manifest.laneCount
     }
 
     private var laneFontName: String? {
