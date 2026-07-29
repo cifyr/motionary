@@ -317,6 +317,12 @@ struct LayoutEditor: View {
         return VStack(alignment: .leading, spacing: 10) {
             Text(AppCatalog.app(id: tile.appID)?.name ?? tile.appID)
                 .font(.subheadline.weight(.semibold))
+            if AppCatalog.app(id: tile.appID)?.canLaunch == false {
+                Text("Cannot be opened from a widget - no URL scheme exists for it. It still draws.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             LabeledContent("Size") {
                 Slider(
@@ -389,6 +395,14 @@ private struct CataloguePicker: View {
                                 Circle().fill(app.tint).frame(width: 14, height: 14)
                                 Text(app.name)
                                 Spacer()
+                                // Some Apple apps publish no URL scheme, so a
+                                // tile for one can never open anything. Better
+                                // said here than discovered by tapping it.
+                                if !app.canLaunch {
+                                    Image(systemName: "hand.raised.slash")
+                                        .foregroundStyle(.secondary)
+                                        .help("\(app.name) cannot be opened from a widget: it publishes no URL scheme.")
+                                }
                             }
                             .contentShape(Rectangle())
                         }
