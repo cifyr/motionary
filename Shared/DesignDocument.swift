@@ -130,6 +130,13 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     var tiles: [PlacedTile] = []
     var snapEnabled: Bool = true
 
+    /// A chosen background image, by filename inside the design's folder.
+    ///
+    /// Without one the composition fills whatever the clip does not cover with
+    /// a dimmed blow-up of the clip itself, which suits footage that nearly
+    /// fills the screen and looks like a mistake when it does not.
+    var backgroundName: String?
+
     /// Bumped whenever a regenerated font set is written, so the widget can
     /// tell a stale render from a current one.
     var buildGeneration: Int = 0
@@ -226,6 +233,7 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         animationCrop = try container.decode(CGRect.self, forKey: .animationCrop)
         tiles = try container.decodeIfPresent([PlacedTile].self, forKey: .tiles) ?? []
         snapEnabled = try container.decodeIfPresent(Bool.self, forKey: .snapEnabled) ?? true
+        backgroundName = try container.decodeIfPresent(String.self, forKey: .backgroundName)
         buildGeneration = try container.decodeIfPresent(Int.self, forKey: .buildGeneration) ?? 0
     }
 

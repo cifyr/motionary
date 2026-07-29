@@ -198,7 +198,15 @@ struct StudioPipeline: Sendable {
         let extractor = MediaFrameExtractor(
             url: store.sourceVideoURL(for: design),
             screenSize: model.screenPixelSize,
-            transform: design.mediaTransform
+            transform: design.mediaTransform,
+            // The same background the build will use, or the motion would be
+            // measured against a different picture than gets made.
+            background: design.backgroundName.flatMap {
+                ImageLoader.load(
+                    at: store.backgroundURL(for: design.id, name: $0),
+                    maxPixelSize: Int(model.screenPixelSize.height)
+                )
+            }
         )
         let sample = try await extractor.composedFrames(
             startFrame: 0,

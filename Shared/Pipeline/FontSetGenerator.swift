@@ -101,7 +101,16 @@ struct FontSetGenerator {
         """)
 
         onStage(.decoding(progress: 0))
-        let extractor = MediaFrameExtractor(url: store.sourceVideoURL(for: design), transform: design.mediaTransform)
+        let extractor = MediaFrameExtractor(
+            url: store.sourceVideoURL(for: design),
+            transform: design.mediaTransform,
+            background: design.backgroundName.flatMap {
+                ImageLoader.load(
+                    at: store.backgroundURL(for: design.id, name: $0),
+                    maxPixelSize: Int(max(DeviceGeometry.screenPixelSize.width, DeviceGeometry.screenPixelSize.height))
+                )
+            }
+        )
         let frames = try await extractor.composedFrames(
             startFrame: design.loopStartFrame,
             count: design.loopFrameCount,
