@@ -32,7 +32,15 @@ final class DesignLibrary: ObservableObject {
     private static let logger = Logger(subsystem: "com.caden.Motionary", category: "Library")
 
     @Published private(set) var designs: [DesignDocument] = []
+
+    /// Fatal only: the app group is missing, so nothing can be read or written.
+    /// This one hides the library and disables importing, so a recoverable
+    /// slip must never be reported here — a single failed save used to set it
+    /// and left importing switched off for the rest of the session.
     @Published var loadFailure: String?
+
+    /// A single operation went wrong. Worth saying, not worth disabling on.
+    @Published var operationFailure: String?
 
     /// The one selection that drives both the app's home and the widget.
     @Published var activeDesignID: UUID? {
@@ -94,7 +102,7 @@ final class DesignLibrary: ObservableObject {
             try store.save(design)
             reload()
         } catch {
-            loadFailure = "Could not save \"\(design.name)\": \(error)"
+            operationFailure = "Could not save \"\(design.name)\": \(error)"
             Self.logger.error("save failed for \(design.id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
         }
     }
@@ -105,7 +113,7 @@ final class DesignLibrary: ObservableObject {
             try store.archive(id: design.id)
             reload()
         } catch {
-            loadFailure = "Could not remove \"\(design.name)\": \(error)"
+            operationFailure = "Could not remove \"\(design.name)\": \(error)"
         }
     }
 
@@ -128,7 +136,7 @@ final class DesignLibrary: ObservableObject {
             activeDesignID = manifest.designID
             pendingPreviewDesignID = manifest.designID
         case .failure(let message):
-            loadFailure = message
+            operationFailure = message
         }
     }
 #endif

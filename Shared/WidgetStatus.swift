@@ -27,6 +27,15 @@ struct WidgetStatus: Codable, Equatable, Sendable {
     var designSize: String?
     var buildGeneration = 0
 
+    /// Why there is no design to draw. "No design" used to report nothing at
+    /// all, which is the one case where the report most needs to speak up:
+    /// an empty store and a store full of designs that will not decode look
+    /// identical from the outside.
+    var designFolders = 0
+    var designsDecoded = 0
+    var decodeErrors: [String] = []
+    var activeSelection: String?
+
     var manifestFound = false
     var laneCount = 0
     var framesPerSecond = 0
@@ -88,8 +97,14 @@ struct WidgetStatus: Codable, Equatable, Sendable {
         rendered      \(Int(renderedSize.width))x\(Int(renderedSize.height)) pt
         expected      \(Int(widgetRect.width / 3))x\(Int(widgetRect.height / 3)) pt
 
-        DESIGN
+        STORE
         container     \(containerReachable ? "reachable" : "UNREACHABLE")
+        folders       \(designFolders)
+        decoded       \(designsDecoded)
+        selection     \(activeSelection ?? "none")
+        errors        \(decodeErrors.isEmpty ? "none" : decodeErrors.joined(separator: " | "))
+
+        DESIGN
         design        \(designName ?? "none") [\(designSize ?? "?")] gen \(buildGeneration)
         id            \(designID ?? "none")
         manifest      \(manifestFound ? "found" : "MISSING")

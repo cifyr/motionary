@@ -31,15 +31,18 @@ struct DesignWidgetView: View {
     private var content: some View {
         switch load() {
         case .success(let loaded) where !loaded.backdropLoaded:
+            // Recorded while the body is evaluated, never from `.onAppear`:
+            // WidgetKit renders to a snapshot and does not reliably run
+            // appearance callbacks, so a failure recorded there never
+            // overwrote the last success. The report then said "ok" while the
+            // widget on screen showed an error.
+            let _ = record(
+                outcome: loaded.outcome, design: loaded.design, manifest: loaded.manifest,
+                report: loaded.report, backdrop: loaded.backdropFacts
+            )
             PlaceholderView(
                 message: "Could not load the picture for \"\(loaded.design.name)\". Open Motionary and rebuild this design."
             )
-            .onAppear {
-                record(
-                    outcome: loaded.outcome, design: loaded.design, manifest: loaded.manifest,
-                    report: loaded.report, backdrop: loaded.backdropFacts
-                )
-            }
 
         case .success(let loaded):
             let _ = Self.logger.info(
@@ -68,11 +71,9 @@ struct DesignWidgetView: View {
                 .accessibilityLabel("Open \(AppCatalog.app(id: tile.appID)?.name ?? tile.appID)")
             }
         case .failure(let message):
+            let _ = Self.logger.error("WIDGET FAILURE: \(message, privacy: .public)")
+            let _ = record(outcome: message, design: nil, manifest: nil, report: nil)
             PlaceholderView(message: message)
-                .onAppear {
-                    Self.logger.error("WIDGET FAILURE: \(message, privacy: .public)")
-                    record(outcome: message, design: nil, manifest: nil, report: nil)
-                }
         }
     }
 
@@ -119,6 +120,27 @@ struct DesignWidgetView: View {
 
         if let store = try? DesignStore() {
             status.containerReachable = true
+            status.activeSelection = ActiveDesign.identifier?.uuidString
+            let folders = ((try? FileManager.default.contentsOfDirectory(atPath: store.root.path)) ?? [])
+                .compactMap { UUID(uuidString: $0) }
+            status.designFolders = folders.count
+
+            // Only swept when there is nothing to draw. Decoding every design
+            // on a good render would spend the extension's budget to learn
+            // what it already knows.
+            if design == nil {
+                for id in folders {
+                    do {
+                        _ = try store.load(id: id)
+                        status.designsDecoded += 1
+                    } catch {
+                        let reason = String(describing: error).prefix(120)
+                        status.decodeErrors.append("\(id.uuidString.prefix(8)) \(reason)")
+                    }
+                }
+                status.decodeErrors = Array(status.decodeErrors.prefix(3))
+            }
+
             if let design {
                 status.designID = design.id.uuidString
                 status.designName = design.name

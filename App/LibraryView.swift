@@ -94,6 +94,14 @@ struct LibraryView: View {
             } message: {
                 Text(importFailure ?? "")
             }
+            .alert("Something went wrong", isPresented: Binding(
+                get: { library.operationFailure != nil },
+                set: { if !$0 { library.operationFailure = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(library.operationFailure ?? "")
+            }
             .onChange(of: pickerItem) { _, item in
                 guard let item else { return }
                 Task { await importPicked(item) }
@@ -217,11 +225,26 @@ struct LibraryView: View {
             importing = false
             pickerItem = nil
         }
-        guard let data = try? await item.loadTransferable(type: Data.self) else {
-            importFailure = String(describing: ImportError.noMediaData)
-            return
+        do {
+            // A file first, then raw bytes. Photos vends a video as a file, and
+            // asking for `Data` pulls the whole clip into memory, which is why
+            // longer videos came back empty. The error used to be discarded by
+            // `try?` and reported as "no data", which said nothing about why.
+            if let picked = try await item.loadTransferable(type: PickedFile.self) {
+                defer { try? FileManager.default.removeItem(at: picked.url) }
+                let data = try Data(contentsOf: picked.url, options: .mappedIfSafe)
+                Self.logger.info("picked \(picked.originalName, privacy: .public), \(data.count) bytes")
+                await ingest(data: data, preferredName: picked.originalName)
+                return
+            }
+            guard let data = try await item.loadTransferable(type: Data.self) else {
+                throw ImportError.noMediaData(offered: item.supportedContentTypes)
+            }
+            await ingest(data: data)
+        } catch {
+            importFailure = String(describing: error)
+            Self.logger.error("photos import failed: \(String(describing: error), privacy: .public)")
         }
-        await ingest(data: data)
     }
 
     /// A file chosen in Files is security scoped, so it has to be copied while
@@ -297,10 +320,51 @@ struct LibraryView: View {
     }
 
     private enum ImportError: Error, CustomStringConvertible {
-        case noMediaData
+        case noMediaData(offered: [UTType])
+
+        /// Names what Photos actually offered. "No data" on its own gave no way
+        /// to tell a refused item from an unsupported one.
         var description: String {
-            "The picked item did not provide any data. Choose a video or an animated GIF."
+            switch self {
+            case .noMediaData(let offered):
+                let list = offered.isEmpty ? "nothing" : offered.map(\.identifier).joined(separator: ", ")
+                return "Photos would not hand this item over. It offered: \(list). "
+                    + "Choose a video or an animated GIF."
+            }
         }
+    }
+}
+
+/// Receives a picked item as a file rather than as bytes in memory.
+///
+/// The copy is needed because the URL handed to the closure is only valid for
+/// the duration of the call.
+private struct PickedFile: Transferable {
+    let url: URL
+    let originalName: String
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(importedContentType: .movie) { try copy($0) }
+        FileRepresentation(importedContentType: .image) { try copy($0) }
+    }
+
+    private static func copy(_ received: ReceivedTransferredFile) throws -> PickedFile {
+        let original = received.file.lastPathComponent
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("import-\(UUID().uuidString)-\(original)")
+        try? FileManager.default.removeItem(at: destination)
+        do {
+            try FileManager.default.copyItem(at: received.file, to: destination)
+        } catch {
+            throw NSError(
+                domain: "com.caden.Motionary.import", code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey: "Could not copy \(original) out of Photos: \(error)",
+                    NSUnderlyingErrorKey: error,
+                ]
+            )
+        }
+        return PickedFile(url: destination, originalName: original)
     }
 }
 
