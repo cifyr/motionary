@@ -51,6 +51,14 @@ struct DeviceModel: Identifiable, Hashable, Sendable {
     let screenPixelSize: CGSize
     let widgetOrigin: CGPoint
     let widgetPixelSize: CGSize
+    /// Corner radius of the widget, in screen pixels.
+    ///
+    /// Estimated rather than measured: iOS derives a widget's corners from its
+    /// container and does not publish the number. It matters because the clip
+    /// is confined to this shape when a background is chosen, so a radius that
+    /// is too small leaves the clip's square corners showing in the wallpaper
+    /// where the background should be. Adjustable per design for that reason.
+    var widgetCornerRadius: CGFloat = 78
 
     var widgetRect: CGRect { CGRect(origin: widgetOrigin, size: widgetPixelSize) }
 
@@ -71,7 +79,8 @@ struct DeviceModel: Identifiable, Hashable, Sendable {
         scale: 3,
         screenPixelSize: CGSize(width: 1206, height: 2622),
         widgetOrigin: CGPoint(x: 66, y: 270),
-        widgetPixelSize: CGSize(width: 1074, height: 1632)
+        widgetPixelSize: CGSize(width: 1074, height: 1632),
+        widgetCornerRadius: 78
     )
 
     static let all: [DeviceModel] = [.iPhone17Pro]

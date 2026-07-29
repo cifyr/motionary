@@ -110,7 +110,8 @@ struct FontSetGenerator {
                     maxPixelSize: Int(max(DeviceGeometry.screenPixelSize.width, DeviceGeometry.screenPixelSize.height))
                 )
             },
-            clipRect: design.backgroundName == nil ? nil : design.widgetRect
+            clipRect: design.backgroundName == nil ? nil : design.widgetRect,
+            clipCornerRadius: design.effectiveCornerRadius
         )
         let frames = try await extractor.composedFrames(
             startFrame: design.loopStartFrame,

@@ -137,6 +137,14 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     /// fills the screen and looks like a mistake when it does not.
     var backgroundName: String?
 
+    /// Overrides the model's estimated widget corner radius, in screen pixels.
+    /// Only the phone can settle this one, so it is adjustable.
+    var widgetCornerRadius: CGFloat?
+
+    var effectiveCornerRadius: CGFloat {
+        widgetCornerRadius ?? DeviceGeometry.model.widgetCornerRadius
+    }
+
     /// Bumped whenever a regenerated font set is written, so the widget can
     /// tell a stale render from a current one.
     var buildGeneration: Int = 0
@@ -234,6 +242,7 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         tiles = try container.decodeIfPresent([PlacedTile].self, forKey: .tiles) ?? []
         snapEnabled = try container.decodeIfPresent(Bool.self, forKey: .snapEnabled) ?? true
         backgroundName = try container.decodeIfPresent(String.self, forKey: .backgroundName)
+        widgetCornerRadius = try container.decodeIfPresent(CGFloat.self, forKey: .widgetCornerRadius)
         buildGeneration = try container.decodeIfPresent(Int.self, forKey: .buildGeneration) ?? 0
     }
 
