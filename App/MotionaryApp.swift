@@ -77,6 +77,12 @@ final class DesignLibrary: ObservableObject {
     func reload() {
         guard let store else { return }
         designs = store.loadAll()
+        // Designs built before the widget-sized backdrop existed would make the
+        // extension decode a full-screen image; cropping one here is cheaper
+        // than demanding a rebuild.
+        if BackdropMigration.run(store: store, designs: designs) > 0 {
+            WidgetCenterBridge.reloadAll()
+        }
         let selection = activeDesignID?.uuidString ?? "none"
         let resolved = activeDesign?.name ?? "none"
         Self.logger.info("loaded \(self.designs.count) designs; selection=\(selection, privacy: .public) resolved=\(resolved, privacy: .public)")

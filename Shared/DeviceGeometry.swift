@@ -77,11 +77,14 @@ enum DeviceGeometry {
     static let fullScreenOrigin = CGPoint(x: 66, y: 270)
     private static let fullScreenSize = CGSize(width: 1074, height: 1632)
 
-    /// Measured from a placed large widget on the simulator: the dark widget
-    /// body against the system wallpaper, edge to edge.
+    /// Width and origin measured from a placed large widget against the system
+    /// wallpaper; the height comes from the size the system actually hands the
+    /// view, which the widget reports back. A screenshot measurement had put it
+    /// at 1090, two pixels short, because the antialiased edge reads as
+    /// background.
     private static let standardSideMargin: CGFloat = 79
     private static let firstRowTop: CGFloat = 272
-    private static let largeSize = CGSize(width: 1049, height: 1090)
+    private static let largeSize = CGSize(width: 1049, height: 1095)
 
     /// Derived from the large measurement by treating the large family as two
     /// grid units in each axis. `largeWidth = 2*unit + horizontalGutter` and

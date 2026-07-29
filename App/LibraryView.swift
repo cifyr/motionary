@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 import os
 
@@ -150,26 +151,28 @@ struct LibraryView: View {
 
             Section {
                 if let store = library.store, let status = WidgetStatusLog.read(store: store) {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Label(
-                            status.succeeded ? "Widget rendered" : "Widget could not render",
+                            status.headline,
                             systemImage: status.succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
                         )
-                        .foregroundStyle(status.succeeded ? .green : .orange)
+                        .foregroundStyle(status.succeeded ? Color.green : Color.orange)
                         .font(.subheadline.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
 
-                        Text(status.summary)
-                            .font(.footnote)
-                            .foregroundStyle(.primary)
+                        // Plain text so it can be copied and pasted rather than
+                        // photographed and squinted at.
+                        Text(status.report)
+                            .font(.system(size: 10, design: .monospaced))
                             .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
 
-                        Text("\(status.family) · \(status.recordedAt.formatted(date: .omitted, time: .standard))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-
-                        ForEach(status.failures, id: \.self) { failure in
-                            Text(failure).font(.caption2).monospaced().foregroundStyle(.red)
+                        Button {
+                            UIPasteboard.general.string = status.report
+                        } label: {
+                            Label("Copy report", systemImage: "doc.on.doc")
                         }
+                        .font(.footnote)
                     }
                     .padding(.vertical, 2)
                 } else {
@@ -180,7 +183,7 @@ struct LibraryView: View {
             } header: {
                 Text("Widget status")
             } footer: {
-                Text("Reported by the widget itself the last time the system drew it.")
+                Text("Written by the widget itself each time the system draws it.")
             }
 
             Section("About") {
