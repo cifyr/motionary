@@ -97,11 +97,32 @@ struct StudioPipeline: Sendable {
         let spec = design.spec
         let natural = max(1, Int((summary.duration * Double(spec.framesPerSecond)).rounded()))
         design.loopFrameCount = spec.seamlessLoopLength(nearest: natural, maximum: 96)
+        try store.save(design)
 
+        let poster = try? await extractor.posterFrame()
+        return Prepared(design: design, store: store, poster: poster)
+    }
+
+    func generate(
+        _ prepared: Prepared,
+        loopSeconds: Double?,
+        onStage: @escaping @Sendable (Stage) -> Void
+    ) async throws -> Built {
+        var design = prepared.design
+        let store = prepared.store
+
+        // Measured here rather than at import, because the editor moves and
+        // resizes the clip afterwards: a crop detected against the old
+        // placement would animate a region the picture has left.
+        let extractor = MediaFrameExtractor(
+            url: store.sourceVideoURL(for: design),
+            screenSize: model.screenPixelSize,
+            transform: design.mediaTransform
+        )
         let sample = try await extractor.composedFrames(
             startFrame: 0,
             count: min(design.loopFrameCount, 16),
-            frameRate: spec.framesPerSecond
+            frameRate: design.spec.framesPerSecond
         )
         // The detector works across the whole screen and the motion it finds
         // can sit entirely outside the widget frame, where nothing is ever
@@ -119,19 +140,7 @@ struct StudioPipeline: Sendable {
         // After the planner, never before: a loop sized against the wrong
         // frame rate plays at the wrong speed.
         design.retuneLoop()
-        try store.save(design)
 
-        let poster = try? await extractor.posterFrame()
-        return Prepared(design: design, store: store, poster: poster)
-    }
-
-    func generate(
-        _ prepared: Prepared,
-        loopSeconds: Double?,
-        onStage: @escaping @Sendable (Stage) -> Void
-    ) async throws -> Built {
-        var design = prepared.design
-        let store = prepared.store
         if let loopSeconds, loopSeconds > 0 {
             design.loopFrameCount = design.spec.seamlessLoopLength(
                 nearest: max(1, Int((loopSeconds * Double(design.spec.framesPerSecond)).rounded())),
@@ -186,10 +195,12 @@ struct StudioPipeline: Sendable {
             iconsFolder: prepared.store.root.deletingLastPathComponent()
                 .appendingPathComponent("Icons", isDirectory: true)
         )
+        let installer = DeviceInstaller(projectRoot: projectRoot)
+        try installer.regenerateProject { onStage(.installing($0)) }
+
         guard let deviceID else { return built }
 
-        try DeviceInstaller(projectRoot: projectRoot)
-            .installAndLaunch(deviceID: deviceID) { onStage(.installing($0)) }
+        try installer.installAndLaunch(deviceID: deviceID) { onStage(.installing($0)) }
         return built
     }
 }

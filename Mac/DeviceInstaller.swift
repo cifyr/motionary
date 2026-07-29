@@ -110,14 +110,19 @@ struct DeviceInstaller {
         }
     }
 
-    /// Regenerates the project, builds for the device, installs, and launches.
+    /// The project file lists the design's fonts by name, so it has to be
+    /// regenerated whenever they change - otherwise the next build, by anyone
+    /// and from anywhere, fails on the previous design's filenames.
+    func regenerateProject(progress: @escaping @Sendable (String) -> Void) throws {
+        progress("Regenerating the project")
+        try run("/usr/bin/env", ["xcodegen", "generate"])
+    }
+
+    /// Builds for the device, installs, and launches.
     func installAndLaunch(
         deviceID: String,
         progress: @escaping @Sendable (String) -> Void
     ) throws {
-        progress("Regenerating the project")
-        try run("/usr/bin/env", ["xcodegen", "generate"])
-
         progress("Building for the device")
         try run("/usr/bin/xcrun", [
             "xcodebuild",
