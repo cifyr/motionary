@@ -225,6 +225,23 @@ struct LibraryView: View {
             }
 
             Section {
+                let history = library.store.map { WidgetRenderLog.read(store: $0) } ?? []
+                if history.isEmpty {
+                    Text("No renders recorded yet.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                } else {
+                    Text(history.reversed().joined(separator: "\n"))
+                        .font(.system(size: 9, design: .monospaced))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            } header: {
+                Text("Recent renders")
+            } footer: {
+                Text("Newest first. Every render the widget attempts, so a good one cannot erase the record of a bad one.")
+            }
+
+            Section {
                 Button {
                     restartWidget()
                 } label: {
@@ -260,6 +277,7 @@ struct LibraryView: View {
         let resolved = library.activeDesign?.id
         ActiveDesign.identifier = resolved
         WidgetStatusLog.clear(store: store)
+        WidgetRenderLog.clear(store: store)
         library.reload()
         WidgetCenterBridge.reloadAll()
 

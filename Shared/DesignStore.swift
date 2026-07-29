@@ -43,14 +43,21 @@ struct DesignStore {
     /// widget found no design and drew the placeholder, then a later render
     /// with the phone in hand read the same design and reported ok. The report
     /// and the picture disagreed because they were made under different locks.
-    static let writingOptions: Data.WritingOptions = [
-        .atomic, .completeFileProtectionUntilFirstUserAuthentication,
-    ]
+    /// `none`, not merely `untilFirstUserAuthentication`. A widget is refreshed
+    /// in lock states this code cannot observe, and every stricter class has
+    /// some state where the file is not there. The content is a wallpaper and
+    /// generated fonts — there is nothing here worth protecting, and the cost
+    /// of guessing wrong is a widget that silently draws the placeholder.
+    ///
+    /// It also fixes the diagnostics. A locked render could not write its
+    /// report either, so the only reports ever seen came from unlocked renders
+    /// and always said ok, while the picture on screen came from a failed one.
+    static let writingOptions: Data.WritingOptions = [.atomic, .noFileProtection]
 
     /// Computed rather than stored: `[FileAttributeKey: Any]` is not Sendable,
     /// so a static instance of it cannot be shared across concurrency domains.
     static var directoryAttributes: [FileAttributeKey: Any] {
-        [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
+        [.protectionKey: FileProtectionType.none]
     }
 
     /// Relaxes protection on everything already written, so designs built

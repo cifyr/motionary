@@ -35,6 +35,10 @@ struct WidgetStatus: Codable, Equatable, Sendable {
     var designsDecoded = 0
     var decodeErrors: [String] = []
     var activeSelection: String?
+    /// Which container the extension actually opened. `devicectl` lists this
+    /// app group as holding nothing but Library, so it is worth stating rather
+    /// than assuming both sides landed in the same place.
+    var storePath: String?
 
     var manifestFound = false
     var laneCount = 0
@@ -102,6 +106,7 @@ struct WidgetStatus: Codable, Equatable, Sendable {
         folders       \(designFolders)
         decoded       \(designsDecoded)
         selection     \(activeSelection ?? "none")
+        path          \(storePath ?? "unknown")
         errors        \(decodeErrors.isEmpty ? "none" : decodeErrors.joined(separator: " | "))
 
         DESIGN
@@ -168,6 +173,47 @@ enum WidgetStatusLog {
         decoder.dateDecodingStrategy = .iso8601
         guard let data = try? Data(contentsOf: url(in: store)) else { return nil }
         return try? decoder.decode(WidgetStatus.self, from: data)
+    }
+}
+
+/// A short, append-only trace of recent renders.
+///
+/// The status file holds only the most recent render, and the most recent
+/// render is not the one on screen. A failing render and a succeeding one
+/// happen seconds apart here, so the succeeding one overwrote the evidence
+/// every time and every report ever seen said "ok" while the widget showed a
+/// placeholder. Keeping a history shows both, and which came last.
+enum WidgetRenderLog {
+    private static let logger = Logger(subsystem: "com.caden.Motionary", category: "RenderLog")
+    private static let filename = "widget-renders.log"
+    private static let keep = 24
+
+    private static func url(in store: DesignStore) -> URL {
+        store.root.deletingLastPathComponent().appendingPathComponent(filename)
+    }
+
+    static func append(_ line: String) {
+        guard let store = try? DesignStore() else { return }
+        let stamp = Date().formatted(date: .omitted, time: .standard)
+        var lines = read(store: store)
+        lines.append("\(stamp)  \(line)")
+        let text = lines.suffix(keep).joined(separator: "\n")
+        do {
+            try Data(text.utf8).write(to: url(in: store), options: DesignStore.writingOptions)
+        } catch {
+            logger.error("could not append render: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    static func read(store: DesignStore) -> [String] {
+        guard let data = try? Data(contentsOf: url(in: store)),
+              let text = String(data: data, encoding: .utf8)
+        else { return [] }
+        return text.split(separator: "\n").map(String.init)
+    }
+
+    static func clear(store: DesignStore) {
+        try? FileManager.default.removeItem(at: url(in: store))
     }
 }
 

@@ -121,6 +121,7 @@ struct DesignWidgetView: View {
         if let store = try? DesignStore() {
             status.containerReachable = true
             status.activeSelection = ActiveDesign.identifier?.uuidString
+            status.storePath = store.root.path
             let folders = ((try? FileManager.default.contentsOfDirectory(atPath: store.root.path)) ?? [])
                 .compactMap { UUID(uuidString: $0) }
             status.designFolders = folders.count
@@ -187,6 +188,19 @@ struct DesignWidgetView: View {
 
         status.memoryFootprintMB = MemoryFootprint.megabytes
         WidgetStatusLog.write(status)
+
+        // Appended as well as written, so a later good render cannot erase the
+        // record of a bad one. `entry` versus `design` is the telling pair: a
+        // nil entry with a design present means the timeline is stale, and
+        // folders without decodes means the files were unreadable.
+        let entryID = entry.designID.map { String($0.uuidString.prefix(8)) } ?? "nil"
+        let drawnID = design.map { String($0.id.uuidString.prefix(8)) } ?? "nil"
+        WidgetRenderLog.append("""
+        \(status.succeeded ? "OK  " : "FAIL") entry=\(entryID) drew=\(drawnID) \
+        folders=\(status.designFolders) decoded=\(status.designsDecoded) \
+        \(Int(Self.lastRenderedSize.width))x\(Int(Self.lastRenderedSize.height)) \
+        \(status.memoryFootprintMB)MB \(status.succeeded ? "" : status.outcome.prefix(48))
+        """)
         return true
     }
 
