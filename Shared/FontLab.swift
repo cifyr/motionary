@@ -175,9 +175,23 @@ enum FontLab {
             familyBase: manifest.fontFamilyBase,
             lane: 0
         )
-        let source = (try? Data(contentsOf: laneZero))
+        var sourceFamily = "\(manifest.fontFamilyBase)0"
+        var source = (try? Data(contentsOf: laneZero))
             ?? Bundle.main.url(forResource: name, withExtension: "ttf").flatMap { try? Data(contentsOf: $0) }
-        let sourceFamily = "\(manifest.fontFamilyBase)0"
+        // Last fallback is the shaping template, which is always in the
+        // extension's bundle. Without it the lab cannot run until a design has
+        // been bundled on a Mac, and the routes exist to find out whether that
+        // step can be skipped - so needing its output first made the lab useless
+        // exactly when it was most wanted.
+        if source == nil,
+           let template = Bundle.main.url(
+               forResource: FontSetGenerator.templateResourceName,
+               withExtension: "ttf"
+           ),
+           let data = try? Data(contentsOf: template) {
+            source = data
+            sourceFamily = LaneFontBuilder.templateFamily
+        }
         let outcomes = activeRoutes.map {
             prepare(route: $0, source: source, sourceFamily: sourceFamily)
         }

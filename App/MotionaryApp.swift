@@ -27,6 +27,11 @@ struct MotionaryApp: App {
             FontLab.isEnabled = wanted
             changed = true
         }
+        if let wanted = WidgetArchiveFontEmbedding.launchOverride(in: arguments),
+           wanted != WidgetArchiveFontEmbedding.isEnabled {
+            WidgetArchiveFontEmbedding.isEnabled = wanted
+            changed = true
+        }
         if changed { WidgetCenterBridge.reloadAll() }
     }
 
