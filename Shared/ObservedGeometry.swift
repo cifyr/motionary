@@ -14,10 +14,19 @@ struct ObservedGeometry: Codable, Equatable, Sendable {
     var updatedAt = Date()
 
     func size(for option: WidgetSizeOption) -> CGSize? {
-        guard let points = sizes[option.rawValue], points.width > 1, points.height > 1 else {
-            return nil
-        }
+        guard let points = sizes[option.rawValue], points.width > 1, points.height > 1,
+              Self.isPlausible(points)
+        else { return nil }
         return points
+    }
+
+    /// Widgets are wide or tall, never square. Checked on read as well as on
+    /// write, because a value stored before the check existed would otherwise
+    /// keep sizing every crop.
+    static func isPlausible(_ size: CGSize) -> Bool {
+        guard size.height > 0 else { return false }
+        let aspect = size.width / size.height
+        return aspect < 0.95 || aspect > 1.05
     }
 }
 
@@ -37,14 +46,18 @@ enum ObservedGeometryStore {
         return observed
     }
 
+    static func reset() {
+        guard let store = try? DesignStore() else { return }
+        try? FileManager.default.removeItem(at: url(in: store))
+        logger.info("discarded learned widget sizes")
+    }
+
     /// Records a family's real point size. Writes only on a change, since the
     /// widget calls this on every render.
     static func record(size: CGSize, for option: WidgetSizeOption) {
         guard size.width > 1, size.height > 1, let store = try? DesignStore() else { return }
-        // Widgets are wide or tall, never square. A square reading means a
-        // preview or a mid-transition layout, not the real family.
-        let aspect = size.width / size.height
-        guard aspect < 0.95 || aspect > 1.05 else {
+        // A square reading means a preview or a mid-transition layout.
+        guard ObservedGeometry.isPlausible(size) else {
             logger.info("ignoring square \(Int(size.width))x\(Int(size.height)) for \(option.rawValue, privacy: .public)")
             return
         }

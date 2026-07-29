@@ -192,7 +192,9 @@ struct DesignWidgetView: View {
         do {
             let store = try DesignStore()
             let design = try store.load(id: designID)
-            let manifest = try store.loadManifest(id: designID)
+            guard let manifest = try? store.loadManifest(id: designID) else {
+                return .failure("\"\(design.name)\" has not been built yet. Open Motionary, open the design, and tap Build widget.")
+            }
 
             // A design cut for another family still draws: the composition is
             // positioned in screen space, so a different family is a different

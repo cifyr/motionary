@@ -359,3 +359,45 @@ final class GeometryAndSnapTests: XCTestCase {
         }
     }
 }
+
+/// The self-calibration learned `large = 359x359` from a widget gallery preview
+/// and sized every crop from it. Squares are refused on read as well as write,
+/// because a value stored before the check existed would otherwise persist.
+final class ObservedGeometryTests: XCTestCase {
+    func testSquareReadingsAreRejected() {
+        var observed = ObservedGeometry()
+        observed.sizes["large"] = CGSize(width: 359, height: 359)
+        XCTAssertNil(observed.size(for: .large), "a square is not a widget shape")
+    }
+
+    func testRealShapesAreAccepted() {
+        var observed = ObservedGeometry()
+        observed.sizes["large"] = CGSize(width: 359, height: 548)
+        observed.sizes["medium"] = CGSize(width: 359, height: 169)
+        XCTAssertEqual(observed.size(for: .large), CGSize(width: 359, height: 548))
+        XCTAssertEqual(observed.size(for: .medium), CGSize(width: 359, height: 169))
+    }
+
+    func testDegenerateReadingsAreRejected() {
+        var observed = ObservedGeometry()
+        observed.sizes["small"] = .zero
+        observed.sizes["medium"] = CGSize(width: 359, height: 0)
+        XCTAssertNil(observed.size(for: .small))
+        XCTAssertNil(observed.size(for: .medium))
+    }
+
+    func testPlausibilityBracketsTheSquare() {
+        XCTAssertFalse(ObservedGeometry.isPlausible(CGSize(width: 100, height: 100)))
+        XCTAssertFalse(ObservedGeometry.isPlausible(CGSize(width: 102, height: 100)))
+        XCTAssertTrue(ObservedGeometry.isPlausible(CGSize(width: 359, height: 169)))
+        XCTAssertTrue(ObservedGeometry.isPlausible(CGSize(width: 359, height: 548)))
+    }
+
+    /// An unusable reading must fall back to the table rather than to nothing.
+    func testUnusableReadingFallsBackToTheTable() {
+        XCTAssertEqual(
+            DeviceGeometry.tabulatedPixelSize(of: .large),
+            CGSize(width: 1049, height: 1095)
+        )
+    }
+}

@@ -186,6 +186,28 @@ struct LibraryView: View {
                 Text("Written by the widget itself each time the system draws it.")
             }
 
+            Section {
+                let learned = ObservedGeometryStore.load().sizes.sorted { $0.key < $1.key }
+                if learned.isEmpty {
+                    Text("No widget sizes learned yet. Place a widget and they appear here.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                } else {
+                    ForEach(learned, id: \.key) { entry in
+                        LabeledContent(entry.key, value: "\(Int(entry.value.width))x\(Int(entry.value.height)) pt")
+                            .font(.caption)
+                    }
+                    Button("Forget learned sizes", role: .destructive) {
+                        ObservedGeometryStore.reset()
+                        WidgetCenterBridge.reloadAll()
+                    }
+                    .font(.caption)
+                }
+            } header: {
+                Text("Measured widget sizes")
+            } footer: {
+                Text("Taken from the system when a widget draws, and preferred over the built-in table.")
+            }
+
             Section("About") {
                 LabeledContent("Version", value: Bundle.main.shortVersion)
                 LabeledContent("Designs", value: "\(library.designs.count)")
@@ -320,7 +342,7 @@ private struct DesignRow: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("Not built yet")
+                    Text("Not built yet - open and tap Build widget")
                         .font(.caption2)
                         .foregroundStyle(.orange)
                 }
