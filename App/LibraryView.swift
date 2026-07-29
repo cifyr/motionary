@@ -264,7 +264,7 @@ struct LibraryView: View {
                     // the widget is black, the font is sound and the widget's
                     // environment is not; if it is black here too, the fonts
                     // this app generates are what iOS 27 will not draw.
-                    LaneGlyphProbe(store: store, manifest: manifest)
+                    LaneGlyphProbe(store: store, manifest: manifest, design: active)
                 }
 
                 Button {
@@ -571,88 +571,83 @@ struct ProgressOverlay: View {
     }
 }
 
-/// Draws a lane glyph beside the bundled template glyph.
+/// Renders the widget's own composition, animated, inside the app.
 ///
-/// The widget is black with the animated layer on and correct with it off, so
-/// the fault is the fonts or the way they are drawn. Two squares separate
-/// those: the template ships with the app and comes from the Onewheel build
-/// that works on this phone, so it is a known-good font drawn by exactly this
-/// code. If the template draws and the generated one does not, generation is
-/// at fault. If neither draws, the drawing is.
+/// Deliberately not a hand-built probe. Two of those have now pointed at the
+/// wrong thing because their glyph offsets were mine rather than the real
+/// ones. This is the production CompositionView with the production manifest
+/// and registry, so the only difference from the Home Screen is the process it
+/// runs in — which is exactly the variable worth isolating.
+///
+/// The widget preview elsewhere in the app plays the preview MP4 instead, so it
+/// never exercised the lane fonts at all.
 private struct LaneGlyphProbe: View {
     let store: DesignStore
     let manifest: BuildManifest
+    var design: DesignDocument?
 
     @State private var report: RuntimeFontRegistry.Report?
-    @State private var templateRegistered = false
+    @State private var wallpaper: Image?
 
-    private var laneZero: String {
-        LaneFontBuilder.postScriptName(family: manifest.fontFamilyBase, lane: 0)
-    }
-
-    private static let templatePostScriptName = "CatFont0-Regular"
+    private static let previewScale: CGFloat = 0.5
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Animation font probe").font(.caption.weight(.semibold))
+            Text("Animated composition, drawn here in the app")
+                .font(.caption.weight(.semibold))
 
-            HStack(spacing: 10) {
-                square(label: "Generated", font: laneZero, ready: report?.isUsable == true)
-                square(label: "Template", font: Self.templatePostScriptName, ready: templateRegistered)
+            if let report {
+                let viewport = design?.widgetRect ?? manifest.widgetRect
+                let points = CGSize(
+                    width: viewport.width / DeviceGeometry.scale,
+                    height: viewport.height / DeviceGeometry.scale
+                )
+                CompositionView(
+                    manifest: manifest,
+                    tiles: design?.tiles ?? [],
+                    viewport: viewport,
+                    wallpaper: wallpaper,
+                    wallpaperRect: manifest.backdropRect,
+                    isAnimated: report.isUsable
+                ) { tile, side in
+                    TileView(tile: tile, side: side, iconImage: nil)
+                }
+                .frame(width: points.width, height: points.height)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .scaleEffect(Self.previewScale, anchor: .topLeading)
+                .frame(
+                    width: points.width * Self.previewScale,
+                    height: points.height * Self.previewScale,
+                    alignment: .topLeading
+                )
+            } else {
+                ProgressView().frame(height: 80)
             }
 
             Text(caption).font(.caption2).foregroundStyle(.secondary)
         }
         .task {
             report = RuntimeFontRegistry.register(manifest: manifest, store: store)
-            templateRegistered = registerTemplate()
+            loadBackdrop()
         }
     }
 
-    /// Magenta, so a glyph that drew black and a glyph that never drew at all
-    /// cannot be mistaken for each other.
-    private func square(label: String, font: String, ready: Bool) -> some View {
-        VStack(spacing: 3) {
-            ZStack {
-                Color(red: 1, green: 0, blue: 1)
-                if ready {
-                    Text(TimerFontSpec.cycleAlignedReference() + 1, style: .timer)
-                        .font(.custom(font, size: 150))
-                        .foregroundStyle(.white)
-                        .frame(width: 150 * 9, height: 150)
-                        .multilineTextAlignment(.trailing)
-                        .offset(x: -150 * 4)
-                }
-            }
-            .frame(width: 150, height: 150)
-            .clipped()
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(.secondary))
-            Text(label).font(.caption2).foregroundStyle(.secondary)
-        }
-    }
-
-    private func registerTemplate() -> Bool {
-        let name = FontSetGenerator.templateResourceName
-        if CTFontCopyPostScriptName(
-            CTFontCreateWithName(Self.templatePostScriptName as CFString, 12, nil)
-        ) as String == Self.templatePostScriptName {
-            return true
-        }
-        guard let url = Bundle.main.url(forResource: name, withExtension: "ttf") else { return false }
-        var error: Unmanaged<CFError>?
-        if !CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) {
-            let code = (error?.takeRetainedValue() as Error?).map { ($0 as NSError).code } ?? -1
-            guard code == Int(CTFontManagerError.alreadyRegistered.rawValue) else { return false }
-        }
-        return CTFontCopyPostScriptName(
-            CTFontCreateWithName(Self.templatePostScriptName as CFString, 12, nil)
-        ) as String == Self.templatePostScriptName
+    private func loadBackdrop() {
+        let url = manifest.backdropRect == nil
+            ? store.wallpaperURL(for: manifest.designID)
+            : store.widgetBackdropURL(for: manifest.designID)
+        let longest = manifest.backdropRect.map { Int(max($0.width, $0.height)) }
+            ?? Int(max(manifest.screenSize.width, manifest.screenSize.height))
+        wallpaper = ImageLoader.load(at: url, maxPixelSize: longest)
+            .map { Image(decorative: $0, scale: 1) }
     }
 
     private var caption: String {
         guard let report else { return "Registering…" }
-        var lines = ["generated \(report.resolvable)/\(report.requested) resolvable, template \(templateRegistered ? "resolvable" : "NOT resolvable")"]
-        lines.append("Template draws, generated magenta: the fonts this app builds are at fault. Neither draws: the drawing is.")
-        return lines.joined(separator: "\n")
+        guard report.isUsable else {
+            return "Fonts unusable here too: \(report.resolvable)/\(report.requested) resolvable."
+        }
+        return "Animating here means the fonts are sound and the widget's process is the problem. "
+            + "Still or black here means the fonts are, and the widget was never the issue."
     }
 }
