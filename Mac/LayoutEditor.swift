@@ -12,6 +12,9 @@ struct LayoutEditor: View {
     @Binding var design: DesignDocument
     let model: DeviceModel
     let poster: CGImage?
+    /// Where a chosen background is stored, so the editor can both read one
+    /// back and write a newly picked one alongside the design.
+    let store: DesignStore?
 
     @State private var selection: UUID?
     @State private var placementBase: MediaTransform?
@@ -22,6 +25,7 @@ struct LayoutEditor: View {
     /// to be repeated for every app placed after it.
     @State private var labelsDefault = true
     @State private var skins: [SkinLibrary.Skin] = []
+    @State private var background: CGImage?
 
     /// Points per screen pixel, so the canvas is the phone at a readable size.
     static let zoom: CGFloat = 0.62
@@ -79,7 +83,46 @@ struct LayoutEditor: View {
             sidebar.frame(width: Self.sidebarWidth)
         }
         .padding(20)
-        .task { reloadSkins() }
+        .task {
+            reloadSkins()
+            reloadBackground()
+        }
+    }
+
+    private func reloadBackground() {
+        guard let store, let name = design.backgroundName else {
+            background = nil
+            return
+        }
+        background = ImageLoader.load(
+            at: store.backgroundURL(for: design.id, name: name),
+            maxPixelSize: Int(model.screenPixelSize.height)
+        )
+    }
+
+    /// Copied in next to the design rather than referenced where it sits: a
+    /// design reopened next week should still find its background.
+    private func chooseBackground() {
+        guard let store else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        guard panel.runModal() == .OK, let source = panel.url else { return }
+
+        let name = "background.\(source.pathExtension.isEmpty ? "png" : source.pathExtension)"
+        let destination = store.backgroundURL(for: design.id, name: name)
+        do {
+            try store.createFolder(for: design.id)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.copyItem(at: source, to: destination)
+            design.backgroundName = name
+            reloadBackground()
+        } catch {
+            design.backgroundName = nil
+        }
     }
 
     private func reloadSkins() {
@@ -175,12 +218,21 @@ struct LayoutEditor: View {
             // Zero-sized anchor: it fixes the stack's origin at the canvas's
             // top left so the offsets below are measured from there.
             Color.clear.frame(width: 0, height: 0)
+            // A chosen background replaces the derived fill, at full strength,
+            // exactly as the compositor does it.
+            if let background {
+                Image(decorative: background, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: canvas.width, height: canvas.height)
+                    .clipped()
+            }
             if let poster {
                 // The generator fills whatever the clip does not cover with a
                 // dimmed blow-up of the same frame rather than black. Drawing
                 // black here instead - which this did - meant the wallpaper
                 // that came out did not look like the one that was positioned.
-                if design.mediaTransform.fillsBackground {
+                if background == nil, design.mediaTransform.fillsBackground {
                     let fill = MediaFrameExtractor.backdropPlacement(
                         sourceSize: sourceSize,
                         screenSize: model.screenPixelSize
@@ -354,10 +406,28 @@ struct LayoutEditor: View {
                 .buttonStyle(.link)
             }
 
-            Toggle("Fill behind the clip", isOn: Binding(
-                get: { design.mediaTransform.fillsBackground },
-                set: { design.mediaTransform.fillsBackground = $0 }
-            ))
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Background").font(.caption.weight(.semibold))
+                    Spacer()
+                    Button(design.backgroundName == nil ? "Choose..." : "Replace...") {
+                        chooseBackground()
+                    }
+                    .buttonStyle(.link)
+                }
+                if design.backgroundName != nil {
+                    Button("Use the clip instead") {
+                        design.backgroundName = nil
+                        reloadBackground()
+                    }
+                    .buttonStyle(.link)
+                } else {
+                    Toggle("Fill behind the clip", isOn: Binding(
+                        get: { design.mediaTransform.fillsBackground },
+                        set: { design.mediaTransform.fillsBackground = $0 }
+                    ))
+                }
+            }
 
             Toggle("Snap to grid", isOn: $design.snapEnabled)
 

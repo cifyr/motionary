@@ -140,15 +140,20 @@ struct MediaFrameExtractor {
     let url: URL
     let screenSize: CGSize
     let transform: MediaTransform
+    /// Drawn behind the clip, aspect-filled to the screen. Nil falls back to a
+    /// dimmed blow-up of the clip itself.
+    let background: CGImage?
 
     init(
         url: URL,
         screenSize: CGSize = DeviceGeometry.screenPixelSize,
-        transform: MediaTransform = .identity
+        transform: MediaTransform = .identity,
+        background: CGImage? = nil
     ) {
         self.url = url
         self.screenSize = screenSize
         self.transform = transform
+        self.background = background
     }
 
     var kind: MediaKind { MediaKind.detect(at: url) }
@@ -464,9 +469,19 @@ struct MediaFrameExtractor {
             )
         }
 
-        // A scaled-down source leaves the screen uncovered; a dim blow-up of
-        // the same frame reads better behind it than a black band.
-        if transform.fillsBackground, placed.width < screenSize.width || placed.height < screenSize.height {
+        // A chosen background wins outright, and is drawn at full strength
+        // across the whole screen: it was picked to be seen, unlike the blow-up
+        // below, which exists only to avoid a black band.
+        if let background {
+            let size = CGSize(width: background.width, height: background.height)
+            context.draw(background, in: flipped(Self.backdropPlacement(
+                sourceSize: size,
+                screenSize: screenSize
+            )))
+        } else if transform.fillsBackground,
+                  placed.width < screenSize.width || placed.height < screenSize.height {
+            // A scaled-down source leaves the screen uncovered; a dim blow-up
+            // of the same frame reads better behind it than a black band.
             context.saveGState()
             context.setAlpha(Self.backdropOpacity)
             context.draw(image, in: flipped(Self.backdropPlacement(sourceSize: source, screenSize: screenSize)))
