@@ -26,7 +26,10 @@ struct HomeView: View {
             }
 
             SaveButton(saving: saving) { save() }
-            if let note { Toast(text: note) }
+            // A tap that opens nothing has to say why. Rewriting this view
+            // dropped the alert that used to report it, so a tile with no
+            // launch route failed in complete silence.
+            if let note = note ?? router.lastFailure { Toast(text: note) }
         }
         .ignoresSafeArea()
         .statusBarHidden(manifest != nil)

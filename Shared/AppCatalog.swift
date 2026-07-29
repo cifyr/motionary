@@ -29,6 +29,11 @@ struct CatalogApp: Identifiable, Equatable, Sendable {
     var launchCandidates: [URL] {
         [scheme, webFallback].compactMap { $0 }.compactMap(URL.init(string:))
     }
+
+    /// Whether tapping this tile can open anything. Some Apple apps expose no
+    /// URL scheme at all, so a tile for one is decoration whatever it looks
+    /// like - the editor says so rather than letting it be found out later.
+    var canLaunch: Bool { !launchCandidates.isEmpty }
 }
 
 enum AppCatalog {
@@ -39,8 +44,13 @@ enum AppCatalog {
                    scheme: "app-settings:", webFallback: nil, category: .system),
         CatalogApp(id: "calendar", name: "Calendar", symbol: "calendar", tint: .red,
                    scheme: "calshow://", webFallback: nil, category: .system),
+        // No scheme, deliberately. Apple publishes none for Clock, and
+        // clock-alarm:// - which this used - is not one of theirs and does not
+        // open on current iOS. Claiming a route that cannot work turns a tap
+        // into "Clock could not be opened, it may not be installed", which
+        // sends you looking for a problem on the phone.
         CatalogApp(id: "clock", name: "Clock", symbol: "clock.fill", tint: .orange,
-                   scheme: "clock-alarm://", webFallback: nil, category: .system),
+                   scheme: nil, webFallback: nil, category: .system),
         CatalogApp(id: "camera", name: "Camera", symbol: "camera.fill", tint: .gray,
                    scheme: "camera://", webFallback: nil, category: .system),
         CatalogApp(id: "photos", name: "Photos", symbol: "photo.on.rectangle.angled", tint: .pink,
