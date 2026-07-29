@@ -122,3 +122,76 @@ final class BackgroundCompositionTests: XCTestCase {
         XCTAssertNil(decoded.backgroundName)
     }
 }
+
+/// With a background chosen, the clip is confined to the widget frame: outside
+/// it the wallpaper has to be the chosen picture, not the clip running past the
+/// only region that ever animates.
+final class ClipConfinementTests: XCTestCase {
+    private func fill(_ color: CGColor, size: CGSize) throws -> CGImage {
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: Int(size.width),
+            height: Int(size.height),
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(color)
+        context.fill(CGRect(origin: .zero, size: size))
+        return try XCTUnwrap(context.makeImage())
+    }
+
+    /// Composes by hand the way the extractor does, so the clipping rule can be
+    /// checked without decoding a video.
+    private func composed(clipTo frame: CGRect?) throws -> (inside: UInt8, outside: UInt8) {
+        let screen = CGSize(width: 400, height: 800)
+        let clip = try fill(CGColor(red: 1, green: 0, blue: 0, alpha: 1), size: CGSize(width: 400, height: 800))
+        let background = try fill(CGColor(red: 0, green: 0, blue: 1, alpha: 1), size: screen)
+
+        var pixels = [UInt8](repeating: 0, count: Int(screen.width * screen.height) * 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &pixels,
+            width: Int(screen.width),
+            height: Int(screen.height),
+            bitsPerComponent: 8,
+            bytesPerRow: Int(screen.width) * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(background, in: CGRect(origin: .zero, size: screen))
+        if let frame {
+            context.saveGState()
+            context.clip(to: frame)
+            context.draw(clip, in: CGRect(origin: .zero, size: screen))
+            context.restoreGState()
+        } else {
+            context.draw(clip, in: CGRect(origin: .zero, size: screen))
+        }
+        _ = context.makeImage()
+
+        func red(_ x: Int, _ y: Int) -> UInt8 {
+            pixels[(y * Int(screen.width) + x) * 4]
+        }
+        return (red(200, 400), red(10, 10))
+    }
+
+    /// Compared by which picture is present rather than by an exact value:
+    /// drawing through a colour space moves a channel by a few units, so the
+    /// blue background reads as red=4 rather than red=0.
+    private static let present: UInt8 = 200
+    private static let absent: UInt8 = 32
+
+    func testAConfinedClipLeavesTheBackgroundOutsideTheFrame() throws {
+        let frame = CGRect(x: 100, y: 200, width: 200, height: 400)
+        let result = try composed(clipTo: frame)
+        XCTAssertGreaterThan(result.inside, Self.present, "the clip should still fill the widget frame")
+        XCTAssertLessThan(result.outside, Self.absent, "the background should survive outside the frame")
+    }
+
+    func testWithoutConfinementTheClipCoversEverything() throws {
+        let result = try composed(clipTo: nil)
+        XCTAssertGreaterThan(result.inside, Self.present)
+        XCTAssertGreaterThan(result.outside, Self.present, "unconfined, the clip covers the background")
+    }
+}

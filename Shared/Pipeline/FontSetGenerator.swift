@@ -109,7 +109,8 @@ struct FontSetGenerator {
                     at: store.backgroundURL(for: design.id, name: $0),
                     maxPixelSize: Int(max(DeviceGeometry.screenPixelSize.width, DeviceGeometry.screenPixelSize.height))
                 )
-            }
+            },
+            clipRect: design.backgroundName == nil ? nil : design.widgetRect
         )
         let frames = try await extractor.composedFrames(
             startFrame: design.loopStartFrame,

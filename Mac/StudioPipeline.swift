@@ -206,7 +206,8 @@ struct StudioPipeline: Sendable {
                     at: store.backgroundURL(for: design.id, name: $0),
                     maxPixelSize: Int(model.screenPixelSize.height)
                 )
-            }
+            },
+            clipRect: design.backgroundName == nil ? nil : design.widgetRect
         )
         let sample = try await extractor.composedFrames(
             startFrame: 0,

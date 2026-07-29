@@ -143,17 +143,26 @@ struct MediaFrameExtractor {
     /// Drawn behind the clip, aspect-filled to the screen. Nil falls back to a
     /// dimmed blow-up of the clip itself.
     let background: CGImage?
+    /// Confines the clip to a region, leaving the background alone outside it.
+    ///
+    /// Set to the widget frame when a background was chosen: the frame is the
+    /// only part that animates, so everything beyond it should be the picture
+    /// that was picked rather than the clip bleeding past the edges of the one
+    /// place it is ever seen.
+    let clipRect: CGRect?
 
     init(
         url: URL,
         screenSize: CGSize = DeviceGeometry.screenPixelSize,
         transform: MediaTransform = .identity,
-        background: CGImage? = nil
+        background: CGImage? = nil,
+        clipRect: CGRect? = nil
     ) {
         self.url = url
         self.screenSize = screenSize
         self.transform = transform
         self.background = background
+        self.clipRect = clipRect
     }
 
     var kind: MediaKind { MediaKind.detect(at: url) }
@@ -488,7 +497,14 @@ struct MediaFrameExtractor {
             context.restoreGState()
         }
 
-        context.draw(image, in: flipped(placed))
+        if let clipRect {
+            context.saveGState()
+            context.clip(to: flipped(clipRect))
+            context.draw(image, in: flipped(placed))
+            context.restoreGState()
+        } else {
+            context.draw(image, in: flipped(placed))
+        }
 
         guard let composed = context.makeImage() else {
             throw MediaImportError.renderFailed(frameIndex: frameIndex)
