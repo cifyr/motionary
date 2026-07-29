@@ -18,6 +18,7 @@ struct LibraryView: View {
     @State private var showingFileImporter = false
     @State private var showingPhotosPicker = false
     @State private var restartNote: String?
+    @State private var buildStage: FontSetGenerator.Stage?
 
     var body: some View {
         NavigationStack {
@@ -60,7 +61,9 @@ struct LibraryView: View {
                 }
             }
             .overlay {
-                if importing {
+                if let buildStage {
+                    ProgressOverlay(caption: buildStage.caption, fraction: buildStage.fraction)
+                } else if importing {
                     ProgressOverlay(caption: "Importing")
                 }
             }
@@ -242,6 +245,19 @@ struct LibraryView: View {
             }
 
             Section {
+                if let active = library.activeDesign, active.sourceDuration > 0 {
+                    TimingControl(design: active) { updated in
+                        library.save(updated)
+                        Task { await rebuild(updated) }
+                    }
+                }
+            } header: {
+                Text("Timing")
+            } footer: {
+                Text("How long one loop takes. Rebuilds the widget, which takes a moment.")
+            }
+
+            Section {
                 if let active = library.activeDesign {
                     Toggle("Animate widget", isOn: Binding(
                         get: { active.animationEnabled },
@@ -291,6 +307,25 @@ struct LibraryView: View {
 
     /// Puts every piece of shared state the widget reads back into a known
     /// condition, in the order the widget reads them.
+    /// Rebuilds after a setting changes. The widget reads built artefacts, so
+    /// nothing takes effect until the fonts are regenerated.
+    private func rebuild(_ design: DesignDocument) async {
+        guard let store = library.store else { return }
+        do {
+            var updated = design
+            let manifest = try await FontSetGenerator(store: store).build(design: updated) { stage in
+                buildStage = stage
+            }
+            updated.buildGeneration = manifest.buildGeneration
+            library.save(updated)
+            library.reload()
+            WidgetCenterBridge.reloadAll()
+        } catch {
+            library.operationFailure = "Could not rebuild: \(error)"
+        }
+        buildStage = nil
+    }
+
     private func restartWidget() {
         guard let store = library.store else {
             restartNote = "The shared container is unavailable, so there is nothing to restart."
@@ -407,11 +442,33 @@ struct LibraryView: View {
                 "motion \(String(describing: detection.crop), privacy: .public) -> crop \(String(describing: design.animationCrop), privacy: .public)"
             )
 
+            // Chosen from real encoded frames rather than left at a default,
+            // because the payload ceiling is what decides whether the widget
+            // draws at all.
+            if let plan = PayloadBudget.bestPlan(samples: sample, crop: design.effectiveCrop) {
+                design.smoothness = plan.smoothness
+                design.jpegQuality = plan.quality
+                design.retuneLoop()
+                Self.logger.info("planned \(plan.summary, privacy: .public)")
+            }
+
             library.save(design)
             library.reload()
             library.activeDesignID = design.id
-            editing = library.designs.first { $0.id == design.id }
+
+            // Built here rather than left for the editor: one upload should be
+            // the whole job.
+            guard let store = library.store else { return }
+            let manifest = try await FontSetGenerator(store: store).build(design: design) { stage in
+                buildStage = stage
+            }
+            design.buildGeneration = manifest.buildGeneration
+            library.save(design)
+            library.reload()
+            WidgetCenterBridge.reloadAll()
+            buildStage = nil
         } catch {
+            buildStage = nil
             importFailure = String(describing: error)
             Self.logger.error("import failed: \(String(describing: error), privacy: .public)")
         }
@@ -632,5 +689,44 @@ private struct LaneGlyphProbe: View {
         let longest = bundled.backdropRect.map { Int(max($0.width, $0.height)) }
             ?? Int(max(bundled.screenSize.width, bundled.screenSize.height))
         wallpaper = ImageLoader.load(at: url, maxPixelSize: longest).map { Image(decorative: $0, scale: 1) }
+    }
+}
+
+
+/// Speed, expressed as the time one loop takes rather than a multiplier.
+///
+/// The frame count is derived, so the source's own length is the sensible
+/// anchor: 1.2s means the clip plays at its recorded speed.
+private struct TimingControl: View {
+    let design: DesignDocument
+    let onCommit: (DesignDocument) -> Void
+
+    @State private var seconds: Double = 1
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Loop length")
+                Spacer()
+                Text(String(format: "%.2fs", seconds)).foregroundStyle(.secondary).monospacedDigit()
+            }
+            Slider(value: $seconds, in: sliderRange, step: 0.05) { editing in
+                guard !editing else { return }
+                var updated = design
+                // Speed is a multiple of the source's own rate, so a shorter
+                // loop is a faster one.
+                updated.playbackSpeed = max(0.1, design.sourceDuration / max(seconds, 0.05))
+                updated.retuneLoop()
+                onCommit(updated)
+            }
+            Text("Recorded at \(String(format: "%.2f", design.sourceDuration))s")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .onAppear { seconds = design.loopDuration > 0 ? design.loopDuration : design.sourceDuration }
+    }
+
+    private var sliderRange: ClosedRange<Double> {
+        let base = max(design.sourceDuration, 0.2)
+        return (base / 4) ... (base * 4)
     }
 }
