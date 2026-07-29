@@ -74,6 +74,20 @@ enum PrebuiltDesign {
 
     static let previewResource = "prebuilt-preview"
 
+    /// A tile's icon, rasterised at build time.
+    ///
+    /// The widget cannot fetch or render one - no network, no time, and the
+    /// SVG renderer is not worth its memory in an extension with a 45MB
+    /// ceiling - so the studio bakes each icon into the bundle and the widget
+    /// only has to load it.
+    static func iconURL(tileID: UUID) -> URL? {
+        Bundle.main.url(forResource: iconResource(tileID: tileID), withExtension: "png")
+    }
+
+    static func iconResource(tileID: UUID) -> String {
+        "prebuilt-icon-\(tileID.uuidString.lowercased())"
+    }
+
     /// Whether every lane font declared in `UIAppFonts` actually resolved.
     ///
     /// Bundled fonts are registered by the system before any code runs, so this

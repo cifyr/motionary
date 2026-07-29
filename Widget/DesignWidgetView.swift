@@ -46,12 +46,25 @@ struct DesignWidgetView: View {
             let _ = record(source: source)
             CompositionView(
                 manifest: source.manifest,
-                tiles: [],
+                tiles: source.manifest.placedTiles,
                 viewport: DeviceGeometry.widgetRect,
                 wallpaper: source.backdrop,
                 wallpaperRect: source.manifest.backdropRect,
                 isAnimated: source.fontsUsable
-            ) { _, _ in EmptyView() }
+            ) { tile, side in
+                // Through the app rather than straight to the destination: a
+                // Link from an extension to a third-party scheme is
+                // unreliable, so the app takes the tap and forwards it.
+                Link(destination: LaunchLink.url(for: tile.appID)) {
+                    TileView(
+                        tile: tile,
+                        side: side,
+                        iconImage: PrebuiltDesign.iconURL(tileID: tile.id)
+                            .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(side * 3)) }
+                            .map { Image(decorative: $0, scale: 1) }
+                    )
+                }
+            }
         } else {
             let _ = record(source: nil)
             PlaceholderView(message: "Open Motionary and add a clip.")

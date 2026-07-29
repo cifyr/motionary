@@ -7,8 +7,11 @@ import SwiftUI
 /// what the widget is showing, and to hand over the wallpaper that has to sit
 /// behind it.
 struct HomeView: View {
+    @EnvironmentObject private var router: ExternalAppRouter
+
     @State private var saving = false
     @State private var note: String?
+    @StateObject private var icons = IconImageLoader(store: try? DesignStore())
 
     private var manifest: BuildManifest? { PrebuiltDesign.manifest }
 
@@ -36,7 +39,7 @@ struct HomeView: View {
         return LoopingCompositionView(
             screenSize: manifest.screenSize,
             viewport: CGRect(origin: .zero, size: manifest.screenSize),
-            tiles: [],
+            tiles: manifest.placedTiles,
             videoURL: PrebuiltDesign.previewURL,
             wallpaper: PrebuiltDesign.wallpaperURL
                 .flatMap { UIImage(contentsOfFile: $0.path) }
@@ -46,7 +49,22 @@ struct HomeView: View {
             // wall clock time, so opening the app continues the loop rather
             // than restarting it.
             startTime: { spec.videoTime(loopFrameCount: loop) }
-        ) { _, _ in EmptyView() }
+        ) { tile, side in
+            Button {
+                router.launch(appID: tile.appID)
+            } label: {
+                TileView(
+                    tile: tile,
+                    side: side,
+                    iconImage: PrebuiltDesign.iconURL(tileID: tile.id)
+                        .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(side * 3)) }
+                        .map { Image(decorative: $0, scale: 1) }
+                        ?? icons.image(for: tile)
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open \(AppCatalog.app(id: tile.appID)?.name ?? tile.appID)")
+        }
         .ignoresSafeArea()
     }
 

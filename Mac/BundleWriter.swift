@@ -80,8 +80,9 @@ struct BundleWriter {
     }
 
     /// `designFolder` is a built design's folder in the studio's scratch store.
+    /// `iconsFolder` is that store's icon cache, if the design placed any.
     @discardableResult
-    func install(designFolder: URL, manifest: BuildManifest) throws -> Result {
+    func install(designFolder: URL, manifest: BuildManifest, iconsFolder: URL? = nil) throws -> Result {
         let manager = FileManager.default
         try manager.createDirectory(at: resources, withIntermediateDirectories: true)
 
@@ -113,12 +114,43 @@ struct BundleWriter {
         // widget renderer advances timer text.
         try copy(designFolder.appendingPathComponent("preview.mp4"), to: "prebuilt-preview.mp4")
 
+        try installIcons(manifest: manifest, from: iconsFolder)
+
         let names = fonts.map(\.lastPathComponent)
         try rewriteAppFonts(at: projectRoot.appendingPathComponent("Widget/Info.plist"), fonts: names)
         try rewriteAppFonts(at: projectRoot.appendingPathComponent("App/Info.plist"), fonts: names)
 
         _ = manifest
         return Result(fontCount: fonts.count, totalBytes: totalBytes)
+    }
+
+    /// One PNG per tile rather than one per icon.
+    ///
+    /// The widget looks an icon up by the tile that owns it, because it has
+    /// only the manifest to go on and no icon cache to consult. Two tiles
+    /// sharing an icon costs one extra copy of a 256px PNG, which is cheaper
+    /// than teaching the extension about cache keys.
+    private func installIcons(manifest: BuildManifest, from iconsFolder: URL?) throws {
+        let manager = FileManager.default
+        for stale in try manager.contentsOfDirectory(at: resources, includingPropertiesForKeys: nil)
+        where stale.lastPathComponent.hasPrefix("prebuilt-icon-") {
+            try manager.removeItem(at: stale)
+        }
+        guard let iconsFolder else { return }
+
+        for tile in manifest.placedTiles {
+            guard let icon = tile.icon else { continue }
+            let rendered = iconsFolder.appendingPathComponent("\(icon.cacheKey).png")
+            guard manager.fileExists(atPath: rendered.path) else {
+                // Not fatal: the tile falls back to its catalogue SF Symbol,
+                // which is a worse icon rather than a missing one.
+                continue
+            }
+            try manager.copyItem(
+                at: rendered,
+                to: resources.appendingPathComponent("\(PrebuiltDesign.iconResource(tileID: tile.id)).png")
+            )
+        }
     }
 
     private func copy(_ source: URL, to name: String) throws {
