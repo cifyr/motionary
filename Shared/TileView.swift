@@ -24,9 +24,21 @@ struct TileView: View {
         return app?.tint ?? .gray
     }
 
+    /// A skin replaces the plate rather than sitting on it.
+    private var isSkinned: Bool { tile.skin != nil && iconImage != nil }
+
     var body: some View {
         VStack(spacing: side * 0.06) {
             ZStack {
+                if isSkinned, let iconImage {
+                    iconImage
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: side, height: side)
+                        .clipShape(RoundedRectangle(cornerRadius: side * tile.cornerRadius, style: .continuous))
+                        .shadow(color: .black.opacity(0.35), radius: side * 0.06, y: side * 0.03)
+                } else {
                 RoundedRectangle(cornerRadius: side * tile.cornerRadius, style: .continuous)
                     .fill(.ultraThinMaterial)
                     .overlay {
@@ -51,6 +63,7 @@ struct TileView: View {
                         .font(.system(size: side * 0.44, weight: .semibold))
                         .foregroundStyle(.white)
                         .shadow(color: .black.opacity(0.4), radius: side * 0.03)
+                }
                 }
             }
             .frame(width: side, height: side)
