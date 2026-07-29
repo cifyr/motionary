@@ -218,12 +218,18 @@ struct EditorView: View {
                         .tag(option)
                     }
                 }
-                LabeledContent("Loop length", value: "\(design.loopFrameCount) frames")
-                Stepper(value: Binding(
-                    get: { design.loopFrameCount },
-                    set: { design.loopFrameCount = $0 }
-                ), in: 1 ... 240) {
-                    Text("Frames").font(.caption)
+                Stepper(value: $design.loopFrameCount, in: 1 ... 240) {
+                    LabeledContent("Loop length", value: "\(design.loopFrameCount) frames")
+                }
+                Stepper(value: $design.loopStartFrame, in: 0 ... 600) {
+                    LabeledContent("Start at", value: "frame \(design.loopStartFrame)")
+                }
+                if let seamless = nearestSeamlessLength, seamless != design.loopFrameCount {
+                    Button("Snap loop to \(seamless) frames") {
+                        design.loopFrameCount = seamless
+                        library.save(design)
+                    }
+                    .font(.caption)
                 }
                 if !design.spec.divides(loopFrameCount: design.loopFrameCount) {
                     Label(
@@ -272,6 +278,14 @@ struct EditorView: View {
             }
         }
         .frame(maxHeight: 340)
+    }
+
+    /// Closest loop length that still tiles the 30-second timer cycle, so the
+    /// wrap does not introduce a second visible cut.
+    private var nearestSeamlessLength: Int? {
+        design.spec
+            .seamlessLoopLengths(maximum: 240)
+            .min { abs($0 - design.loopFrameCount) < abs($1 - design.loopFrameCount) }
     }
 
     private var sizeCaption: String {
