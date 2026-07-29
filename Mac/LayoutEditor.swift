@@ -15,6 +15,7 @@ struct LayoutEditor: View {
 
     @State private var selection: UUID?
     @State private var placementBase: MediaTransform?
+    @State private var scaleBase: Double?
     @State private var tileBase: CGPoint?
     @State private var showingCatalogue = false
 
@@ -32,6 +33,28 @@ struct LayoutEditor: View {
     /// a drag moves the same distance on the phone as under the cursor.
     private var unit: CGFloat { canvas.width / model.screenPixelSize.width }
 
+    /// The clip's own pixel size, taken from the frame rather than stored: the
+    /// poster is a frame of the source, so it is the source's size by
+    /// definition and cannot drift from it.
+    private var sourceSize: CGSize {
+        guard let poster else { return model.screenPixelSize }
+        return CGSize(width: poster.width, height: poster.height)
+    }
+
+    /// Where the clip actually lands on the screen, in screen pixels.
+    ///
+    /// The same call the generator makes, so the canvas shows what will be
+    /// built rather than an approximation of it. Drawing the poster stretched
+    /// to the canvas instead - which this did at first - showed a distorted
+    /// picture that moved when nothing else did.
+    private var placement: CGRect {
+        MediaFrameExtractor.placement(
+            sourceSize: sourceSize,
+            screenSize: model.screenPixelSize,
+            transform: design.mediaTransform
+        )
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
             screen
@@ -44,9 +67,11 @@ struct LayoutEditor: View {
         ZStack(alignment: .topLeading) {
             Color.black
             if let poster {
+                let rect = placement
                 Image(decorative: poster, scale: 1)
                     .resizable()
-                    .frame(width: canvas.width, height: canvas.height)
+                    .frame(width: rect.width * unit, height: rect.height * unit)
+                    .offset(x: rect.minX * unit, y: rect.minY * unit)
             }
             widgetFrame
             ForEach(design.tiles) { tile in
@@ -60,6 +85,7 @@ struct LayoutEditor: View {
                 .strokeBorder(.white.opacity(0.15), lineWidth: 1)
         )
         .gesture(clipDrag)
+        .simultaneousGesture(clipZoom)
         .onTapGesture { selection = nil }
     }
 
@@ -98,6 +124,33 @@ struct LayoutEditor: View {
                 )
             }
             .onEnded { _ in placementBase = nil }
+    }
+
+    /// Uniform, and anchored on the middle of the widget frame.
+    ///
+    /// Uniform because a clip stretched to fit reads as broken rather than
+    /// framed, and anchored there because that is the part anyone is looking
+    /// at while they size it - scaling about the screen's centre slides the
+    /// subject out of the frame as it grows.
+    private var clipZoom: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                let base = scaleBase ?? design.mediaTransform.scale
+                if scaleBase == nil { scaleBase = base }
+                setScale(base * value.magnification)
+            }
+            .onEnded { _ in scaleBase = nil }
+    }
+
+    private func setScale(_ scale: Double) {
+        let frame = design.widgetRect
+        design.mediaTransform = MediaFrameExtractor.transform(
+            design.mediaTransform,
+            scaledTo: min(max(scale, 0.1), 8),
+            anchoredAt: CGPoint(x: frame.midX, y: frame.midY),
+            sourceSize: sourceSize,
+            screenSize: model.screenPixelSize
+        )
     }
 
     private func tileDrag(_ tile: PlacedTile) -> some Gesture {
@@ -153,13 +206,38 @@ struct LayoutEditor: View {
                 }
             }
 
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Size")
+                    Spacer()
+                    Text(String(format: "%.0f%%", design.mediaTransform.scale * 100))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                Slider(
+                    value: Binding(
+                        get: { design.mediaTransform.scale },
+                        set: { setScale($0) }
+                    ),
+                    in: 0.1 ... 4
+                )
+                Button("Fit to widget") {
+                    design.mediaTransform = MediaTransform.fitting(
+                        sourceSize: sourceSize,
+                        inside: design.widgetRect,
+                        screenSize: model.screenPixelSize
+                    )
+                }
+                .buttonStyle(.link)
+            }
+
             Toggle("Snap to grid", isOn: $design.snapEnabled)
 
             if let selection, let index = design.tiles.firstIndex(where: { $0.id == selection }) {
                 Divider()
                 selected(index: index)
             } else {
-                Text("Drag the picture to position it. Tap a tile to adjust it.")
+                Text("Drag the picture to move it, pinch or use the slider to size it. Tap a tile to adjust it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
