@@ -479,7 +479,12 @@ private struct EditorWindow: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            LayoutEditor(design: $prepared.design, model: model, poster: prepared.poster)
+            LayoutEditor(
+                design: $prepared.design,
+                model: model,
+                poster: prepared.poster,
+                store: prepared.store
+            )
             Divider()
             HStack {
                 Button("Close") { onCancel(prepared) }

@@ -124,6 +124,12 @@ struct DesignStore {
         folder(for: id).appendingPathComponent("manifest.json")
     }
 
+    /// A chosen background, kept with the design so reopening it finds the
+    /// same picture even if the original file has moved.
+    func backgroundURL(for id: UUID, name: String) -> URL {
+        folder(for: id).appendingPathComponent(name)
+    }
+
     func wallpaperURL(for id: UUID) -> URL {
         folder(for: id).appendingPathComponent("wallpaper.png")
     }
