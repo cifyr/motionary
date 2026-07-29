@@ -1,0 +1,64 @@
+import CoreGraphics
+import CoreText
+import Foundation
+import os
+
+/// The one design, built ahead of time and shipped inside the app.
+///
+/// Everything else about this widget has been proven working: the geometry, the
+/// crop, the backdrop, the memory budget, the timeline. The single difference
+/// from the Onewheel build that animates on the same phone was that its fonts
+/// live in the bundle and are declared in `UIAppFonts`, while these were
+/// generated on device and registered at runtime. The animated layer never drew
+/// here and always drew there.
+///
+/// So the fonts are pre-built and bundled, exactly as the working build has
+/// them. That removes on-device generation, runtime registration and the shared
+/// container from the render path altogether — the widget now reads nothing it
+/// did not ship with.
+enum PrebuiltDesign {
+    private static let logger = Logger(subsystem: "com.caden.Motionary", category: "Prebuilt")
+
+    static let manifestResource = "prebuilt-manifest"
+    static let backdropResource = "prebuilt-backdrop"
+    static let wallpaperResource = "prebuilt-wallpaper"
+
+    /// Loaded once: the manifest is small, but a widget re-reads it on every
+    /// render and there is no reason to touch the disk each time.
+    static let manifest: BuildManifest? = {
+        guard let url = Bundle.main.url(forResource: manifestResource, withExtension: "json") else {
+            logger.error("\(manifestResource, privacy: .public).json is missing from the bundle")
+            return nil
+        }
+        do {
+            return try JSONDecoder().decode(BuildManifest.self, from: Data(contentsOf: url))
+        } catch {
+            logger.error("could not decode the bundled manifest: \(String(describing: error), privacy: .public)")
+            return nil
+        }
+    }()
+
+    static var backdropURL: URL? {
+        Bundle.main.url(forResource: backdropResource, withExtension: "jpg")
+    }
+
+    static var wallpaperURL: URL? {
+        Bundle.main.url(forResource: wallpaperResource, withExtension: "png")
+    }
+
+    /// Whether every lane font declared in `UIAppFonts` actually resolved.
+    ///
+    /// Bundled fonts are registered by the system before any code runs, so this
+    /// is a check rather than a step: if it fails, the build is wrong and no
+    /// amount of retrying at runtime will help.
+    static func fontReport(for manifest: BuildManifest) -> (resolvable: Int, requested: Int) {
+        var resolvable = 0
+        for lane in 0 ..< manifest.laneCount {
+            let name = LaneFontBuilder.postScriptName(family: manifest.fontFamilyBase, lane: lane)
+            if CTFontCopyPostScriptName(CTFontCreateWithName(name as CFString, 12, nil)) as String == name {
+                resolvable += 1
+            }
+        }
+        return (resolvable, manifest.laneCount)
+    }
+}
