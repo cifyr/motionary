@@ -571,57 +571,88 @@ struct ProgressOverlay: View {
     }
 }
 
-/// Draws one lane glyph in the app, against a colour nothing else uses.
+/// Draws a lane glyph beside the bundled template glyph.
 ///
-/// The widget renders black with the animated layer on and correctly with it
-/// off, which narrows the fault to the generated fonts or to the environment
-/// they are drawn in. Those two look identical from the Home Screen. Here there
-/// is no memory cap and no archived snapshot, so whatever this shows is what
-/// the font itself does.
+/// The widget is black with the animated layer on and correct with it off, so
+/// the fault is the fonts or the way they are drawn. Two squares separate
+/// those: the template ships with the app and comes from the Onewheel build
+/// that works on this phone, so it is a known-good font drawn by exactly this
+/// code. If the template draws and the generated one does not, generation is
+/// at fault. If neither draws, the drawing is.
 private struct LaneGlyphProbe: View {
     let store: DesignStore
     let manifest: BuildManifest
 
     @State private var report: RuntimeFontRegistry.Report?
+    @State private var templateRegistered = false
 
     private var laneZero: String {
         LaneFontBuilder.postScriptName(family: manifest.fontFamilyBase, lane: 0)
     }
 
+    private static let templatePostScriptName = "CatFont0-Regular"
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Animation font probe").font(.caption.weight(.semibold))
 
-            ZStack {
-                // Magenta, so an opaque black glyph and a glyph that did not
-                // draw at all cannot be confused.
-                Color(red: 1, green: 0, blue: 1)
-                if report?.isUsable == true {
-                    Text(TimerFontSpec.cycleAlignedReference() + 1, style: .timer)
-                        .font(.custom(laneZero, size: 240))
-                        .foregroundStyle(.white)
-                        .frame(width: 240 * 9, height: 240)
-                        .multilineTextAlignment(.trailing)
-                        .offset(x: -240 * 4)
-                }
+            HStack(spacing: 10) {
+                square(label: "Generated", font: laneZero, ready: report?.isUsable == true)
+                square(label: "Template", font: Self.templatePostScriptName, ready: templateRegistered)
             }
-            .frame(width: 240, height: 240)
-            .clipped()
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(.secondary))
 
             Text(caption).font(.caption2).foregroundStyle(.secondary)
         }
         .task {
             report = RuntimeFontRegistry.register(manifest: manifest, store: store)
+            templateRegistered = registerTemplate()
         }
+    }
+
+    /// Magenta, so a glyph that drew black and a glyph that never drew at all
+    /// cannot be mistaken for each other.
+    private func square(label: String, font: String, ready: Bool) -> some View {
+        VStack(spacing: 3) {
+            ZStack {
+                Color(red: 1, green: 0, blue: 1)
+                if ready {
+                    Text(TimerFontSpec.cycleAlignedReference() + 1, style: .timer)
+                        .font(.custom(font, size: 150))
+                        .foregroundStyle(.white)
+                        .frame(width: 150 * 9, height: 150)
+                        .multilineTextAlignment(.trailing)
+                        .offset(x: -150 * 4)
+                }
+            }
+            .frame(width: 150, height: 150)
+            .clipped()
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(.secondary))
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func registerTemplate() -> Bool {
+        let name = FontSetGenerator.templateResourceName
+        if CTFontCopyPostScriptName(
+            CTFontCreateWithName(Self.templatePostScriptName as CFString, 12, nil)
+        ) as String == Self.templatePostScriptName {
+            return true
+        }
+        guard let url = Bundle.main.url(forResource: name, withExtension: "ttf") else { return false }
+        var error: Unmanaged<CFError>?
+        if !CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) {
+            let code = (error?.takeRetainedValue() as Error?).map { ($0 as NSError).code } ?? -1
+            guard code == Int(CTFontManagerError.alreadyRegistered.rawValue) else { return false }
+        }
+        return CTFontCopyPostScriptName(
+            CTFontCreateWithName(Self.templatePostScriptName as CFString, 12, nil)
+        ) as String == Self.templatePostScriptName
     }
 
     private var caption: String {
         guard let report else { return "Registering…" }
-        guard report.isUsable else {
-            return "Fonts did not register here either: \(report.resolvable)/\(report.requested)."
-        }
-        return "Picture means the fonts are sound and the widget's environment is at fault. "
-            + "Black or magenta means these generated fonts are what will not draw."
+        var lines = ["generated \(report.resolvable)/\(report.requested) resolvable, template \(templateRegistered ? "resolvable" : "NOT resolvable")"]
+        lines.append("Template draws, generated magenta: the fonts this app builds are at fault. Neither draws: the drawing is.")
+        return lines.joined(separator: "\n")
     }
 }
