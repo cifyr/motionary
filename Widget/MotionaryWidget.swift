@@ -10,7 +10,7 @@ struct DesignEntry: TimelineEntry {
 /// is no per-widget configuration to keep in sync with the app.
 struct DesignProvider: TimelineProvider {
     func placeholder(in context: Context) -> DesignEntry {
-        DesignEntry(date: .now, designID: nil)
+        DesignEntry(date: .now, designID: resolvedID())
     }
 
     func getSnapshot(in context: Context, completion: @escaping (DesignEntry) -> Void) {

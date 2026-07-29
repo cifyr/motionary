@@ -27,7 +27,7 @@ struct DesignWidgetView: View {
                 "WIDGET OK design=\(loaded.design.name, privacy: .public) family=\(family.rawValue) fonts=\(loaded.fontsReady)"
             )
             let _ = record(
-                outcome: loaded.backdropLoaded ? "ok" : "ok, but the backdrop image did not load",
+                outcome: loaded.outcome,
                 design: loaded.design,
                 report: loaded.report
             )
@@ -68,6 +68,16 @@ struct DesignWidgetView: View {
         let report: RuntimeFontRegistry.Report
         let usesCroppedBackdrop: Bool
         let backdropLoaded: Bool
+        let familyMatches: Bool
+
+        var outcome: String {
+            if !backdropLoaded { return "ok, but the backdrop image did not load" }
+            if !familyMatches {
+                return "ok, but this design is cut for \(design.widgetSize.title); "
+                    + "set the design to this widget's size and rebuild for an exact fit"
+            }
+            return "ok"
+        }
     }
 
     @discardableResult
@@ -109,16 +119,12 @@ struct DesignWidgetView: View {
             let design = try store.load(id: designID)
             let manifest = try store.loadManifest(id: designID)
 
-            // A design cut for one family renders wrong in another, and a
-            // silently mis-cropped widget is harder to diagnose than a label.
+            // A design cut for another family still draws: the composition is
+            // positioned in screen space, so a different family is a different
+            // sized window onto it. Refusing produced a blank widget, which is
+            // worse than a window that does not quite line up.
             let expected = WidgetFamilyCompatibility.sizeOption(for: family)
-            guard design.widgetSize == expected else {
-                return .failure(
-                    "\"\(design.name)\" is cut for \(design.widgetSize.title), but this is the "
-                    + "\(expected.title) widget. Remove this one and add a \(design.widgetSize.title) "
-                    + "widget, or change the design's size and rebuild."
-                )
-            }
+            let familyMatches = design.widgetSize == expected
 
             let report = RuntimeFontRegistry.register(manifest: manifest, store: store)
 
@@ -141,7 +147,8 @@ struct DesignWidgetView: View {
                 icons: IconImageProvider(store: store),
                 report: report,
                 usesCroppedBackdrop: usesBackdrop,
-                backdropLoaded: loadedImage != nil
+                backdropLoaded: loadedImage != nil,
+                familyMatches: familyMatches
             ))
         } catch {
             return .failure(String(describing: error))
@@ -169,5 +176,8 @@ private struct PlaceholderView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
+        // Redaction turns text into a grey bar and an icon into a grey square,
+        // which is exactly how this failure looked on device: unreadable.
+        .unredacted()
     }
 }
