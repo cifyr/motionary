@@ -274,7 +274,7 @@ struct EditorView: View {
                 }
                 .disabled(library.manifest(for: design) == nil)
             } footer: {
-                Text("Set the exported image as your Home Screen wallpaper with no blur and no zoom, then add the \(design.widgetSize.title) Motionary widget in the matching slot.")
+                Text("Set the exported image as your Home Screen wallpaper with no blur and no zoom, then add the \(design.widgetSize.title) Motionary widget in the matching slot. The widget shows whichever design is selected in Designs.")
             }
         }
         .frame(maxHeight: 340)

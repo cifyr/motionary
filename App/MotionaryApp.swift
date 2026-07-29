@@ -34,14 +34,15 @@ final class DesignLibrary: ObservableObject {
     @Published private(set) var designs: [DesignDocument] = []
     @Published var loadFailure: String?
 
-    /// Which design the Home Screen imitation shows. Persisted in the app group
-    /// so it survives relaunches.
+    /// The one selection that drives both the app's home and the widget.
     @Published var activeDesignID: UUID? {
-        didSet { defaults?.set(activeDesignID?.uuidString, forKey: Self.activeKey) }
+        didSet {
+            guard activeDesignID != oldValue else { return }
+            ActiveDesign.identifier = activeDesignID
+            // The widget reads this at timeline time, so it needs telling.
+            WidgetCenterBridge.reloadAll()
+        }
     }
-
-    private static let activeKey = "activeDesignID"
-    private let defaults = UserDefaults(suiteName: DesignStore.appGroupIdentifier)
 
     private(set) var store: DesignStore?
 
@@ -61,7 +62,7 @@ final class DesignLibrary: ObservableObject {
     }
 
     init() {
-        activeDesignID = defaults?.string(forKey: Self.activeKey).flatMap(UUID.init(uuidString:))
+        activeDesignID = ActiveDesign.identifier
         do {
             store = try DesignStore()
             reload()

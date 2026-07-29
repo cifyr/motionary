@@ -75,6 +75,22 @@ struct LibraryView: View {
     private var designList: some View {
         List {
             Section {
+                Picker("Showing", selection: Binding(
+                    get: { library.activeDesign?.id },
+                    set: { library.activeDesignID = $0 }
+                )) {
+                    ForEach(library.designs) { design in
+                        Text(design.name)
+                            .tag(Optional(design.id))
+                    }
+                }
+            } header: {
+                Text("Home and widget")
+            } footer: {
+                Text("The app and the Home Screen widget both show this design. Build a design before selecting it.")
+            }
+
+            Section {
                 ForEach(library.designs) { design in
                     Button {
                         editing = design
@@ -98,8 +114,10 @@ struct LibraryView: View {
                         }
                     }
                 }
+            } header: {
+                Text("Designs")
             } footer: {
-                Text("Tap a design to edit it. Swipe right to show it when Motionary opens.")
+                Text("Tap a design to edit it. Swipe right to show it on the home and in the widget.")
             }
 
             Section("About") {

@@ -37,6 +37,14 @@ struct DesignStore {
 
     let root: URL
 
+    /// Roots the store at an arbitrary directory. Tests use this; the app and
+    /// the extension always go through the app group.
+    init(containerURL: URL) throws {
+        let designsRoot = containerURL.appendingPathComponent("Designs", isDirectory: true)
+        try FileManager.default.createDirectory(at: designsRoot, withIntermediateDirectories: true)
+        root = designsRoot
+    }
+
     init(appGroupIdentifier: String = DesignStore.appGroupIdentifier) throws {
         guard let container = FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
