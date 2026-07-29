@@ -148,17 +148,6 @@ struct LibraryView: View {
                 Text("Tap a design to edit it. Swipe right to show it on the home and in the widget.")
             }
 
-#if DEBUG
-            Section {
-                Toggle("Widget diagnostics", isOn: Binding(
-                    get: { library.diagnosticsEnabled },
-                    set: { library.diagnosticsEnabled = $0 }
-                ))
-            } footer: {
-                Text("Overlays font-resolution state on the widget. Debug builds only.")
-            }
-#endif
-
             Section {
                 if let store = library.store, let status = WidgetStatusLog.read(store: store) {
                     VStack(alignment: .leading, spacing: 6) {

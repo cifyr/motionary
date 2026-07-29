@@ -112,32 +112,6 @@ final class DesignLibrary: ObservableObject {
     /// the render path gets screenshotted from the command line.
     @Published var pendingPreviewDesignID: UUID?
 
-    /// A marker file rather than a default, because the widget extension reads
-    /// it and a file is visible to both without a defaults round trip.
-    var diagnosticsEnabled: Bool {
-        get { store.map { FileManager.default.fileExists(atPath: diagnosticsMarker($0).path) } ?? false }
-        set {
-            guard let store else { return }
-            let marker = diagnosticsMarker(store)
-            if newValue {
-                FileManager.default.createFile(atPath: marker.path, contents: Data())
-            } else {
-                try? FileManager.default.removeItem(at: marker)
-            }
-            WidgetCenterBridge.reloadAll()
-            objectWillChange.send()
-        }
-    }
-
-    private func diagnosticsMarker(_ store: DesignStore) -> URL {
-        store.root.deletingLastPathComponent().appendingPathComponent("diagnose")
-    }
-
-    func enableDiagnosticsIfRequested() {
-        guard ProcessInfo.processInfo.arguments.contains("-MotionaryDiagnose") else { return }
-        diagnosticsEnabled = true
-    }
-
     func runDemoSeed() async {
         guard let store else { return }
         switch await DemoSeeder.run(store: store) {
