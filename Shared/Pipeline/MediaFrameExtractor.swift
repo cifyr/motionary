@@ -145,8 +145,8 @@ struct MediaFrameExtractor {
     ///
     /// The editor needs the raw pixels so it can apply the placement live while
     /// the user drags, rather than showing the last build's baked wallpaper.
-    func posterFrame(at index: Int = 0, frameRate: Int = 30) async throws -> CGImage {
-        let rate = Double(max(frameRate, 1))
+    func posterFrame(at index: Int = 0, frameRate: Int = 30, speed: Double = 1) async throws -> CGImage {
+        let rate = Double(max(frameRate, 1)) / max(speed, 0.01)
         switch kind {
         case .video:
             guard let frame = try await videoFrames(startFrame: index, count: 1, rate: rate, progress: nil).first else {
@@ -244,9 +244,12 @@ struct MediaFrameExtractor {
         startFrame: Int,
         count: Int,
         frameRate: Int,
+        speed: Double = 1,
         progress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> [CGImage] {
-        let rate = Double(max(frameRate, 1))
+        // Speed divides the sampling interval: at 2x each output frame steps
+        // twice as far through the source.
+        let rate = Double(max(frameRate, 1)) / max(speed, 0.01)
         let raw: [CGImage]
         switch kind {
         case .video:

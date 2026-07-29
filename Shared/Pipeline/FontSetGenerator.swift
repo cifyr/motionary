@@ -103,6 +103,7 @@ struct FontSetGenerator {
             startFrame: design.loopStartFrame,
             count: design.loopFrameCount,
             frameRate: spec.framesPerSecond,
+            speed: design.playbackSpeed,
             progress: { onStage(.decoding(progress: $0)) }
         )
 

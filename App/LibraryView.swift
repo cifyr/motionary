@@ -255,6 +255,7 @@ struct LibraryView: View {
             let spec = design.spec
             // Loop length counts frames at the design's rate, not the
             // source's, and lands on the divisor nearest the natural loop.
+            design.sourceDuration = summary.duration
             let natural = max(1, Int((summary.duration * Double(spec.framesPerSecond)).rounded()))
             design.loopFrameCount = spec.seamlessLoopLength(nearest: natural, maximum: 96)
             design.loopStartFrame = 0

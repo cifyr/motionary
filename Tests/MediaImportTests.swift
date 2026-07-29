@@ -378,6 +378,69 @@ final class MediaImportTests: XCTestCase {
         XCTAssertEqual(placed, .zero)
     }
 
+    // MARK: - Playback speed
+
+    /// At 2x each output frame steps twice as far through the source, so a
+    /// boundary that took eight samples to reach takes four.
+    func testDoubleSpeedReachesTheBoundaryInHalfTheSamples() async throws {
+        let url = try writeGIF(
+            named: "speed.gif",
+            frames: [colour(1, 0, 0), colour(0, 0, 1)],
+            delay: 0.5
+        )
+        func switchIndex(speed: Double) async throws -> Int? {
+            let frames = try await MediaFrameExtractor(url: url)
+                .composedFrames(startFrame: 0, count: 16, frameRate: 16, speed: speed)
+            return frames.firstIndex { centrePixel($0) != centrePixel(frames[0]) }
+        }
+        let normal = try await switchIndex(speed: 1)
+        let double = try await switchIndex(speed: 2)
+        let half = try await switchIndex(speed: 0.5)
+
+        XCTAssertEqual(normal, 8)
+        XCTAssertEqual(double, 4, "twice as fast reaches it in half the samples")
+        XCTAssertEqual(half, nil, "half speed has not reached it within 16 samples")
+    }
+
+    func testSpeedIsClampedAwayFromZero() async throws {
+        let url = try writeGIF(named: "zero.gif", frames: [colour(1, 0, 0), colour(0, 0, 1)])
+        // A zero speed would divide by zero and never advance.
+        let frames = try await MediaFrameExtractor(url: url)
+            .composedFrames(startFrame: 0, count: 2, frameRate: 16, speed: 0)
+        XCTAssertEqual(frames.count, 2)
+    }
+
+    /// Speeding up shortens the source, so the loop must shrink with it or it
+    /// would replay part of the source twice.
+    func testLoopSizingFollowsSpeed() {
+        var design = DesignDocument.new(name: "t", sourceVideoName: "source.gif")
+        design.smoothness = .standard
+        design.sourceDuration = 1.2
+
+        design.playbackSpeed = 1
+        XCTAssertEqual(design.naturalLoopFrames, 38)
+        design.playbackSpeed = 2
+        XCTAssertEqual(design.naturalLoopFrames, 19)
+        design.playbackSpeed = 0.5
+        XCTAssertEqual(design.naturalLoopFrames, 77)
+    }
+
+    func testNaturalLoopFallsBackWithoutAKnownDuration() {
+        var design = DesignDocument.new(name: "t", sourceVideoName: "source.gif")
+        design.loopFrameCount = 24
+        XCTAssertEqual(design.naturalLoopFrames, 24, "no duration means nothing better to say")
+    }
+
+    func testDesignWithoutSpeedDecodesAtNormalSpeed() throws {
+        let json = """
+        {"id":"\(UUID().uuidString)","name":"Old","createdAt":0,"updatedAt":0,
+         "sourceVideoName":"source.gif","animationCrop":[[0,0],[100,100]]}
+        """
+        let design = try JSONDecoder().decode(DesignDocument.self, from: Data(json.utf8))
+        XCTAssertEqual(design.playbackSpeed, 1)
+        XCTAssertEqual(design.sourceDuration, 0)
+    }
+
     // MARK: - Import defaults
 
     /// A phone-shaped clip should still fill the screen.

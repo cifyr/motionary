@@ -203,6 +203,19 @@ struct EditorView: View {
 
     /// Always derived from the transform at gesture start, so a long pinch does
     /// not accumulate rounding from its own intermediate results.
+    /// Changing speed resizes the loop to keep a whole pass through the source,
+    /// otherwise speeding up would just repeat part of it.
+    private func applySpeed(_ speed: Double) {
+        design.playbackSpeed = speed
+        if design.sourceDuration > 0 {
+            design.loopFrameCount = design.spec.seamlessLoopLength(
+                nearest: design.naturalLoopFrames,
+                maximum: 96
+            )
+        }
+        library.save(design)
+    }
+
     private func applyPinch(_ value: MagnifyGesture.Value) {
         guard let sourceFrame else { return }
         // Clamped so a stray pinch cannot shrink the source to nothing or blow
@@ -449,8 +462,29 @@ struct EditorView: View {
                         .tag(option)
                     }
                 }
+                VStack(alignment: .leading, spacing: 2) {
+                    Slider(
+                        value: Binding(
+                            get: { design.playbackSpeed },
+                            set: { applySpeed($0) }
+                        ),
+                        in: 0.25 ... 4,
+                        step: 0.05
+                    )
+                    HStack {
+                        Text("Speed \(String(format: "%.2f", design.playbackSpeed))x")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Reset") { applySpeed(1) }
+                            .font(.caption2)
+                            .disabled(design.playbackSpeed == 1)
+                    }
+                }
                 Stepper(value: $design.loopFrameCount, in: 1 ... 240) {
-                    LabeledContent("Loop length", value: "\(design.loopFrameCount) frames")
+                    LabeledContent(
+                    "Loop length",
+                    value: "\(design.loopFrameCount) frames · \(String(format: "%.2f", design.loopDuration))s"
+                )
                 }
                 Stepper(value: $design.loopStartFrame, in: 0 ... 600) {
                     LabeledContent("Start at", value: "frame \(design.loopStartFrame)")
@@ -594,7 +628,11 @@ struct EditorView: View {
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         do {
             sourceFrame = try await MediaFrameExtractor(url: url)
-                .posterFrame(at: design.loopStartFrame, frameRate: design.spec.framesPerSecond)
+                .posterFrame(
+                    at: design.loopStartFrame,
+                    frameRate: design.spec.framesPerSecond,
+                    speed: design.playbackSpeed
+                )
         } catch {
             Self.logger.error("could not load a source frame: \(String(describing: error), privacy: .public)")
         }

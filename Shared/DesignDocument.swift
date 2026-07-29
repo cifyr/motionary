@@ -90,6 +90,12 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     var sourceVideoName: String
     /// How the imported media is fitted to the screen before rendering.
     var mediaTransform: MediaTransform = .identity
+    /// How fast to move through the source. 2 plays it twice as fast, 0.5 half.
+    /// A slow GIF can be sped up to read as motion rather than a drift.
+    var playbackSpeed: Double = 1
+    /// The source's own length, kept so the editor can resize the loop when the
+    /// speed changes without decoding the file again.
+    var sourceDuration: TimeInterval = 0
 
     // Loop selection
     var loopStartFrame: Int = 0
@@ -116,6 +122,18 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     var buildGeneration: Int = 0
 
     var spec: TimerFontSpec { TimerFontSpec(smoothness: smoothness) }
+
+    /// Frames the source fills at the current speed, for sizing the loop.
+    var naturalLoopFrames: Int {
+        guard sourceDuration > 0 else { return loopFrameCount }
+        let frames = sourceDuration * Double(spec.framesPerSecond) / max(playbackSpeed, 0.01)
+        return max(1, Int(frames.rounded()))
+    }
+
+    /// How long the built loop runs on screen.
+    var loopDuration: TimeInterval {
+        Double(loopFrameCount) / Double(spec.framesPerSecond)
+    }
 
     var widgetRect: CGRect {
         DeviceGeometry.widgetRect(size: widgetSize, slot: widgetSlot, nudge: widgetNudge)
@@ -157,6 +175,8 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
         sourceVideoName = try container.decode(String.self, forKey: .sourceVideoName)
         mediaTransform = try container.decodeIfPresent(MediaTransform.self, forKey: .mediaTransform) ?? .identity
+        playbackSpeed = try container.decodeIfPresent(Double.self, forKey: .playbackSpeed) ?? 1
+        sourceDuration = try container.decodeIfPresent(TimeInterval.self, forKey: .sourceDuration) ?? 0
         loopStartFrame = try container.decodeIfPresent(Int.self, forKey: .loopStartFrame) ?? 0
         loopFrameCount = try container.decodeIfPresent(Int.self, forKey: .loopFrameCount) ?? 32
         widgetSize = try container.decodeIfPresent(WidgetSizeOption.self, forKey: .widgetSize) ?? .fullScreen
