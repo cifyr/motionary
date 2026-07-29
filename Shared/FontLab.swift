@@ -36,6 +36,40 @@ enum FontLab {
         return nil
     }
 
+    private static let limitKey = "fontLabRouteLimit"
+
+    /// How many routes to draw, or 0 for all of them.
+    ///
+    /// WidgetKit rejected the whole lab with `badTimelineData` and drew an
+    /// empty view, so the routes have to be bisected to find which one the
+    /// timeline will not carry. A rebuild per step is a minute; guessing has
+    /// cost rather more than that.
+    static var routeLimit: Int {
+        get { UserDefaults(suiteName: DesignStore.appGroupIdentifier)?.integer(forKey: limitKey) ?? 0 }
+        set { UserDefaults(suiteName: DesignStore.appGroupIdentifier)?.set(newValue, forKey: limitKey) }
+    }
+
+    static func launchRouteLimit(in arguments: [String]) -> Int? {
+        guard let flag = arguments.firstIndex(of: "-MotionaryFontLabRoutes"),
+              arguments.index(after: flag) < arguments.endIndex
+        else { return nil }
+        return Int(arguments[arguments.index(after: flag)])
+    }
+
+    /// The routes a widget timeline will actually carry.
+    ///
+    /// `direct` and `graphicsFont` are left out by default because they do not
+    /// merely fail to draw: WidgetKit rejects the whole timeline as
+    /// `badTimelineData` and the widget renders empty, taking the working rows
+    /// down with it. Found by bisecting the lab in the simulator, one route at
+    /// a time.
+    static let timelineSafe: [Route] = [.bundled, .groupProcess, .cachesProcess]
+
+    static var activeRoutes: [Route] {
+        let limit = routeLimit
+        return limit > 0 ? Array(Route.allCases.prefix(limit)) : timelineSafe
+    }
+
     /// The routes still worth drawing.
     ///
     /// Four others were tried and measured out, on the simulator and on the
@@ -51,12 +85,20 @@ enum FontLab {
         /// which is the one arrangement already known to animate on device.
         case bundled
         case groupProcess
+        /// The sandbox theory: a widget extension is reported to be denied
+        /// `file-read-data` on fonts in shared storage while its own container
+        /// is readable. Same API and scope as the route above; only the
+        /// directory differs, so the two together isolate the path from the
+        /// registration.
         case cachesProcess
-        case graphicsFont
         /// No registry at all: a `CTFont` built straight from the bytes and
         /// handed to SwiftUI. If the view archive carries the font rather than
         /// its name, the renderer never has to look anything up.
         case direct
+        /// Registers, resolves, and then makes WidgetKit throw the whole
+        /// timeline out as `badTimelineData` - the widget draws nothing at all,
+        /// not even the labels. Kept last so the routes before it stay usable.
+        case graphicsFont
 
         var label: String {
             switch self {
@@ -106,7 +148,7 @@ enum FontLab {
     /// per render and rewriting nine multi-megabyte fonts each time would cost
     /// more memory than the extension is allowed.
     static func run(manifest: BuildManifest, store: DesignStore) -> [Outcome] {
-        let key = "\(manifest.designID.uuidString)#\(manifest.buildGeneration)"
+        let key = "\(manifest.designID.uuidString)#\(manifest.buildGeneration)#\(routeLimit)"
         lock.lock()
         if let cache, cache.key == key {
             lock.unlock()
@@ -126,7 +168,7 @@ enum FontLab {
         let source = (try? Data(contentsOf: laneZero))
             ?? Bundle.main.url(forResource: name, withExtension: "ttf").flatMap { try? Data(contentsOf: $0) }
         let sourceFamily = "\(manifest.fontFamilyBase)0"
-        let outcomes = Route.allCases.map {
+        let outcomes = activeRoutes.map {
             prepare(route: $0, source: source, sourceFamily: sourceFamily)
         }
 

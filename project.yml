@@ -28,7 +28,7 @@ targets:
     dependencies:
       - target: MotionaryWidgetExtension
     scheme:
-      testTargets: [MotionaryTests]
+      testTargets: [MotionaryTests, MotionaryUITests]
 
   MotionaryWidgetExtension:
     type: app-extension
@@ -60,3 +60,18 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.caden.MotionaryTests
+
+  # Drives SpringBoard from inside the simulator, so the widget can be found
+  # and photographed without posting mouse events onto whatever machine is
+  # running the build.
+  MotionaryUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - UITests
+    dependencies:
+      - target: Motionary
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.caden.MotionaryUITests

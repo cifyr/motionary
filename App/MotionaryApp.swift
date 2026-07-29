@@ -10,11 +10,17 @@ struct MotionaryApp: App {
     /// switched the flag but left the already-drawn home on screen, which reads
     /// as the flag having been ignored.
     init() {
-        guard let wanted = FontLab.launchOverride(in: ProcessInfo.processInfo.arguments),
-              wanted != FontLab.isEnabled
-        else { return }
-        FontLab.isEnabled = wanted
-        WidgetCenterBridge.reloadAll()
+        let arguments = ProcessInfo.processInfo.arguments
+        var changed = false
+        if let limit = FontLab.launchRouteLimit(in: arguments), limit != FontLab.routeLimit {
+            FontLab.routeLimit = limit
+            changed = true
+        }
+        if let wanted = FontLab.launchOverride(in: arguments), wanted != FontLab.isEnabled {
+            FontLab.isEnabled = wanted
+            changed = true
+        }
+        if changed { WidgetCenterBridge.reloadAll() }
     }
 
     var body: some Scene {
