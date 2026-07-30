@@ -22,9 +22,13 @@ import sys
 import numpy as np
 from PIL import Image
 
-# The measured frame, from Shared/DeviceGeometry.swift. Passed in when a shot
-# comes from a device whose frame is not this one.
-DEFAULT_FRAME = (66, 270, 1074, 1632)
+# The *rendered* frame from Shared/Model/DeviceGeometry.swift, not the frame a
+# design is cut to. EdgeLabView draws its rings, bands and grid to the widget's own
+# bounds, so every offset here is measured from those - and the cut frame is 2px
+# right of them and 13 rows short, which put the bounds samples on the wrong
+# columns and the rim samples on the wrong rows.
+# Passed in when a shot comes from a device whose frame is not this one.
+DEFAULT_FRAME = (64, 270, 1078, 1645)
 RINGS = [("red", (255, 0, 0)), ("green", (0, 255, 0)),
          ("blue", (0, 0, 255)), ("yellow", (255, 255, 0))]
 BAND_LEVELS = [0.25, 0.5, 0.75]
