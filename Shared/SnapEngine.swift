@@ -100,18 +100,38 @@ struct SnapEngine {
         return result.map { (value: $0.0, guide: $0.1) }
     }
 
-    /// Keeps a tile inside the screen regardless of snapping. `tileSize` should
+    /// Keeps a tile inside `bounds`, regardless of snapping. `tileSize` should
     /// be the rotated bounding extent, not the plate's side, or a rotated
-    /// corner can still leave the screen.
-    func clamp(center: CGPoint, tileSize: CGFloat) -> CGPoint {
-        // A tile larger than the screen has no valid range; centre it rather
-        // than letting the clamp invert.
-        let halfX = min(tileSize / 2, screenSize.width / 2)
-        let halfY = min(tileSize / 2, screenSize.height / 2)
+    /// corner can still cross the edge.
+    ///
+    /// The editor passes the widget frame rather than the screen. The widget is
+    /// the only thing that draws a tile and it can only draw inside its own
+    /// frame, so a tile straddling that edge is cut in half - and the wallpaper
+    /// behind it carries no tiles at all, so there is nothing on the other side
+    /// to complete it.
+    func clamp(center: CGPoint, tileSize: CGFloat, within bounds: CGRect? = nil) -> CGPoint {
+        let box = bounds ?? CGRect(origin: .zero, size: screenSize)
+        // A tile larger than its box has no valid range; centre it rather than
+        // letting the clamp invert.
+        let halfX = min(tileSize / 2, box.width / 2)
+        let halfY = min(tileSize / 2, box.height / 2)
         return CGPoint(
-            x: min(max(center.x, halfX), screenSize.width - halfX),
-            y: min(max(center.y, halfY), screenSize.height - halfY)
+            x: min(max(center.x, box.minX + halfX), box.maxX - halfX),
+            y: min(max(center.y, box.minY + halfY), box.maxY - halfY)
         )
+    }
+
+    /// Whether a tile is wholly drawable, for warning about designs made before
+    /// placement was bounded by the frame.
+    static func isFullyInside(_ tile: PlacedTile, frame: CGRect) -> Bool {
+        let extent = tile.boundingExtent
+        let box = CGRect(
+            x: tile.center.x - extent / 2,
+            y: tile.center.y - extent / 2,
+            width: extent,
+            height: extent
+        )
+        return frame.contains(box)
     }
 
     /// Angles a rotating tile settles onto, so a tile meant to be square or at
