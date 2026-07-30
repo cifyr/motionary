@@ -41,12 +41,12 @@ enum PrebuiltDesign {
         }
 
         var manifestName: String { resource("manifest") }
-        var backdropURL: URL? { Bundle.main.url(forResource: resource("backdrop"), withExtension: "jpg") }
-        var wallpaperURL: URL? { Bundle.main.url(forResource: resource("wallpaper"), withExtension: "png") }
-        var previewURL: URL? { Bundle.main.url(forResource: resource("preview"), withExtension: "mp4") }
+        var backdropURL: URL? { PrebuiltDesign.resource(named: resource("backdrop"), extension: "jpg") }
+        var wallpaperURL: URL? { PrebuiltDesign.resource(named: resource("wallpaper"), extension: "png") }
+        var previewURL: URL? { PrebuiltDesign.resource(named: resource("preview"), extension: "mp4") }
 
         var manifest: BuildManifest? {
-            guard let url = Bundle.main.url(forResource: manifestName, withExtension: "json"),
+            guard let url = PrebuiltDesign.resource(named: manifestName, extension: "json"),
                   let data = try? Data(contentsOf: url)
             else { return nil }
             return try? JSONDecoder().decode(BuildManifest.self, from: data)
@@ -56,7 +56,7 @@ enum PrebuiltDesign {
     /// Every design compiled into this build, in the order the studio wrote
     /// them. Empty when nothing has been bundled yet.
     static let entries: [Entry] = {
-        guard let url = Bundle.main.url(forResource: "prebuilt-index", withExtension: "json"),
+        guard let url = PrebuiltDesign.resource(named: "prebuilt-index", extension: "json"),
               let data = try? Data(contentsOf: url)
         else {
             // A build made before several designs could ship names its files
@@ -90,7 +90,7 @@ enum PrebuiltDesign {
     /// Loaded once: the manifest is small, but a widget re-reads it on every
     /// render and there is no reason to touch the disk each time.
     static let manifest: BuildManifest? = {
-        guard let url = Bundle.main.url(forResource: manifestResource, withExtension: "json") else {
+        guard let url = PrebuiltDesign.resource(named: manifestResource, extension: "json") else {
             logger.error("\(manifestResource, privacy: .public).json is missing from the bundle")
             return nil
         }
@@ -120,18 +120,48 @@ enum PrebuiltDesign {
     /// trusting it is what produced a black widget from a healthy-looking
     /// 32/32.
     static func fontsAreBundled(familyBase: String) -> Bool {
-        Bundle.main.url(
-            forResource: LaneFontBuilder.postScriptName(family: familyBase, lane: 0),
-            withExtension: "ttf"
+        resource(
+            named: LaneFontBuilder.postScriptName(family: familyBase, lane: 0),
+            extension: "ttf"
         ) != nil
     }
 
+    /// The design a launch argument asks for: `-MotionaryDesignIndex 1` is the
+    /// second bundled design, in the order the studio wrote them.
+    ///
+    /// nil when the arguments say nothing, so a normal launch leaves whatever
+    /// was swiped to alone.
+    static func launchSelection(in arguments: [String]) -> UUID? {
+        guard let flag = arguments.firstIndex(of: "-MotionaryDesignIndex"),
+              arguments.index(after: flag) < arguments.endIndex,
+              let index = Int(arguments[arguments.index(after: flag)]),
+              entries.indices.contains(index)
+        else { return nil }
+        return entries[index].id
+    }
+
+    /// Marker so the resources can be found in the bundle this code was compiled
+    /// into, not only in `Bundle.main`.
+    private final class BundleMarker {}
+
+    /// Where a bundled design's files are.
+    ///
+    /// `Bundle.main` in the app and in the extension, which is what production
+    /// needs. In a unit test `Bundle.main` is the runner, so every lookup came
+    /// back nil and every test that asked about a bundled design skipped itself
+    /// - which is how the widget's design selection went untested long enough to
+    /// regress.
+    static func resource(named name: String, extension ext: String) -> URL? {
+        Bundle.main.url(forResource: name, withExtension: ext)
+            ?? Bundle(for: BundleMarker.self).url(forResource: name, withExtension: ext)
+    }
+
     static var backdropURL: URL? {
-        Bundle.main.url(forResource: backdropResource, withExtension: "jpg")
+        PrebuiltDesign.resource(named: backdropResource, extension: "jpg")
     }
 
     static var wallpaperURL: URL? {
-        Bundle.main.url(forResource: wallpaperResource, withExtension: "png")
+        PrebuiltDesign.resource(named: wallpaperResource, extension: "png")
     }
 
     /// The animation as a video, for the app to play.
@@ -141,7 +171,7 @@ enum PrebuiltDesign {
     /// the same frames back as a film. It is seeked by wall clock, so opening
     /// the app picks up wherever the widget had got to.
     static var previewURL: URL? {
-        Bundle.main.url(forResource: previewResource, withExtension: "mp4")
+        PrebuiltDesign.resource(named: previewResource, extension: "mp4")
     }
 
     static let previewResource = "prebuilt-preview"
@@ -153,7 +183,7 @@ enum PrebuiltDesign {
     /// ceiling - so the studio bakes each icon into the bundle and the widget
     /// only has to load it.
     static func iconURL(tileID: UUID) -> URL? {
-        Bundle.main.url(forResource: iconResource(tileID: tileID), withExtension: "png")
+        PrebuiltDesign.resource(named: iconResource(tileID: tileID), extension: "png")
     }
 
     static func iconResource(tileID: UUID) -> String {
