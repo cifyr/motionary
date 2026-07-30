@@ -1,5 +1,6 @@
 import CoreGraphics
 import ImageIO
+import SwiftUI
 import UniformTypeIdentifiers
 import XCTest
 
@@ -368,8 +369,14 @@ final class RuntimeFrameTests: XCTestCase {
         XCTAssertTrue(loaded.payload.isDrawable)
     }
 
-    /// A gap in the folder is named rather than drawn as a hole in the loop.
-    func testAMissingFrameIsReportedByIndex() async throws {
+    /// A gap in the folder is filled from a neighbour rather than left empty,
+    /// and named either way.
+    ///
+    /// An empty slot draws nothing for its share of the cycle, so a folder caught
+    /// mid-write - which the app archiving an old design while a render lands
+    /// really does produce - strobed several times a second. A repeated frame is
+    /// a stutter instead.
+    func testAMissingFrameIsFilledFromANeighbourAndStillReported() async throws {
         let store = try store()
         let built = try await RuntimeDesignImporter(store: store).run(
             sourceData: try Data(contentsOf: try movingClip()),
@@ -381,7 +388,47 @@ final class RuntimeFrameTests: XCTestCase {
 
         let loaded = RuntimeFrameLoader.load(sequence: sequence, designID: built.design.id, in: store)
         XCTAssertEqual(loaded.missing, [1])
-        XCTAssertTrue(loaded.note.contains("MISSING"))
+        XCTAssertTrue(loaded.note.contains("FILLED"), loaded.note)
+        XCTAssertEqual(loaded.payload.foundCount, sequence.frameCount - 1)
+        // Every slot still has a picture, so nothing strobes.
+        XCTAssertEqual(loaded.payload.frames.count, sequence.frameCount)
+        XCTAssertTrue(loaded.payload.isDrawable)
+    }
+
+    /// Enough of the folder gone and there is nothing to fill from, at which
+    /// point the still picture is the honest answer rather than one frame held
+    /// for two seconds.
+    func testAnEmptyFrameFolderIsNotDrawnAsAnAnimation() async throws {
+        let store = try store()
+        let built = try await RuntimeDesignImporter(store: store).run(
+            sourceData: try Data(contentsOf: try movingClip()),
+            name: "moving",
+            options: options(rate: 2)
+        )
+        let sequence = try XCTUnwrap(built.manifest.frameSequence)
+        try FileManager.default.removeItem(at: store.framesFolder(for: built.design.id))
+
+        let loaded = RuntimeFrameLoader.load(sequence: sequence, designID: built.design.id, in: store)
+        XCTAssertFalse(loaded.payload.isDrawable)
+        XCTAssertTrue(loaded.note.contains("NOT DRAWABLE"), loaded.note)
+    }
+
+    func testGapsAtEitherEndAreFilledFromTheOnlyDirectionAvailable() {
+        // A hole at index 0 has nothing before it and has to look forward.
+        let sequence = RuntimeFrameSequence(
+            framesPerSecond: 2,
+            layout: .separate,
+            frameSize: CGSize(width: 4, height: 4),
+            rect: CGRect(x: 0, y: 0, width: 4, height: 4),
+            sourceRepeats: 1,
+            speed: 1,
+            totalFrameBytes: 0
+        )
+        let real = Image(systemName: "circle")
+        XCTAssertEqual(RuntimeFrameLoader.filled([nil, real, nil, nil]).count, 4)
+        XCTAssertEqual(RuntimeFrameLoader.filled([real, nil, nil, nil]).count, 4)
+        XCTAssertEqual(RuntimeFrameLoader.filled([nil, nil, nil, nil]).count, 0)
+        XCTAssertEqual(sequence.frameCount, 4)
     }
 
     func testTheStoreOnlyOffersRuntimeDesignsThatWereBuilt() async throws {
