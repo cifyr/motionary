@@ -67,10 +67,19 @@ struct FontSetGenerator {
 
     let store: DesignStore
     let bundle: Bundle
+    /// Artwork for a tile, so the icons baked into the wallpaper are the same
+    /// ones the widget draws over it. Whoever owns the skin library and the icon
+    /// cache supplies it; the default bakes SF Symbol fallbacks.
+    let tileArtwork: WallpaperComposer.ArtworkProvider
 
-    init(store: DesignStore, bundle: Bundle = .main) {
+    init(
+        store: DesignStore,
+        bundle: Bundle = .main,
+        tileArtwork: @escaping WallpaperComposer.ArtworkProvider = { _ in nil }
+    ) {
         self.store = store
         self.bundle = bundle
+        self.tileArtwork = tileArtwork
     }
 
     func build(
@@ -169,7 +178,17 @@ struct FontSetGenerator {
         onStage(.writingFonts(completed: spec.laneCount, total: spec.laneCount))
 
         onStage(.writingWallpaper)
-        let wallpaper = try FrameEncoder.pngData(frames[0])
+        // The wallpaper carries the tiles; the widget backdrop below does not.
+        // The widget draws its own live tiles, and only inside its frame - so a
+        // tile crossing that edge is completed by the wallpaper behind it, and
+        // baking them into the backdrop too would draw those halves twice.
+        let poster = await WallpaperComposer.compose(
+            frame: frames[0],
+            tiles: design.tiles,
+            screenSize: DeviceGeometry.screenPixelSize,
+            artwork: tileArtwork
+        )
+        let wallpaper = try FrameEncoder.pngData(poster)
         try wallpaper.write(to: store.wallpaperURL(for: design.id), options: DesignStore.writingOptions)
 
         // The full screen costs about 12.6MB decompressed and the widget only

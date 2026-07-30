@@ -166,19 +166,9 @@ struct BundleWriter {
     /// than teaching the extension about cache keys.
     private func installIcons(manifest: BuildManifest, from iconsFolder: URL?) throws {
         let manager = FileManager.default
-        let skins = try? SkinLibrary()
+        let artwork = TileArtwork(iconsFolder: iconsFolder)
         for tile in manifest.placedTiles {
-            // A skin wins over a catalogue icon: it is the artwork someone
-            // chose, against a default they did not.
-            let rendered: URL?
-            if let skin = tile.skin, let skins {
-                rendered = skins.url(for: skin)
-            } else if let icon = tile.icon, let iconsFolder {
-                rendered = iconsFolder.appendingPathComponent("\(icon.cacheKey).png")
-            } else {
-                rendered = nil
-            }
-            guard let rendered, manager.fileExists(atPath: rendered.path) else {
+            guard let rendered = artwork.url(for: tile) else {
                 // Not fatal: the tile falls back to its catalogue SF Symbol,
                 // which is a worse icon rather than a missing one.
                 continue

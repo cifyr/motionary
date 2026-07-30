@@ -403,12 +403,11 @@ struct LayoutEditor: View {
                     screenSize: model.screenPixelSize,
                     widgetRect: design.widgetRect
                 )
+                // Bounded by the screen, not by the widget frame: a tile may
+                // hang over the edge, because the wallpaper carries a picture
+                // of the part the widget cannot draw.
                 guard design.snapEnabled else {
-                    design.tiles[index].center = engine.clamp(
-                        center: moved,
-                        tileSize: extent,
-                        within: design.widgetRect
-                    )
+                    design.tiles[index].center = engine.clamp(center: moved, tileSize: extent)
                     return
                 }
                 let snapped = engine.snap(
@@ -416,11 +415,7 @@ struct LayoutEditor: View {
                     tileSize: extent,
                     siblings: design.tiles.filter { $0.id != tile.id }
                 )
-                design.tiles[index].center = engine.clamp(
-                    center: snapped.center,
-                    tileSize: extent,
-                    within: design.widgetRect
-                )
+                design.tiles[index].center = engine.clamp(center: snapped.center, tileSize: extent)
             }
             .onEnded { _ in tileBase = nil }
     }
@@ -514,26 +509,14 @@ struct LayoutEditor: View {
 
             let outside = design.tiles.filter { !SnapEngine.isFullyInside($0, frame: design.widgetRect) }
             if !outside.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(outside.count) app\(outside.count == 1 ? "" : "s") cross the widget edge and will be cut off.")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button("Bring them inside") {
-                        let engine = SnapEngine(
-                            screenSize: model.screenPixelSize,
-                            widgetRect: design.widgetRect
-                        )
-                        for index in design.tiles.indices {
-                            design.tiles[index].center = engine.clamp(
-                                center: design.tiles[index].center,
-                                tileSize: design.tiles[index].boundingExtent,
-                                within: design.widgetRect
-                            )
-                        }
-                    }
-                    .buttonStyle(.link)
-                }
+                Text("""
+                \(outside.count) app\(outside.count == 1 ? "" : "s") cross the widget edge. \
+                Only the part inside answers a tap; the rest is baked into the wallpaper, \
+                so save that to the phone as well.
+                """)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             skinPicker
@@ -559,7 +542,7 @@ struct LayoutEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text("The dashed frame is the widget. Only what falls inside it animates; the rest becomes the wallpaper.")
+            Text("The dashed frame is the widget. Only what falls inside it animates and answers a tap; the rest becomes the wallpaper, tiles included.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -584,15 +567,14 @@ struct LayoutEditor: View {
                         get: { design.tiles[index].size },
                         set: { size in
                             design.tiles[index].size = max(40, size)
-                            // Growing a tile can push it over the edge just as
+                            // Growing a tile can push it off the screen just as
                             // dragging can.
                             design.tiles[index].center = SnapEngine(
                                 screenSize: model.screenPixelSize,
                                 widgetRect: design.widgetRect
                             ).clamp(
                                 center: design.tiles[index].center,
-                                tileSize: design.tiles[index].boundingExtent,
-                                within: design.widgetRect
+                                tileSize: design.tiles[index].boundingExtent
                             )
                         }
                     ),
@@ -623,9 +605,9 @@ struct LayoutEditor: View {
     }
 
     private func add(appID: String) {
-        // Dropped into the middle of the widget frame rather than the middle
-        // of the screen: outside that frame a tile sits on wallpaper the
-        // widget never draws, which looks like it vanished.
+        // Dropped into the middle of the widget frame rather than the middle of
+        // the screen: outside that frame a tile is only a picture on the
+        // wallpaper, and a new tile should land somewhere it can be tapped.
         let frame = design.widgetRect
         var tile = PlacedTile(
             appID: appID,

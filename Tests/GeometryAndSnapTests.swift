@@ -407,60 +407,51 @@ final class GeometryAndSnapTests: XCTestCase {
     }
 }
 
-/// The widget is the only thing that draws a tile, and it can only draw inside
-/// its own frame. A tile straddling that edge is cut in half, and the wallpaper
-/// behind it carries no tiles at all, so nothing completes it on the other side.
-final class TileConfinementTests: XCTestCase {
+/// A tile may hang over the widget's edge: the wallpaper carries a baked picture
+/// of the part the widget cannot draw, so the tile still reads whole. What
+/// changes across that edge is whether it answers a tap.
+final class TilePlacementTests: XCTestCase {
     private let frame = DeviceGeometry.widgetRect
     private var engine: SnapEngine {
         SnapEngine(screenSize: DeviceGeometry.screenPixelSize, widgetRect: DeviceGeometry.widgetRect)
     }
 
-    func testClampKeepsATileInsideTheWidgetFrame() {
-        for point in [
-            CGPoint(x: 0, y: 0),
-            CGPoint(x: frame.minX, y: frame.midY),
-            CGPoint(x: frame.maxX, y: frame.midY),
-            CGPoint(x: frame.midX, y: frame.minY),
-            CGPoint(x: frame.midX, y: frame.maxY),
-            CGPoint(x: 9999, y: 9999),
-        ] {
-            let clamped = engine.clamp(center: point, tileSize: 180, within: frame)
-            let box = CGRect(x: clamped.x - 90, y: clamped.y - 90, width: 180, height: 180)
-            XCTAssertTrue(frame.contains(box), "\(point) clamped to \(clamped), which still leaves the frame")
-        }
+    /// The bound is the screen, not the frame - otherwise a tile could never be
+    /// placed half on, which is the whole point of baking them into the paper.
+    func testATileMayHangOverTheWidgetEdge() {
+        // On the frame's top edge, which is 270px down the screen: far enough in
+        // that the screen bound cannot be what holds the tile in place.
+        let straddling = CGPoint(x: frame.midX, y: frame.minY)
+        XCTAssertEqual(engine.clamp(center: straddling, tileSize: 180), straddling)
+        XCTAssertFalse(
+            SnapEngine.isFullyInside(
+                PlacedTile(appID: "spotify", center: straddling, size: 180),
+                frame: frame
+            )
+        )
     }
 
     /// A rotated tile reaches about 1.41x its side, so clamping against the
-    /// plate's side alone would let a corner cross the edge.
-    func testRotationIsAccountedFor() {
-        var tile = PlacedTile(appID: "spotify", center: CGPoint(x: frame.maxX, y: frame.midY), size: 200)
+    /// plate's side alone would let a corner leave the screen.
+    func testRotationIsAccountedForAgainstTheScreen() {
+        var tile = PlacedTile(
+            appID: "spotify",
+            center: CGPoint(x: DeviceGeometry.screenPixelSize.width, y: frame.midY),
+            size: 200
+        )
         tile.rotation = 45
-        let clamped = engine.clamp(center: tile.center, tileSize: tile.boundingExtent, within: frame)
-        tile.center = clamped
-        XCTAssertTrue(SnapEngine.isFullyInside(tile, frame: frame))
+        tile.center = engine.clamp(center: tile.center, tileSize: tile.boundingExtent)
+        XCTAssertTrue(
+            SnapEngine.isFullyInside(tile, frame: CGRect(origin: .zero, size: DeviceGeometry.screenPixelSize))
+        )
     }
 
-    /// Without a bound it still means the screen, so the older callers and the
-    /// existing tests keep their meaning.
-    func testTheDefaultBoundIsStillTheScreen() {
-        let clamped = engine.clamp(center: CGPoint(x: -500, y: -500), tileSize: 180)
-        XCTAssertEqual(clamped.x, 90, accuracy: 0.01)
-        XCTAssertEqual(clamped.y, 90, accuracy: 0.01)
-    }
-
-    func testATileOutsideTheFrameIsReported() {
+    /// Reported, not corrected: the editor says how many tiles cross the edge so
+    /// a layout that leans on the wallpaper does so knowingly.
+    func testATileCrossingTheFrameIsReported() {
         let inside = PlacedTile(appID: "spotify", center: CGPoint(x: frame.midX, y: frame.midY), size: 180)
         let straddling = PlacedTile(appID: "spotify", center: CGPoint(x: frame.minX, y: frame.midY), size: 180)
         XCTAssertTrue(SnapEngine.isFullyInside(inside, frame: frame))
         XCTAssertFalse(SnapEngine.isFullyInside(straddling, frame: frame))
-    }
-
-    /// A tile too big for the frame has no valid position; it is centred rather
-    /// than letting the clamp invert and throw it somewhere arbitrary.
-    func testATileLargerThanTheFrameIsCentred() {
-        let clamped = engine.clamp(center: .zero, tileSize: frame.width * 3, within: frame)
-        XCTAssertEqual(clamped.x, frame.midX, accuracy: 0.01)
-        XCTAssertEqual(clamped.y, frame.midY, accuracy: 0.01)
     }
 }
