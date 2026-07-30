@@ -29,7 +29,8 @@ struct DesignProvider: TimelineProvider {
         WidgetRenderLog.append("""
         ask  timeline    preview=\(context.isPreview) family=\(context.family.rawValue) \
         size=\(Int(context.displaySize.width))x\(Int(context.displaySize.height)) \
-        embed=\(WidgetArchiveFontEmbedding.isEnabled)
+        embed=\(WidgetArchiveFontEmbedding.isEnabled) \
+        embedLinked=\(WidgetArchiveFontEmbedding.isLinked)
         """)
         // Archiving happens after this returns, so what this finds belongs to the
         // previous attempt. Captured here anyway: it is the only point in the

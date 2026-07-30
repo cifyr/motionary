@@ -1,31 +1,70 @@
 import SwiftUI
 import XCTest
 
-/// Pins down the one private WidgetKit switch that could let a design built on
-/// the phone reach the widget renderer.
+/// Pins down the one private WidgetKit switch that could have let a design built
+/// on the phone reach the widget renderer.
 ///
-/// What these tests can and cannot settle. They run in the simulator, which has
-/// none of the device's sandbox restrictions, so nothing here says a font will
-/// draw on a phone. What they do settle is entirely OS-level and carries across:
-/// whether WidgetKit still exports the accessors, whether calling them through
-/// `@_silgen_name` has the right calling convention, and what the flag's default
-/// is. Those are facts about the framework, not about the sandbox. The
-/// question these cannot touch - whether a `true` flag actually changes what the
-/// archiver writes - needs a widget render, and on device.
+/// It does not, and that is now measured rather than open: with the flag set and
+/// read back as `true` inside the widget extension's own archived render, the
+/// archived timeline is unchanged and the font is still written as a URL. See
+/// `Tools/font-embed-shot.sh`. What is left here is the shim itself, kept as a
+/// probe against a future iOS changing its mind, so these tests guard the shim's
+/// two remaining properties: the accessors are still exported and callable with
+/// the right convention, and the shim declines to call them when they are not.
 ///
-/// Written to fail loudly if the symbols disappear, because that is the event
-/// worth being told about: the accessors are strong undefined symbols and their
-/// removal takes the widget extension down in dyld at launch.
+/// What these cannot settle: they run in the simulator, which has none of the
+/// device's sandbox restrictions, so nothing here says whether a font would
+/// draw on a phone.
 final class WidgetArchiveFontEmbeddingTests: XCTestCase {
     /// The accessors are reachable on the OS this test is running on.
     ///
-    /// If this fails, the widget extension in this build cannot launch at all,
-    /// so it is the first thing to check and the reason to check it here.
+    /// Worth failing loudly on. Not because a shipped build would break - it no
+    /// longer references them - but because their disappearance is the one event
+    /// that would make the probe's result stale.
     func testWidgetKitStillExportsTheEmbeddingAccessors() {
         XCTAssertTrue(
             WidgetArchiveFontEmbedding.isSymbolPresent,
-            "WidgetKit no longer exports _wantsCustomFontsEmbeddedInArchive; the extension will die in dyld"
+            "WidgetKit no longer exports _wantsCustomFontsEmbeddedInArchive"
         )
+    }
+
+    /// The test target builds with the shim, so a failure here means the rest of
+    /// this suite is silently testing stubs.
+    func testTheProbeIsCompiledIntoTheTestBuild() {
+        XCTAssertTrue(
+            WidgetArchiveFontEmbedding.isLinked,
+            "FONT_EMBED_PROBE is not set for MotionaryTests; these tests prove nothing"
+        )
+    }
+
+    /// With the symbols reported absent, the modifier must not reach them.
+    ///
+    /// This is the whole safety story. The accessors are strong bindings resolved
+    /// at launch, so on an OS that dropped them the stub is null and calling it
+    /// takes the widget extension down. Asserted by observing that nothing was
+    /// written back: `lastObserved` is only ever set from inside the closure that
+    /// touches private API.
+    @MainActor
+    func testTheModifierDoesNotTouchTheAccessorsWhenTheSymbolIsAbsent() {
+        WidgetArchiveFontEmbedding.resetLastObservedForTesting()
+        let guarded = Text("12:34").embeddingCustomFontsInArchive(true, symbolPresent: false)
+        let renderer = ImageRenderer(content: guarded)
+        XCTAssertNotNil(renderer.uiImage, "the guarded view has to still render")
+        XCTAssertNil(
+            WidgetArchiveFontEmbedding.lastObserved,
+            "the shim called into WidgetKit despite the symbol being reported missing"
+        )
+    }
+
+    /// The same view with the symbol present does reach them, so the test above
+    /// is measuring the guard rather than a modifier that never does anything.
+    @MainActor
+    func testTheModifierDoesTouchTheAccessorsWhenTheSymbolIsPresent() {
+        WidgetArchiveFontEmbedding.resetLastObservedForTesting()
+        let flagged = Text("12:34").embeddingCustomFontsInArchive(true, symbolPresent: true)
+        let renderer = ImageRenderer(content: flagged)
+        XCTAssertNotNil(renderer.uiImage)
+        XCTAssertEqual(WidgetArchiveFontEmbedding.lastObserved, true)
     }
 
     /// The setter runs inside a real SwiftUI environment and the value sticks -

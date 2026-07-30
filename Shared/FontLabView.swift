@@ -82,6 +82,11 @@ struct FontLabView: View {
                 magnification: Self.renderScale,
                 font: font
             )
+            // Set here as well as at the root of the archived tree. If the flag
+            // embedded font bytes only when it is in scope at the exact node
+            // whose font is being encoded, a root-only test would report a
+            // false negative and close the question wrongly.
+            .embeddingCustomFontsInArchive(WidgetArchiveFontEmbedding.isEnabled)
             .offset(x: -window.minX, y: -window.minY)
             .frame(width: size.width, height: size.height, alignment: .topLeading)
             .clipped()

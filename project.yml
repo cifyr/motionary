@@ -25,6 +25,20 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.caden.Motionary
         INFOPLIST_FILE: App/Info.plist
         CODE_SIGN_ENTITLEMENTS: App/Motionary.entitlements
+        # Lets the FONT_EMBED_PROBE build still link if a future SDK stops
+        # exporting the two private `_wantsCustomFontsEmbeddedInArchive`
+        # accessors. It does NOT make a found symbol weak - the reference stays
+        # strong and two-level - which is why the shim is behind a compile flag
+        # rather than shipped. See Shared/WidgetArchiveFontEmbedding.swift.
+        OTHER_LDFLAGS:
+          - -Xlinker
+          - -U
+          - -Xlinker
+          - "_$s7SwiftUI17EnvironmentValuesV9WidgetKitE34_wantsCustomFontsEmbeddedInArchiveSbvg"
+          - -Xlinker
+          - -U
+          - -Xlinker
+          - "_$s7SwiftUI17EnvironmentValuesV9WidgetKitE34_wantsCustomFontsEmbeddedInArchiveSbvs"
     dependencies:
       - target: MotionaryWidgetExtension
     scheme:
@@ -47,6 +61,20 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Widget/MotionaryWidget.entitlements
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
+        # Lets the FONT_EMBED_PROBE build still link if a future SDK stops
+        # exporting the two private `_wantsCustomFontsEmbeddedInArchive`
+        # accessors. It does NOT make a found symbol weak - the reference stays
+        # strong and two-level - which is why the shim is behind a compile flag
+        # rather than shipped. See Shared/WidgetArchiveFontEmbedding.swift.
+        OTHER_LDFLAGS:
+          - -Xlinker
+          - -U
+          - -Xlinker
+          - "_$s7SwiftUI17EnvironmentValuesV9WidgetKitE34_wantsCustomFontsEmbeddedInArchiveSbvg"
+          - -Xlinker
+          - -U
+          - -Xlinker
+          - "_$s7SwiftUI17EnvironmentValuesV9WidgetKitE34_wantsCustomFontsEmbeddedInArchiveSbvs"
 
   MotionaryTests:
     type: bundle.unit-test
@@ -65,6 +93,25 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.caden.MotionaryTests
+        # The private-font-embedding shim is compiled in here always, so the unit
+        # suite is what notices if WidgetKit's accessors change or disappear. The
+        # app and the extension only get it when a measurement run asks, because
+        # the symbols are strong and a shipped widget should not depend on them.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: [$(inherited), FONT_EMBED_PROBE]
+        # Lets the FONT_EMBED_PROBE build still link if a future SDK stops
+        # exporting the two private `_wantsCustomFontsEmbeddedInArchive`
+        # accessors. It does NOT make a found symbol weak - the reference stays
+        # strong and two-level - which is why the shim is behind a compile flag
+        # rather than shipped. See Shared/WidgetArchiveFontEmbedding.swift.
+        OTHER_LDFLAGS:
+          - -Xlinker
+          - -U
+          - -Xlinker
+          - "_$s7SwiftUI17EnvironmentValuesV9WidgetKitE34_wantsCustomFontsEmbeddedInArchiveSbvg"
+          - -Xlinker
+          - -U
+          - -Xlinker
+          - "_$s7SwiftUI17EnvironmentValuesV9WidgetKitE34_wantsCustomFontsEmbeddedInArchiveSbvs"
 
   # A design can only reach the Home Screen by being compiled into the widget
   # extension's bundle, so building one is a toolchain run rather than
