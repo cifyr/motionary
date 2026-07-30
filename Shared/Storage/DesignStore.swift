@@ -247,6 +247,61 @@ struct DesignStore {
         .sorted { $0.updatedAt > $1.updatedAt }
     }
 
+    /// Copies a design under a new id, so a layout can be varied without
+    /// risking the one that already works.
+    ///
+    /// Only the inputs are copied -- the clip, the background and the placed
+    /// pictures. Fonts, the manifest and the wallpaper are build outputs that
+    /// belong to the id that produced them, and carrying them over would leave
+    /// the copy claiming a build it does not have.
+    ///
+    /// The copy is never starred, whatever the original was: duplicating a
+    /// design should not quietly add 29MB to the next install.
+    func duplicate(_ design: DesignDocument, named name: String? = nil) throws -> DesignDocument {
+        var copy = design
+        copy.id = UUID()
+        copy.name = name ?? Self.copyName(for: design.name)
+        copy.createdAt = Date()
+        copy.isStarred = false
+
+        try createFolder(for: copy.id)
+
+        let source = folder(for: design.id)
+        let destination = folder(for: copy.id)
+        var carried: [String] = [design.sourceVideoName]
+        if let background = design.backgroundName { carried.append(background) }
+
+        for name in carried {
+            let from = source.appendingPathComponent(name)
+            guard FileManager.default.fileExists(atPath: from.path) else { continue }
+            try FileManager.default.copyItem(at: from, to: destination.appendingPathComponent(name))
+        }
+
+        if FileManager.default.fileExists(atPath: assetsFolder(for: design.id).path) {
+            try FileManager.default.copyItem(
+                at: assetsFolder(for: design.id),
+                to: assetsFolder(for: copy.id)
+            )
+        }
+
+        try save(copy)
+        Self.logger.info(
+            "duplicated \(design.id.uuidString, privacy: .public) as \(copy.id.uuidString, privacy: .public)"
+        )
+        return copy
+    }
+
+    /// "Board" -> "Board copy" -> "Board copy 2", so duplicating twice does not
+    /// produce two designs with the same name.
+    static func copyName(for name: String) -> String {
+        guard name.hasSuffix(" copy") || name.contains(" copy ") else { return "\(name) copy" }
+        let parts = name.split(separator: " ")
+        if let last = parts.last, let number = Int(last) {
+            return parts.dropLast().joined(separator: " ") + " \(number + 1)"
+        }
+        return "\(name) 2"
+    }
+
     /// Designs are whole directories of generated artefacts, so removal moves
     /// them into a timestamped trash folder instead of deleting outright.
     func archive(id: UUID) throws {
