@@ -213,10 +213,16 @@ struct DesignStore {
         try FileManager.default.createDirectory(at: fontsFolder(for: id), withIntermediateDirectories: true, attributes: Self.directoryAttributes)
     }
 
-    func save(_ design: DesignDocument) throws {
+    /// `touch: false` writes without restamping `updatedAt`.
+    ///
+    /// Moving a design between stores is not editing it. Migration used to go
+    /// through the touching path, which restamped every design it carried over
+    /// to the same second -- and since the library sorts on `updatedAt`, that
+    /// replaced the real order of work with the order of one batch job.
+    func save(_ design: DesignDocument, touch: Bool = true) throws {
         try createFolder(for: design.id)
         var updated = design
-        updated.updatedAt = Date()
+        if touch { updated.updatedAt = Date() }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(updated)
@@ -260,7 +266,10 @@ struct DesignStore {
     func duplicate(_ design: DesignDocument, named name: String? = nil) throws -> DesignDocument {
         var copy = design
         copy.id = UUID()
-        copy.name = name ?? Self.copyName(for: design.name)
+        copy.name = Self.uniqueName(
+            name ?? Self.copyName(for: design.name),
+            among: loadAll().map(\.name)
+        )
         copy.createdAt = Date()
         copy.isStarred = false
 
@@ -289,6 +298,20 @@ struct DesignStore {
             "duplicated \(design.id.uuidString, privacy: .public) as \(copy.id.uuidString, privacy: .public)"
         )
         return copy
+    }
+
+    /// A name not already in the library.
+    ///
+    /// A design is named after the file it was made from, and the same file
+    /// gets dropped over and over while a layout is worked out. Without this
+    /// the library fills with rows that are identical in every visible
+    /// respect, which is exactly what happened: nineteen designs all called
+    /// after one downloaded GIF.
+    static func uniqueName(_ base: String, among existing: [String]) -> String {
+        guard existing.contains(base) else { return base }
+        var attempt = 2
+        while existing.contains("\(base) \(attempt)") { attempt += 1 }
+        return "\(base) \(attempt)"
     }
 
     /// "Board" -> "Board copy" -> "Board copy 2", so duplicating twice does not

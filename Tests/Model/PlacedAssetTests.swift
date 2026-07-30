@@ -219,6 +219,40 @@ final class DesignStoreAssetTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: store.manifestURL(for: copy.id).path))
     }
 
+    /// Nineteen designs in the real library were all named after one downloaded
+    /// GIF, which made the list impossible to navigate.
+    func testASecondDesignOfTheSameNameIsNumbered() {
+        XCTAssertEqual(DesignStore.uniqueName("clip", among: []), "clip")
+        XCTAssertEqual(DesignStore.uniqueName("clip", among: ["clip"]), "clip 2")
+        XCTAssertEqual(DesignStore.uniqueName("clip", among: ["clip", "clip 2"]), "clip 3")
+        XCTAssertEqual(DesignStore.uniqueName("clip", among: ["other"]), "clip")
+    }
+
+    func testDuplicatingTwiceDoesNotProduceTwoDesignsOfTheSameName() throws {
+        let original = design(name: "Board")
+        try store.save(original)
+
+        let first = try store.duplicate(original)
+        let second = try store.duplicate(original)
+
+        XCTAssertEqual(first.name, "Board copy")
+        XCTAssertNotEqual(second.name, first.name)
+    }
+
+    /// Carrying a design between stores is not editing it. Restamping it puts
+    /// the library in the order of the batch job rather than the order of work.
+    func testSavingWithoutTouchingKeepsTheEditedTime() throws {
+        var original = design(name: "Board")
+        let stamped = Date(timeIntervalSinceReferenceDate: 100_000)
+        original.updatedAt = stamped
+
+        try store.save(original, touch: false)
+        XCTAssertEqual(try store.load(id: designID).updatedAt, stamped)
+
+        try store.save(original)
+        XCTAssertGreaterThan(try store.load(id: designID).updatedAt, stamped)
+    }
+
     func testCopyNamesDoNotCollideWhenDuplicatingTwice() {
         XCTAssertEqual(DesignStore.copyName(for: "Board"), "Board copy")
         XCTAssertEqual(DesignStore.copyName(for: "Board copy"), "Board copy 2")

@@ -115,7 +115,9 @@ struct StudioPipeline: Sendable {
                 if !manager.fileExists(atPath: destination.path) {
                     try manager.copyItem(at: source, to: destination)
                 }
-                try store.save(design)
+                // Not touched: carrying a design across stores is not editing
+                // it, and the library sorts on updatedAt.
+                try store.save(design, touch: false)
                 moved += 1
             } catch {
                 continue
@@ -163,8 +165,14 @@ struct StudioPipeline: Sendable {
         // Named for what the bytes are rather than what they were called: the
         // extractor picks its decoder from the extension.
         let isGIF = data.starts(with: Data("GIF8".utf8))
+        // Numbered against the library, because the same clip gets dropped
+        // repeatedly while a layout is worked out and rows that read
+        // identically cannot be told apart afterwards.
         var design = DesignDocument.new(
-            name: source.deletingPathExtension().lastPathComponent,
+            name: DesignStore.uniqueName(
+                source.deletingPathExtension().lastPathComponent,
+                among: store.loadAll().map(\.name)
+            ),
             sourceVideoName: isGIF ? "source.gif" : "source.mov"
         )
         try store.createFolder(for: design.id)
