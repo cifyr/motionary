@@ -40,7 +40,12 @@ struct DesignWidgetView: View {
 
     @ViewBuilder
     private var content: some View {
-        if FontLab.isEnabled, let lab = lab() {
+        if EdgeLab.isEnabled {
+            // Filled to the widget's own bounds rather than cut from the screen
+            // composition: the question it answers is what the system does to
+            // those bounds.
+            EdgeLabView()
+        } else if FontLab.isEnabled, let lab = lab() {
             lab
         } else if let source = imported() ?? bundled() {
             let _ = record(source: source)
