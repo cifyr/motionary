@@ -117,7 +117,7 @@ belong in that table — the widget's frame is not derivable, and a few pixels o
 drift shows as a seam against the wallpaper.
 
 The system hands over slightly *more* widget than the frame says, and starts it
-2px further left: 1078x1645 px at (64, 270) against a cut frame of 1074x1632 at
+2px further left: 1079x1645 px at (64, 270) against a cut frame of 1074x1632 at
 (66, 270). The extension lays its content out from the rendered origin — using the
 cut frame's put every design 2px left of the wallpaper — and the backdrop is
 padded to cover the difference. See
@@ -143,6 +143,10 @@ padded to cover the difference. See
   single-pixel step needs quality 0.95 or better.
 - **The project lists fonts by name**, so it must be regenerated whenever they
   change — not only when a device is attached.
+- **An iPhone screenshot is Display P3; the pipeline's pictures are untagged
+  sRGB.** Differencing one against the other without converting invents about
+  −13 red / +14 blue on warm content, which is big enough to look like a finding.
+  sRGB red is (234, 51, 35) read as P3.
 - **A stale studio binary silently un-applies a pipeline change.** Rebuilding
   designs is not enough if what rebuilt them was compiled before the change: a
   design shipped with neither the edge nor the colour correction in its backdrop
