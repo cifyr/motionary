@@ -196,9 +196,10 @@ struct FontSetGenerator {
         // 46.7MB against a working reference of 43.3MB and its render was
         // dropped, which is what a black widget looks like from outside.
         //
-        // Padded, because the system hands over 359x548pt where the
-        // calibration says 358x544: cropping to the exact frame would leave a
-        // few unpainted pixels down the right and bottom edges.
+        // Padded, because the system hands over 1078x1645px where the cut frame
+        // is 1074x1632 and starts 2px further right: cropping to the exact frame
+        // would leave unpainted pixels on all four sides. The padding has to
+        // cover DeviceGeometry.renderedWidgetRect, which a test asserts.
         let padding: CGFloat = 24
         let backdropRect = design.widgetRect
             .insetBy(dx: -padding, dy: -padding)

@@ -17,6 +17,9 @@ Motionary.xcodeproj/
 # Archived designs
 .archive/
 
+# Python byte cache, from the analysis scripts importing each other
+__pycache__/
+
 # Built by Motionary Studio from a source clip: 45MB of derived fonts and
 # pictures that change on every build. Run the studio to regenerate them.
 Resources/MFont*.ttf

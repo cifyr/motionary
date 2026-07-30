@@ -130,6 +130,68 @@ final class EdgeCompensationTests: XCTestCase {
         XCTAssertTrue(corrected === image)
     }
 
+    // MARK: - As the pipeline composes them
+
+    /// Both corrections, in the order `FontSetGenerator` applies them, on an image
+    /// the shape of the padded backdrop.
+    ///
+    /// A design shipped with neither of them in its backdrop, which is invisible
+    /// from any test that exercises the two in isolation: each was fine. What was
+    /// not established anywhere is that a backdrop coming out of this pair is both
+    /// tinted *and* darkened at the edge, so that is what this pins. A shot of a
+    /// design built without them measures the whole line rather than what is left
+    /// of it, and folding that into the profile doubles it -
+    /// `Tools/edge-calibrate.py` refuses for that reason.
+    func testTheBackdropGetsBothTheTintAndTheEdgeSubtraction() throws {
+        let widgetRect = DeviceGeometry.widgetRect
+        let padded = widgetRect.insetBy(dx: -24, dy: -24)
+        let originY = Int(padded.minY)
+        let level = 180
+        let image = try flat(level: level, width: 8, height: Int(padded.height))
+
+        let corrected = EdgeCompensation.applied(
+            to: WidgetTint.applied(to: image),
+            originY: originY,
+            widgetRect: widgetRect
+        )
+        let before = try Pixels(image)
+        let after = try Pixels(corrected)
+        let source = Double(before.at(x: 4, y: 0).g)
+
+        // Well inside the widget: the tint and nothing else.
+        let middle = Int(widgetRect.midY) - originY
+        XCTAssertEqual(
+            Double(after.at(x: 4, y: middle).g),
+            source * WidgetTint.gain.g,
+            accuracy: 2,
+            "the middle of the backdrop is not carrying the colour gain"
+        )
+
+        // The widget's own top and bottom rows: the tint, then the line taken out.
+        for (label, screenRow, profile) in [
+            ("top", EdgeCompensation.topEdgeRow(widgetRect: widgetRect), EdgeCompensation.topAdded[0]),
+            ("bottom", EdgeCompensation.bottomEdgeRow(widgetRect: widgetRect), EdgeCompensation.bottomAdded[0]),
+        ] {
+            let row = screenRow - originY
+            XCTAssertEqual(
+                Double(after.at(x: 4, y: row).g),
+                source * WidgetTint.gain.g - profile.g * EdgeCompensation.strength,
+                accuracy: 2,
+                "the \(label) row is not both tinted and darkened"
+            )
+        }
+
+        // And the rows just outside the widget, which the padding covers, keep the
+        // tint alone: darkening them would put a band next to no line at all.
+        let above = Int(widgetRect.minY) - originY - 1
+        XCTAssertEqual(
+            Double(after.at(x: 4, y: above).g),
+            source * WidgetTint.gain.g,
+            accuracy: 2,
+            "the padding above the widget was darkened"
+        )
+    }
+
     private func flat(level: Int, width: Int, height: Int) throws -> CGImage {
         let context = try XCTUnwrap(CGContext(
             data: nil,
