@@ -1,0 +1,59 @@
+name: CI
+
+# A widget that draws nothing looks exactly like a widget that is broken, so the
+# cheap checks matter: does every target still compile for both platforms, and
+# does the suite still pass. Neither can tell you whether the widget draws - that
+# needs a rendered one, which is what Tools/edge-shot.sh and Tools/lab-shot.sh are
+# for, and they are too slow for every push.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # The .xcodeproj is generated, never committed, so a checkout has none.
+      - name: Generate the project
+        run: xcodegen generate
+
+      # No signing: a simulator build does not need it, and CI has no identity.
+      # A fresh clone also has no designs in it - prebuilt resources are build
+      # output and ignored - so tests that need one skip themselves and say so.
+      # Picked from what the runner actually has rather than hard-coded: the image
+      # changes its simulator list without notice, and a wrong name fails as
+      # "destination not found", which reads like a broken project.
+      - name: Unit tests
+        run: |
+          set -o pipefail
+          UDID=$(xcrun simctl list devices available -j \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for k in sorted(d, reverse=True) if "iOS" in k for x in d[k] if "iPhone" in x["name"]))')
+          echo "using simulator $UDID"
+          xcodebuild test \
+            -scheme Motionary \
+            -destination "id=$UDID" \
+            -only-testing:MotionaryTests \
+            CODE_SIGNING_ALLOWED=NO \
+            | tail -40
+
+      # The studio is where every design comes from, and it shares the whole
+      # pipeline with the phone, so it breaking is not a lesser failure.
+      - name: Build Motionary Studio
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -scheme MotionaryStudio \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            | tail -20
