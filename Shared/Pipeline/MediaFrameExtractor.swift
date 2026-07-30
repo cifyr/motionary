@@ -154,6 +154,16 @@ struct MediaFrameExtractor {
     /// rounded, so a square confinement leaves the clip showing in the corners
     /// of the wallpaper where the background should be.
     let clipCornerRadius: CGFloat
+    /// Wraps sampling back to the start of the source after this many seconds of
+    /// source time. Nil samples straight through, which is what every lane-font
+    /// build does.
+    ///
+    /// The runtime-frame route needs it. Its frames have to fill the blink
+    /// font's two-second cycle whatever the source's own length is, so a 0.75s
+    /// clip is sampled over 2.25s of source time and has to come round three
+    /// times. Without wrapping, `AVAssetImageGenerator` runs off the end of the
+    /// clip and the import fails with a frame count one short.
+    let sourceLoop: TimeInterval?
 
     init(
         url: URL,
@@ -161,7 +171,8 @@ struct MediaFrameExtractor {
         transform: MediaTransform = .identity,
         background: CGImage? = nil,
         clipRect: CGRect? = nil,
-        clipCornerRadius: CGFloat = 0
+        clipCornerRadius: CGFloat = 0,
+        sourceLoop: TimeInterval? = nil
     ) {
         self.url = url
         self.screenSize = screenSize
@@ -169,6 +180,7 @@ struct MediaFrameExtractor {
         self.background = background
         self.clipRect = clipRect
         self.clipCornerRadius = clipCornerRadius
+        self.sourceLoop = sourceLoop
     }
 
     var kind: MediaKind { MediaKind.detect(at: url) }
@@ -303,6 +315,51 @@ struct MediaFrameExtractor {
         return try raw.enumerated().map { try compose($0.element, frameIndex: $0.offset) }
     }
 
+    /// The same frames, handed over one at a time and never all held at once.
+    ///
+    /// This exists because the phone cannot afford the array. A composed frame
+    /// is the whole screen — 1206x2622 at 4 bytes is 12.6MB — and a 64-frame
+    /// loop is 810MB of live bitmaps. The Mac shrugs at that; the phone is
+    /// killed for it. Encoding and writing each frame as it arrives keeps the
+    /// peak at one frame, and the runtime-frame route is the only reason a
+    /// build ever runs on device.
+    func forEachComposedFrame(
+        startFrame: Int,
+        count: Int,
+        frameRate: Int,
+        speed: Double = 1,
+        progress: (@Sendable (Double) -> Void)? = nil,
+        handler: (Int, CGImage) throws -> Void
+    ) async throws {
+        let rate = Double(max(frameRate, 1)) / max(speed, 0.01)
+        var emitted = 0
+        let consume: (CGImage) throws -> Void = { raw in
+            try handler(emitted, try self.compose(raw, frameIndex: emitted))
+            emitted += 1
+            progress?(Double(emitted) / Double(max(1, count)))
+        }
+
+        switch kind {
+        case .video:
+            try await streamVideoFrames(startFrame: startFrame, count: count, rate: rate, body: consume)
+        case .gif:
+            try streamGIFFrames(startFrame: startFrame, count: count, rate: rate, body: consume)
+        }
+
+        guard emitted == count else {
+            throw MediaImportError.tooFewFrames(found: emitted, needed: count, url: url)
+        }
+    }
+
+    /// Source time for sample `index`, wrapped when the source has to come
+    /// round more than once to fill the requested span.
+    private func sampleTime(index: Int, rate: Double) -> TimeInterval {
+        let raw = Double(index) / rate
+        guard let sourceLoop, sourceLoop > 0 else { return raw }
+        let wrapped = raw.truncatingRemainder(dividingBy: sourceLoop)
+        return wrapped < 0 ? wrapped + sourceLoop : wrapped
+    }
+
     // MARK: - Video
 
     private func videoSummary() async throws -> MediaSummary {
@@ -334,6 +391,21 @@ struct MediaFrameExtractor {
         rate: Double,
         progress: (@Sendable (Double) -> Void)?
     ) async throws -> [CGImage] {
+        var frames: [CGImage] = []
+        frames.reserveCapacity(count)
+        try await streamVideoFrames(startFrame: startFrame, count: count, rate: rate) { image in
+            frames.append(image)
+            progress?(Double(frames.count) / Double(max(1, count)))
+        }
+        return frames
+    }
+
+    private func streamVideoFrames(
+        startFrame: Int,
+        count: Int,
+        rate: Double,
+        body: (CGImage) throws -> Void
+    ) async throws {
         let asset = AVURLAsset(url: url)
         guard try await asset.loadTracks(withMediaType: .video).first != nil else {
             throw MediaImportError.noVideoTrack(url: url)
@@ -345,22 +417,23 @@ struct MediaFrameExtractor {
         generator.requestedTimeToleranceAfter = .zero
         generator.maximumSize = CGSize(width: screenSize.width * 2, height: screenSize.height * 2)
 
-        var frames: [CGImage] = []
-        frames.reserveCapacity(count)
         for index in 0 ..< count {
-            let time = CMTime(seconds: Double(startFrame + index) / rate, preferredTimescale: 600)
+            let seconds = sampleTime(index: startFrame + index, rate: rate)
+            let time = CMTime(seconds: seconds, preferredTimescale: 600)
+            let decoded: CGImage
             do {
-                let (image, _) = try await generator.image(at: time)
-                frames.append(image)
+                (decoded, _) = try await generator.image(at: time)
             } catch {
                 // A clip can end a frame or two before its declared duration;
                 // stop cleanly rather than failing the whole import.
                 Self.logger.error("frame \(index) at \(time.seconds)s failed: \(String(describing: error), privacy: .public)")
                 break
             }
-            progress?(Double(index + 1) / Double(count))
+            // Outside the catch on purpose: a write failure in the handler must
+            // surface as itself, not be mistaken for a clip that ended early
+            // and reported as a frame count one short.
+            try body(decoded)
         }
-        return frames
     }
 
     // MARK: - GIF
@@ -403,6 +476,21 @@ struct MediaFrameExtractor {
         rate: Double,
         progress: (@Sendable (Double) -> Void)?
     ) throws -> [CGImage] {
+        var frames: [CGImage] = []
+        frames.reserveCapacity(count)
+        try streamGIFFrames(startFrame: startFrame, count: count, rate: rate) { image in
+            frames.append(image)
+            progress?(Double(frames.count) / Double(max(1, count)))
+        }
+        return frames
+    }
+
+    private func streamGIFFrames(
+        startFrame: Int,
+        count: Int,
+        rate: Double,
+        body: (CGImage) throws -> Void
+    ) throws {
         let source = try imageSource()
         let total = CGImageSourceGetCount(source)
         guard total > 0 else { throw MediaImportError.emptySource(url: url) }
@@ -419,20 +507,18 @@ struct MediaFrameExtractor {
             running += delay
         }
 
-        var frames: [CGImage] = []
-        frames.reserveCapacity(count)
         for index in 0 ..< count {
-            let time = Double(startFrame + index) / rate
+            // A GIF already wraps on its own length; `sourceLoop` wraps first
+            // when a design asked for a shorter loop than the whole file.
+            let time = sampleTime(index: startFrame + index, rate: rate)
             let wrapped = duration > 0 ? time.truncatingRemainder(dividingBy: duration) : 0
             let frameIndex = starts.lastIndex { $0 <= wrapped } ?? 0
             guard let image = CGImageSourceCreateImageAtIndex(source, frameIndex, nil) else {
                 throw MediaImportError.renderFailed(frameIndex: frameIndex)
             }
-            frames.append(image)
-            progress?(Double(index + 1) / Double(count))
+            try body(image)
         }
-        Self.logger.info("decoded \(frames.count) GIF samples at \(rate)fps from \(total) source frames over \(duration)s")
-        return frames
+        Self.logger.info("sampled \(count) GIF frames at \(rate)fps from \(total) source frames over \(duration)s")
     }
 
     private func frameDelays(in source: CGImageSource) -> [TimeInterval] {
