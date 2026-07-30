@@ -37,9 +37,21 @@ import os
 // A `dlsym` plus `@convention(c)` version also segfaults, for the same reason
 // plus the C convention's different handling of the struct.
 //
-// FAILURE MODE, stated plainly: these are strong undefined symbols. If Apple
-// ever stops exporting them, the widget extension fails to bind at launch and
-// dies in dyld - it does not fall back to a static widget.
+// FAILURE MODE, stated as measured. Declared this way these are *strong*
+// undefined symbols bound two-level to WidgetKit: `nm -m` on the built extension
+// reports "(undefined) external ... (from WidgetKit)". An OS that stopped
+// exporting them would therefore kill the extension in dyld at launch rather
+// than degrade, and `-Xlinker -U` does NOT change that - it permits a symbol to
+// be missing at *link* time, and leaves a found symbol strongly bound. That was
+// checked, not assumed.
+//
+// So the risk is removed by not linking them unless asked. The shim exists only
+// under `FONT_EMBED_PROBE`, which the unit tests and `Tools/font-embed-shot.sh`
+// set and an ordinary build does not - a shipped widget extension contains no
+// reference to either accessor. `-U` is still passed so that the probe keeps
+// building against a future SDK that has dropped them, and every call is gated
+// on `isSymbolPresent` so a null stub is never jumped to.
+#if FONT_EMBED_PROBE
 extension EnvironmentValues {
     @_silgen_name("$s7SwiftUI17EnvironmentValuesV9WidgetKitE34_wantsCustomFontsEmbeddedInArchiveSbvs")
     mutating func _setWantsCustomFontsEmbeddedInArchive(_ newValue: Bool)
@@ -47,20 +59,24 @@ extension EnvironmentValues {
     @_silgen_name("$s7SwiftUI17EnvironmentValuesV9WidgetKitE34_wantsCustomFontsEmbeddedInArchiveSbvg")
     func _getWantsCustomFontsEmbeddedInArchive() -> Bool
 }
+#endif
 
 /// Asks WidgetKit to archive custom font data inline instead of by reference.
 ///
-/// Every runtime font-delivery route measured so far fails in one of two places,
-/// and this switch is upstream of both: `RegisterGraphicsFont` and a raw
-/// `CTFont` have no URL to write and so fail while *encoding*, inside the
-/// extension; an App Group URL encodes fine and then fails while *decoding*,
-/// because `chronod` does not inherit the extension's App Group sandbox grant.
-/// Embedding the bytes removes the reference that both failures are about.
+/// MEASURED, AND IT DOES NOT WORK. Setting this flag changes nothing about a
+/// Home Screen widget's archived timeline. With one runtime-registered lane font
+/// in the tree, the archive is the same size with the flag off and on (12,200
+/// bytes both ways) and still carries the font as
+/// `file://...app-group.../MLabGroupProcess.ttf#postscript-name=...` with no
+/// sfnt bytes anywhere in the extension's container. The flag was verified to be
+/// `true` in the environment at the same time, at the root of the archived tree
+/// and again at the font's own use site, and the detector was proved on the same
+/// archive with a real 994,891-byte font appended.
+/// See `Tools/font-embed-shot.sh` and `docs/widget-animation-surface.md` §6.3.
 ///
-/// Off by default. On device this is the only thing standing between "a design
-/// must be compiled into the extension on a Mac" and "a design can be built on
-/// the phone", so it is worth having; but it is private API driving the archive
-/// format, and a bad archive takes the whole widget black rather than degrading.
+/// Kept as a probe, not a route. It stays off, it is compiled in only under
+/// `FONT_EMBED_PROBE`, and the reason to keep it is that it is the one thing that
+/// would tell us cheaply if a future iOS changed its mind.
 enum WidgetArchiveFontEmbedding {
     private static let logger = Logger(subsystem: "com.caden.Motionary", category: "FontEmbedding")
     private static let flagKey = "widgetArchiveFontEmbedding"
@@ -81,15 +97,36 @@ enum WidgetArchiveFontEmbedding {
         return nil
     }
 
-    /// Whether WidgetKit still exports the accessors this file links against.
+    /// Whether this build carries the private-symbol shim at all.
     ///
-    /// Diagnostic only. By the time this can be called the process has already
-    /// survived dyld, so a `false` here would mean the symbols were resolved
-    /// some other way, not that the flag is safely unavailable.
-    static var isSymbolPresent: Bool {
-        let name = "$s7SwiftUI17EnvironmentValuesV9WidgetKitE34_wantsCustomFontsEmbeddedInArchiveSbvs"
-        return dlsym(UnsafeMutableRawPointer(bitPattern: -2), name) != nil
+    /// False in a shipped build. The point of saying so out loud is that
+    /// `isEnabled` being true means nothing without this being true too, and a
+    /// run that flipped the flag and saw no change would otherwise be reported as
+    /// evidence about WidgetKit when it was evidence about the build.
+    static var isLinked: Bool {
+        #if FONT_EMBED_PROBE
+        true
+        #else
+        false
+        #endif
     }
+
+    /// Whether WidgetKit still exports the accessors the shim calls.
+    ///
+    /// This is the guard, not a diagnostic: the symbols are resolved at launch
+    /// and a future OS that dropped them would leave a null stub behind, so every
+    /// call site asks this first rather than jumping to it.
+    ///
+    /// Resolved once, because the answer cannot change inside a process and the
+    /// question would otherwise be asked on every render.
+    static let isSymbolPresent: Bool = {
+        let setter = "$s7SwiftUI17EnvironmentValuesV9WidgetKitE34_wantsCustomFontsEmbeddedInArchiveSbvs"
+        let getter = "$s7SwiftUI17EnvironmentValuesV9WidgetKitE34_wantsCustomFontsEmbeddedInArchiveSbvg"
+        // RTLD_DEFAULT. Both, because the shim calls both and one of them being
+        // present says nothing about the other.
+        let handle = UnsafeMutableRawPointer(bitPattern: -2)
+        return dlsym(handle, setter) != nil && dlsym(handle, getter) != nil
+    }()
 
     /// Set and read the flag back inside a real SwiftUI environment, reporting
     /// whether the value stuck.
@@ -100,6 +137,8 @@ enum WidgetArchiveFontEmbedding {
     /// only environment worth asking is one SwiftUI itself produced.
     @MainActor
     static func roundTripsInARealRender() -> Bool {
+        #if FONT_EMBED_PROBE
+        guard isSymbolPresent else { return false }
         var observed = false
         let probe = Color.clear.transformEnvironment(\.self) { env in
             env._setWantsCustomFontsEmbeddedInArchive(true)
@@ -108,6 +147,42 @@ enum WidgetArchiveFontEmbedding {
         let renderer = ImageRenderer(content: probe.frame(width: 4, height: 4))
         _ = renderer.uiImage
         return observed
+        #else
+        return false
+        #endif
+    }
+
+    /// What the flag read back as, the last time the widget's own tree set it.
+    ///
+    /// The set is not the finding. A shim with the wrong calling convention has
+    /// already round-tripped a `true` that was never in the environment, and a
+    /// flag that does nothing looks exactly like a flag that was never set - so
+    /// the widget reads it back from the environment it just wrote, inside the
+    /// render being archived, and says so in the log.
+    nonisolated(unsafe) private(set) static var lastObserved: Bool?
+
+    /// So a test can tell "the guard held" apart from "an earlier case had
+    /// already set this".
+    static func resetLastObservedForTesting() { lastObserved = nil }
+
+    /// Written to a file of its own rather than appended to the render log.
+    /// `WidgetRenderLog.append` rewrites the whole file after reading it, so a
+    /// line written from inside a render closure can be lost to a line written
+    /// from the render around it - and "the line is missing" is exactly the
+    /// finding this has to be able to report.
+    static let observationFilename = "font-embed-observed.txt"
+
+    static func note(observed: Bool) {
+        lastObserved = observed
+        guard let store = try? DesignStore() else { return }
+        let url = store.root.deletingLastPathComponent()
+            .appendingPathComponent(observationFilename)
+        let text = "set=true observed=\(observed) symbol=\(isSymbolPresent) at \(Date())"
+        do {
+            try Data(text.utf8).write(to: url, options: DesignStore.writingOptions)
+        } catch {
+            logger.error("could not record the observation: \(String(describing: error), privacy: .public)")
+        }
     }
 }
 
@@ -122,15 +197,35 @@ extension View {
     /// Apply it as high in the archived tree as possible - the outermost view the
     /// widget's content closure returns. The archiver resolves each node's
     /// environment while walking the tree, so a flag set below a font's use site
-    /// would not be seen when that font is encoded.
+    /// would not be seen when that font is encoded. It is also applied directly
+    /// around the font's use site, because "the flag was set too high up" and
+    /// "the flag does nothing" are otherwise the same observation.
+    ///
+    /// A no-op outside a `FONT_EMBED_PROBE` build, which is every shipped build.
+    ///
+    /// `symbolPresent` is a parameter only so a test can take the absent case;
+    /// nothing else should pass it.
     @ViewBuilder
-    func embeddingCustomFontsInArchive(_ enabled: Bool = true) -> some View {
-        if enabled {
+    func embeddingCustomFontsInArchive(
+        _ enabled: Bool = true,
+        symbolPresent: Bool = WidgetArchiveFontEmbedding.isSymbolPresent
+    ) -> some View {
+        #if FONT_EMBED_PROBE
+        // The symbol condition is not belt-and-braces. These are strong bindings
+        // resolved at launch, so an OS that dropped them leaves a null stub, and
+        // an unguarded call would take the whole widget extension down.
+        if enabled && symbolPresent {
             transformEnvironment(\.self) { env in
                 env._setWantsCustomFontsEmbeddedInArchive(true)
+                WidgetArchiveFontEmbedding.note(
+                    observed: env._getWantsCustomFontsEmbeddedInArchive()
+                )
             }
         } else {
             self
         }
+        #else
+        self
+        #endif
     }
 }
