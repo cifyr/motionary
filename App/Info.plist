@@ -9,6 +9,21 @@
   <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
   <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
   <key>UILaunchScreen</key><dict/>
+  <!-- A design is composed in one measured device's portrait screen pixels and
+       pinned to the view's top-left at 1:1 (LoopingCompositionView .device), so
+       a landscape window draws the wrong crop rather than a relaid-out screen.
+       The widget it mirrors has only the tall portrait family. -->
+  <key>UISupportedInterfaceOrientations</key>
+  <array><string>UIInterfaceOrientationPortrait</string></array>
+  <!-- XcodeGen leaves TARGETED_DEVICE_FAMILY at 1,2, so the iPad variant has to
+       say it too or iPadOS falls back to all four. -->
+  <key>UISupportedInterfaceOrientations~ipad</key>
+  <array><string>UIInterfaceOrientationPortrait</string></array>
+  <!-- An orientation restriction does not hold on an iPad app the system can
+       resize into Split View, so the key above needs this to mean anything on
+       that family. Unmeasured: the lab has no iPad, and a Debug build warns
+       about neither its presence nor its absence. -->
+  <key>UIRequiresFullScreen</key><true/>
   <key>NSPhotoLibraryAddUsageDescription</key>
   <string>Motionary saves the generated Home Screen wallpaper to your photo library so you can set it as your background.</string>
   <key>NSPhotoLibraryUsageDescription</key>
