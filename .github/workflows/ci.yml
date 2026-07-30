@@ -17,9 +17,17 @@ concurrency:
 
 jobs:
   test:
-    runs-on: macos-15
+    # Needs an Xcode carrying the iOS 26 SDK: the test target compiles the
+    # font-embedding probe, which links two private SwiftUI symbols that only
+    # exist there. If a runner image is too old the link fails rather than the
+    # tests - drop FONT_EMBED_PROBE from the test target's compilation
+    # conditions in that case, since nothing shipped depends on it.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Show the toolchain
+        run: xcodebuild -version && xcrun --sdk iphonesimulator --show-sdk-version
 
       - name: Install XcodeGen
         run: brew install xcodegen
