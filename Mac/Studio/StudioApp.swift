@@ -414,7 +414,13 @@ struct StudioView: View {
 
             Button { reopen(design) } label: {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(design.name).lineLimit(1).font(.callout)
+                    // Truncated in the middle, not at the end: what tells two
+                    // designs apart is the number on the tail, and clipping
+                    // that is what made a numbered library still unreadable.
+                    Text(design.name)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .font(.callout)
                     HStack(spacing: 6) {
                         Text(count(design.tiles.count, "app"))
                         if !design.assets.isEmpty {
