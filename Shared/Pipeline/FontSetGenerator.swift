@@ -206,8 +206,25 @@ struct FontSetGenerator {
             .integral
         var bakedBackdrop: CGRect?
         if !backdropRect.isNull, let cropped = frames[0].cropping(to: backdropRect) {
-            let data = try FrameEncoder.jpegData(cropped, quality: 0.9)
-                ?? FrameEncoder.pngData(cropped)
+            // The wallpaper above keeps the picture as it is; only the widget's
+            // own copy gets the edge line taken out of it, because the line is
+            // only drawn where the widget is.
+            let corrected = EdgeCompensation.applied(
+                to: cropped,
+                originY: Int(backdropRect.minY),
+                widgetRect: design.widgetRect
+            )
+            if EdgeCompensation.overlaps(crop, widgetRect: design.widgetRect) {
+                // Those rows are drawn from the glyphs rather than the backdrop,
+                // so the correction below cannot reach them and the line stays
+                // visible where the animation runs to the widget's edge.
+                Self.logger.warning("""
+                the animated crop reaches the widget's edge; the top or bottom line \
+                will still show across \(Int(crop.width))px of it
+                """)
+            }
+            let data = try FrameEncoder.jpegData(corrected, quality: 0.9)
+                ?? FrameEncoder.pngData(corrected)
             try data.write(to: store.widgetBackdropURL(for: design.id), options: DesignStore.writingOptions)
             bakedBackdrop = backdropRect
             Self.logger.info("""
