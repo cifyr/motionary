@@ -52,7 +52,7 @@ There is no animation API in a widget worth using for this. What there is:
     Shared/     Everything both platforms need, including all of Pipeline/
     App/        The iPhone viewer
     Widget/     The extension
-    Tests/      202 unit tests, run on the simulator
+    Tests/      The unit suite, run on the simulator, mirroring the sections below
     UITests/    Drives SpringBoard from inside the simulator to photograph the widget
     Tools/      Shot loops and analysis scripts
     docs/       What was measured and what it cost to find out
