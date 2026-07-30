@@ -170,7 +170,7 @@ struct StudioPipeline: Sendable {
         // identically cannot be told apart afterwards.
         var design = DesignDocument.new(
             name: DesignStore.uniqueName(
-                source.deletingPathExtension().lastPathComponent,
+                DesignStore.suggestedName(for: source.deletingPathExtension().lastPathComponent),
                 among: store.loadAll().map(\.name)
             ),
             sourceVideoName: isGIF ? "source.gif" : "source.mov"

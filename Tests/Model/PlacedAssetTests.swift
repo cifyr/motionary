@@ -219,6 +219,43 @@ final class DesignStoreAssetTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: store.manifestURL(for: copy.id).path))
     }
 
+    /// A downloaded clip is named by digest, and a design named after one says
+    /// nothing at all - which is how a library ends up unreadable even once
+    /// every name in it is unique.
+    func testADigestFilenameFallsBackToTheDate() {
+        let made = Date(timeIntervalSinceReferenceDate: 0)
+
+        XCTAssertTrue(DesignStore.looksLikeADigest("461e10bd3c4e275f5fb6cf09a3b70cb4"))
+        XCTAssertTrue(DesignStore.looksLikeADigest("3E4C1E5A-0000-4000-8000-000000000001"))
+        XCTAssertNotEqual(
+            DesignStore.suggestedName(for: "461e10bd3c4e275f5fb6cf09a3b70cb4", created: made),
+            "461e10bd3c4e275f5fb6cf09a3b70cb4"
+        )
+        XCTAssertTrue(
+            DesignStore.suggestedName(for: "461e10bd3c4e275f5fb6cf09a3b70cb4", created: made)
+                .hasPrefix("Clip ")
+        )
+    }
+
+    func testARealNameIsKept() {
+        let made = Date(timeIntervalSinceReferenceDate: 0)
+
+        XCTAssertFalse(DesignStore.looksLikeADigest("onewheel-dock"))
+        XCTAssertFalse(DesignStore.looksLikeADigest("0729 (1)"))
+        // Short enough to be a word rather than a digest.
+        XCTAssertFalse(DesignStore.looksLikeADigest("beadface"))
+
+        XCTAssertEqual(DesignStore.suggestedName(for: "onewheel-dock", created: made), "onewheel-dock")
+        XCTAssertEqual(DesignStore.suggestedName(for: "0729 (1)", created: made), "0729 (1)")
+    }
+
+    func testAnEmptyFilenameFallsBackToTheDate() {
+        XCTAssertTrue(
+            DesignStore.suggestedName(for: "  ", created: Date(timeIntervalSinceReferenceDate: 0))
+                .hasPrefix("Clip ")
+        )
+    }
+
     /// Nineteen designs in the real library were all named after one downloaded
     /// GIF, which made the list impossible to navigate.
     func testASecondDesignOfTheSameNameIsNumbered() {

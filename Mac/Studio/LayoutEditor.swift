@@ -497,9 +497,42 @@ struct LayoutEditor: View {
 
     // MARK: - Assets
 
-    private var selectedAssetIndex: Int? {
+    private var selectedAsset: PlacedAsset? {
         guard let selection else { return nil }
-        return design.assets.firstIndex { $0.id == selection }
+        return design.assets.first { $0.id == selection }
+    }
+
+    /// Bindings resolve the asset by id on every access rather than closing over
+    /// an index. An index taken while the inspector renders outlives the array
+    /// it indexed - removing an asset while its slider is live would read off
+    /// the end - and identity is what the inspector is really about anyway.
+    private func assetBinding<Value>(
+        _ id: UUID,
+        _ path: WritableKeyPath<PlacedAsset, Value>,
+        fallback: Value
+    ) -> Binding<Value> {
+        Binding(
+            get: { design.assets.first { $0.id == id }?[keyPath: path] ?? fallback },
+            set: { newValue in
+                guard let index = design.assets.firstIndex(where: { $0.id == id }) else { return }
+                design.assets[index][keyPath: path] = newValue
+            }
+        )
+    }
+
+    private func chromaBinding(
+        _ id: UUID,
+        _ path: WritableKeyPath<ChromaKey.Settings, Double>
+    ) -> Binding<Double> {
+        Binding(
+            get: { (design.assets.first { $0.id == id }?.chroma ?? .default)[keyPath: path] },
+            set: { newValue in
+                guard let index = design.assets.firstIndex(where: { $0.id == id }) else { return }
+                var settings = design.assets[index].chroma ?? ChromaKey.Settings.default
+                settings[keyPath: path] = newValue
+                design.assets[index].chroma = settings
+            }
+        )
     }
 
     @ViewBuilder
@@ -519,7 +552,10 @@ struct LayoutEditor: View {
                     HStack(spacing: 6) {
                         Image(systemName: selection == asset.id ? "largecircle.fill.circle" : "circle")
                             .foregroundStyle(.secondary)
-                        Text(asset.fileName).lineLimit(1).font(.caption)
+                        Text(asset.fileName)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .font(.caption)
                         Spacer()
                     }
                     .contentShape(Rectangle())
@@ -532,19 +568,21 @@ struct LayoutEditor: View {
                 }
             }
 
-            if let index = selectedAssetIndex {
-                assetInspector(index: index)
+            if let asset = selectedAsset {
+                assetInspector(asset)
             }
         }
         .disabled(store == nil)
     }
 
     @ViewBuilder
-    private func assetInspector(index: Int) -> some View {
-        let asset = design.assets[index]
+    private func assetInspector(_ asset: PlacedAsset) -> some View {
         Divider()
         VStack(alignment: .leading, spacing: 4) {
-            Text(asset.fileName).font(.caption.weight(.semibold)).lineLimit(1)
+            Text(asset.fileName)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
 
             LabeledContent("Width", value: "\(Int(asset.size.width)) px")
                 .font(.caption2)
@@ -552,8 +590,10 @@ struct LayoutEditor: View {
             // aspect comes from the size it was imported at.
             Slider(
                 value: Binding(
-                    get: { design.assets[index].size.width },
+                    get: { asset.size.width },
                     set: { newWidth in
+                        guard let index = design.assets.firstIndex(where: { $0.id == asset.id })
+                        else { return }
                         let current = design.assets[index].size
                         let aspect = current.height / max(current.width, 1)
                         design.assets[index].size = CGSize(
@@ -566,22 +606,24 @@ struct LayoutEditor: View {
             )
 
             LabeledContent("Rotation", value: "\(Int(asset.rotation))°").font(.caption2)
-            Slider(value: $design.assets[index].rotation, in: -180 ... 180)
+            Slider(value: assetBinding(asset.id, \.rotation, fallback: 0), in: -180 ... 180)
 
             LabeledContent("Opacity", value: String(format: "%.2f", asset.opacity)).font(.caption2)
-            Slider(value: $design.assets[index].opacity, in: 0 ... 1)
+            Slider(value: assetBinding(asset.id, \.opacity, fallback: 1), in: 0 ... 1)
 
             Divider()
-            keyingControls(index: index)
+            keyingControls(asset)
         }
     }
 
     @ViewBuilder
-    private func keyingControls(index: Int) -> some View {
-        let chroma = design.assets[index].chroma ?? ChromaKey.Settings.default
+    private func keyingControls(_ asset: PlacedAsset) -> some View {
+        let chroma = asset.chroma ?? ChromaKey.Settings.default
         Toggle("Remove backdrop", isOn: Binding(
-            get: { design.assets[index].chroma?.enabled ?? false },
+            get: { design.assets.first { $0.id == asset.id }?.chroma?.enabled ?? false },
             set: { on in
+                guard let index = design.assets.firstIndex(where: { $0.id == asset.id })
+                else { return }
                 var settings = design.assets[index].chroma ?? ChromaKey.Settings.default
                 settings.enabled = on
                 design.assets[index].chroma = settings
@@ -592,15 +634,15 @@ struct LayoutEditor: View {
         if chroma.enabled {
             LabeledContent("Tolerance", value: String(format: "%.2f", chroma.tolerance))
                 .font(.caption2)
-            Slider(value: binding(index: index, \.tolerance), in: 0 ... 2)
+            Slider(value: chromaBinding(asset.id, \.tolerance), in: 0 ... 2)
 
             LabeledContent("Edge softness", value: String(format: "%.2f", chroma.softness))
                 .font(.caption2)
-            Slider(value: binding(index: index, \.softness), in: 0 ... 2)
+            Slider(value: chromaBinding(asset.id, \.softness), in: 0 ... 2)
 
             LabeledContent("Spill removal", value: String(format: "%.2f", chroma.spill))
                 .font(.caption2)
-            Slider(value: binding(index: index, \.spill), in: 0 ... 1)
+            Slider(value: chromaBinding(asset.id, \.spill), in: 0 ... 1)
 
             HStack {
                 Text(chroma.keyColor == nil ? "Colour: detected" : "Colour: chosen")
@@ -608,13 +650,14 @@ struct LayoutEditor: View {
                 Spacer()
                 if chroma.keyColor != nil {
                     Button("Redetect") {
+                        guard let index = design.assets.firstIndex(where: { $0.id == asset.id })
+                        else { return }
                         design.assets[index].chroma?.setKeyColor(nil)
                     }
                     .buttonStyle(.link).font(.caption2)
                 }
             }
 
-            let asset = design.assets[index]
             Button(pickingKeyFor == asset.id ? "Click the backdrop..." : "Pick colour") {
                 pickingKeyFor = pickingKeyFor == asset.id ? nil : asset.id
             }
@@ -622,20 +665,6 @@ struct LayoutEditor: View {
             .font(.caption2)
             .help("Detection reads the border. Pick instead when the backdrop is not what surrounds the picture.")
         }
-    }
-
-    private func binding(
-        index: Int,
-        _ path: WritableKeyPath<ChromaKey.Settings, Double>
-    ) -> Binding<Double> {
-        Binding(
-            get: { (design.assets[index].chroma ?? .default)[keyPath: path] },
-            set: { newValue in
-                var settings = design.assets[index].chroma ?? ChromaKey.Settings.default
-                settings[keyPath: path] = newValue
-                design.assets[index].chroma = settings
-            }
-        )
     }
 
     private func importAssets() {

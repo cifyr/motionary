@@ -300,6 +300,39 @@ struct DesignStore {
         return copy
     }
 
+    /// Whether a filename carries no information about its contents.
+    ///
+    /// A downloaded clip is often named by digest - browsers, Slack and Discord
+    /// all do it - and naming a design after one gives a row that says nothing.
+    /// Dashes are stripped first so a bare UUID counts too.
+    static func looksLikeADigest(_ name: String) -> Bool {
+        let stripped = name.replacingOccurrences(of: "-", with: "")
+        guard stripped.count >= 16 else { return false }
+        return stripped.allSatisfy(\.isHexDigit)
+    }
+
+    /// Fixed rather than localised: a design name is stored, so it should not
+    /// read differently on a machine with different settings.
+    private static let dateNameFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "d MMM HH:mm"
+        return formatter
+    }()
+
+    /// What to call a design made from `fileName`.
+    ///
+    /// The filename when it says something, the date when it does not. "Clip 30
+    /// Jul 12:57" is not a good name either, but it places the design in the
+    /// afternoon it came from, which a digest does not.
+    static func suggestedName(for fileName: String, created: Date = Date()) -> String {
+        let trimmed = fileName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !looksLikeADigest(trimmed) else {
+            return "Clip \(dateNameFormatter.string(from: created))"
+        }
+        return trimmed
+    }
+
     /// A name not already in the library.
     ///
     /// A design is named after the file it was made from, and the same file
