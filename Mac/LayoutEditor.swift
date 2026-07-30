@@ -81,7 +81,14 @@ struct LayoutEditor: View {
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
             screen
-            sidebar.frame(width: Self.sidebarWidth)
+            // Scrolled, because the sidebar holds more than the sheet is tall.
+            // Overflowing it squeezed the flexible child - the skin grid - down
+            // to nothing, so an imported skin was in the view tree and zero
+            // pixels high, which reads exactly like an import that failed.
+            ScrollView {
+                sidebar.frame(width: Self.sidebarWidth, alignment: .leading)
+            }
+            .frame(width: Self.sidebarWidth)
         }
         .padding(20)
         .task {
@@ -178,40 +185,38 @@ struct LayoutEditor: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else if let index {
-                ScrollView {
-                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(44), spacing: 6), count: 4), spacing: 6) {
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(44), spacing: 6), count: 4), spacing: 6) {
+                    Button {
+                        design.tiles[index].skin = nil
+                    } label: {
+                        Image(systemName: "nosign")
+                            .frame(width: 44, height: 44)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .help("No skin - use the tinted plate")
+
+                    ForEach(skins) { skin in
                         Button {
-                            design.tiles[index].skin = nil
+                            design.tiles[index].skin = skin.id
                         } label: {
-                            Image(systemName: "nosign")
+                            AsyncSkinThumbnail(url: skin.url)
                                 .frame(width: 44, height: 44)
-                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .strokeBorder(
+                                            design.tiles[index].skin == skin.id
+                                                ? Color.accentColor : .clear,
+                                            lineWidth: 2
+                                        )
+                                }
                         }
                         .buttonStyle(.plain)
-                        .help("No skin - use the tinted plate")
-
-                        ForEach(skins) { skin in
-                            Button {
-                                design.tiles[index].skin = skin.id
-                            } label: {
-                                AsyncSkinThumbnail(url: skin.url)
-                                    .frame(width: 44, height: 44)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                    .overlay {
-                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                            .strokeBorder(
-                                                design.tiles[index].skin == skin.id
-                                                    ? Color.accentColor : .clear,
-                                                lineWidth: 2
-                                            )
-                                    }
-                            }
-                            .buttonStyle(.plain)
-                            .help(skin.id)
-                        }
+                        .help(skin.id)
                     }
                 }
-                .frame(maxHeight: 160)
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -525,7 +530,6 @@ struct LayoutEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Spacer()
             Text("The dashed frame is the widget. Only what falls inside it animates; the rest becomes the wallpaper.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
