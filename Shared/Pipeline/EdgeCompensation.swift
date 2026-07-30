@@ -5,29 +5,34 @@ import os
 /// Cancels the bright line the Home Screen draws along the top and bottom of the
 /// widget, by taking it out of the content first.
 ///
-/// Measured from a screenshot of a real iPhone 17 Pro Home Screen, against the
-/// design's own wallpaper as the reference, with the picture's own edges
-/// subtracted out so only what the system added remains:
+/// Measured from full-resolution screenshots of a real iPhone 17 Pro Home
+/// Screen, against the design's own wallpaper as the reference, with the
+/// picture's own edges subtracted out so only what the system added remains, and
+/// then refined against a second screenshot taken with the first correction
+/// already in place:
 ///
-/// - a line at the widget's top row (screen row 270) about +60 brighter than the
-///   picture, +40 one row in, then a tail of +13, +7, +3;
-/// - the same at the bottom, at screen row 1913 - twelve rows below where the
-///   composition's own frame ends, because the system hands over 548pt of widget
-///   where the calibration says 544. The padded backdrop already covers it;
-/// - nothing at all down the left and right edges, which is why the lines read as
-///   top and bottom rather than as a border.
+/// - a line on the widget's top row, screen row 270;
+/// - a stronger one on its bottom row, screen row 1914 - thirteen rows below
+///   where the composition's own frame ends, because the system hands over 548pt
+///   of widget where the calibration says 544. The padded backdrop covers those
+///   rows, so the correction can reach them;
+/// - nothing down the left and right edges, which is why the lines read as top
+///   and bottom rather than as a border. A useful check on the method, too: the
+///   Polaroid edges in the picture itself cancelled to within two units while
+///   these stood at sixty and more.
 ///
 /// It adds rather than blends: the wallpaper behind the widget is the same
-/// picture as the widget's own content there, so a blend would be invisible, and
-/// this is not. That is what makes it invertible without knowing anything about
-/// what is behind - subtract the same amount from the content and the sum comes
-/// out at the picture.
+/// picture as the widget's own content there, so a blend would cancel itself and
+/// be invisible, and this is not. That is what makes it invertible without
+/// knowing anything about what is behind - subtract the same amount from the
+/// content and the sum comes out at the picture.
 ///
-/// The numbers came through a 0.76 downscale, so they are a floor rather than an
-/// exact profile, and `strength` holds the correction below 1 deliberately:
-/// under-correcting leaves a fainter bright line, over-correcting leaves a dark
-/// one, and a dark line is a new artefact rather than a smaller old one. Run the
-/// edge lab on the phone to replace these with an exact per-channel fit.
+/// Where the content has room to be darkened this now lands within about two
+/// units. Where it does not, nothing here can help: the system adds light, and
+/// light can only be removed from content that has some, so a design whose own
+/// top or bottom row is nearly black keeps its line. The fix for that one is in
+/// the design, not in the pipeline - move the clip or the background so the
+/// widget's outermost rows are not the darkest part of the picture.
 enum EdgeCompensation {
     private static let logger = Logger(subsystem: "com.caden.Motionary", category: "EdgeCompensation")
 
@@ -41,36 +46,42 @@ enum EdgeCompensation {
     /// three, and the bottom peaks one row below where the composition's own frame
     /// ends. Both fade into a tail of a few units over the next several rows.
     static let topAdded: [(r: Double, g: Double, b: Double)] = [
-        (76, 71, 56),
-        (60, 46, 42),
-        (33, 30, 26),
-        (12, 13, 11),
-        (7, 9, 9),
-        (8, 7, 6),
-        (6, 6, 5),
-        (5, 5, 4),
-        (4, 4, 4),
+        (71, 71, 64),
+        (57, 46, 47),
+        (39, 32, 27),
+        (14, 14, 12),
+        (10, 11, 10),
+        (10, 8, 8),
+        (7, 7, 7),
+        (6, 6, 6),
+        (5, 5, 5),
     ]
 
     static let bottomAdded: [(r: Double, g: Double, b: Double)] = [
-        (70, 58, 44),
-        (60, 62, 56),
-        (43, 34, 40),
-        (16, 13, 17),
-        (14, 11, 11),
-        (8, 9, 8),
-        (10, 7, 6),
-        (8, 6, 5),
-        (7, 5, 4),
+        (79, 68, 59),
+        (63, 66, 65),
+        (46, 38, 45),
+        (18, 14, 18),
+        (16, 12, 9),
+        (10, 10, 7),
+        (12, 7, 6),
+        (9, 6, 5),
+        (8, 5, 3),
     ]
 
     /// Full correction now that the profile was measured at full resolution
     /// rather than estimated through a 0.76 downscale.
     ///
-    /// It still cannot cancel exactly. Measured across two different halves of
-    /// the width, the same row differs by around eight units - so part of what
-    /// the system adds depends on the content near the edge rather than being a
-    /// fixed line. A single profile takes out the fixed part and leaves that.
+    /// Refined once more against a screenshot taken with the previous profile in
+    /// place: where the content had room to be darkened, the line came back
+    /// within about two units of the picture, and those small remainders are
+    /// folded in here.
+    ///
+    /// What is left cannot be fixed from here. The system adds light, and light
+    /// can only be taken out of content that has some: where a design's own top
+    /// or bottom row is nearly black, the subtraction hits zero with the line
+    /// still showing. On the design measured, three of nine columns across the
+    /// top and five of nine across the bottom were in that state.
     static let strength: Double = 1.0
 
     /// The widget's real height in screen pixels, from where the bottom line
@@ -149,12 +160,23 @@ enum EdgeCompensation {
         }
 
         var corrected = 0
+        var ranOut = 0
+        var total = 0
         for row in 0 ..< height {
             guard let correction = correction(screenRow: originY + row, widgetRect: widgetRect) else { continue }
             corrected += 1
             let start = row * bytesPerRow
             for column in 0 ..< width {
                 let index = start + column * 4
+                total += 1
+                // Counted, not worked around: this is where the line survives,
+                // and it is worth knowing how much of an edge is in that state
+                // rather than wondering why a design still shows one.
+                if Double(pixels[index]) < correction.r
+                    || Double(pixels[index + 1]) < correction.g
+                    || Double(pixels[index + 2]) < correction.b {
+                    ranOut += 1
+                }
                 pixels[index] = subtract(pixels[index], correction.r)
                 pixels[index + 1] = subtract(pixels[index + 1], correction.g)
                 pixels[index + 2] = subtract(pixels[index + 2], correction.b)
@@ -178,7 +200,18 @@ enum EdgeCompensation {
             logger.error("corrected backdrop could not be rebuilt; shipping it uncorrected")
             return image
         }
-        logger.info("took the edge line out of \(corrected) rows of the backdrop")
+        let share = total > 0 ? ranOut * 100 / total : 0
+        logger.info("""
+        took the edge line out of \(corrected) rows of the backdrop; \
+        \(share)% of those pixels were too dark to take all of it \
+        (the line still shows there)
+        """)
+        if share > 25 {
+            logger.warning("""
+            more than a quarter of the widget's edge is too dark to correct; \
+            move the clip or the background so its outermost rows are brighter
+            """)
+        }
         return made
     }
 
