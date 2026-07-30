@@ -103,7 +103,7 @@ struct DesignWidgetView: View {
         WidgetRenderLog.append("lab  enter \(MemoryFootprint.megabytes)MB")
         let importedManifest = ActiveDesign.resolve(in: store)
             .flatMap { try? store.loadManifest(id: $0.id) }
-        guard let manifest = importedManifest ?? PrebuiltDesign.manifest else {
+        guard let manifest = importedManifest ?? PrebuiltDesign.selectedManifest else {
             WidgetRenderLog.append("lab  no manifest")
             return nil
         }

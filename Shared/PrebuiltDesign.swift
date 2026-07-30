@@ -102,6 +102,14 @@ enum PrebuiltDesign {
         }
     }()
 
+    /// The chosen bundled design's manifest.
+    ///
+    /// `manifest` alone reads the single-design filename, which stopped existing
+    /// once several designs could ship at once - so anything asking for "the
+    /// bundled manifest" got nil on a modern build even though the widget was
+    /// drawing one. That silently disabled the font lab.
+    static var selectedManifest: BuildManifest? { selected()?.manifest ?? manifest }
+
     /// Whether a design's lane fonts shipped in this build.
     ///
     /// Only bundled fonts animate. Registering generated fonts at runtime —
