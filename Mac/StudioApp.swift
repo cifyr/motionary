@@ -10,6 +10,9 @@ struct MotionaryStudioApp: App {
         if CommandLine.arguments.contains("--roundtrip") {
             HeadlessBuild.roundTrip()
         }
+        if CommandLine.arguments.contains("--install-starred") {
+            HeadlessBuild.installStarred(deviceID: HeadlessBuild.device(in: CommandLine.arguments))
+        }
         if let source = HeadlessBuild.requested(in: CommandLine.arguments) {
             HeadlessBuild.run(source: source)
         }
@@ -66,6 +69,54 @@ enum HeadlessBuild {
             print("imported \(restored.name) tiles=\(restored.tiles.count) clip=\(clip) background=\(restored.backgroundName ?? "none")")
             print(restored.id == design.id && clip ? "roundtrip ok" : "roundtrip INCOMPLETE")
             exit(restored.id == design.id && clip ? 0 : 1)
+        } catch {
+            FileHandle.standardError.write(Data("failed: \(error)\n".utf8))
+            exit(1)
+        }
+    }
+
+    /// Bundles and installs every starred design that has a build, without
+    /// making a new one. Rebuilding the phone from what is starred is a job in
+    /// its own right, and going through a fresh clip to trigger it would leave
+    /// a design behind that nobody asked for.
+    static func installStarred(deviceID: String?) -> Never {
+        guard let root = ProjectLocator.find(), let store = try? StudioPipeline.openStore() else {
+            FileHandle.standardError.write(Data("failed: no project or store\n".utf8))
+            exit(1)
+        }
+        var bundled: [BundleWriter.Bundled] = []
+        var skipped: [String] = []
+        for design in StudioPipeline.saved() where design.isStarred {
+            if let manifest = try? store.loadManifest(id: design.id) {
+                bundled.append(.init(name: design.name, folder: store.folder(for: design.id), manifest: manifest))
+            } else {
+                skipped.append(design.name)
+            }
+        }
+        for name in skipped {
+            FileHandle.standardError.write(Data("... \(name) is starred but has no build - skipped\n".utf8))
+        }
+        guard !bundled.isEmpty else {
+            FileHandle.standardError.write(Data("failed: nothing starred has a build\n".utf8))
+            exit(1)
+        }
+
+        do {
+            let writer = try BundleWriter(projectRoot: root)
+            let result = try writer.install(bundled, iconsFolder: store.root
+                .deletingLastPathComponent().appendingPathComponent("Icons", isDirectory: true))
+            print("bundled \(bundled.count) designs, \(result.fontCount) fonts, \(result.totalBytes / 1_048_576)MB")
+            for design in bundled { print("  - \(design.name)") }
+
+            let installer = DeviceInstaller(projectRoot: root)
+            try installer.regenerateProject { FileHandle.standardError.write(Data("... \($0)\n".utf8)) }
+            if let deviceID {
+                let warning = try installer.installAndLaunch(deviceID: deviceID) {
+                    FileHandle.standardError.write(Data("... \($0)\n".utf8))
+                }
+                if let warning { print(warning) }
+            }
+            exit(0)
         } catch {
             FileHandle.standardError.write(Data("failed: \(error)\n".utf8))
             exit(1)

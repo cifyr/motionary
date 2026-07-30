@@ -60,7 +60,11 @@ struct SkinLibrary {
                   let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
             else { continue }
 
-            let trimmed = Self.trimmed(image) ?? image
+            // Keyed before trimming: a green screen is a border colour the
+            // trimmer would only cut from the edges, leaving it filling every
+            // gap inside the artwork.
+            let keyed = Self.keyingOut(image) ?? image
+            let trimmed = Self.trimmed(keyed) ?? keyed
             let squared = Self.squared(trimmed) ?? trimmed
             guard let scaled = Self.scaled(squared, to: Self.renderedSide) else { continue }
 
@@ -96,6 +100,56 @@ struct SkinLibrary {
         ) else { return nil }
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
         return (data, width, height)
+    }
+
+    /// Makes a saturated background colour transparent, wherever it appears.
+    ///
+    /// Icon art often arrives on a green screen. Trimming alone would cut it
+    /// from the edges and leave it filling the gaps inside the artwork, so it
+    /// has to be keyed out instead.
+    ///
+    /// Only saturated backgrounds are keyed. White and parchment paddings are
+    /// the trimmer's job, and keying those would eat any pale part of the
+    /// picture - the corner colour decides which case this is.
+    static func keyingOut(_ image: CGImage, inner: Int = 70, outer: Int = 120) -> CGImage? {
+        guard var (data, width, height) = pixels(image), width > 2, height > 2 else { return nil }
+
+        func at(_ index: Int) -> (Int, Int, Int) {
+            (Int(data[index]), Int(data[index + 1]), Int(data[index + 2]))
+        }
+        let key = at(0)
+        // A deliberate key colour is vivid; a paper background is not.
+        guard max(key.0, key.1, key.2) - min(key.0, key.1, key.2) > 80 else { return nil }
+
+        var keyed = 0
+        for index in stride(from: 0, to: data.count, by: 4) {
+            let pixel = at(index)
+            let distance = max(abs(pixel.0 - key.0), abs(pixel.1 - key.1), abs(pixel.2 - key.2))
+            if distance <= inner {
+                data[index + 3] = 0
+                keyed += 1
+            } else if distance < outer {
+                // Feathered, so the cut edge is not a staircase. The colour is
+                // left alone: correcting the key colour's spill onto the
+                // artwork's edge is a separate job this does not attempt.
+                let fraction = Double(distance - inner) / Double(outer - inner)
+                data[index + 3] = UInt8(Double(data[index + 3]) * fraction)
+            }
+        }
+        // Nothing keyed means the corner was vivid but unique - a picture that
+        // happens to start on a bright pixel, not a background.
+        guard keyed > (width * height) / 50 else { return nil }
+
+        guard let context = CGContext(
+            data: &data,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        return context.makeImage()
     }
 
     /// Crops away a uniform border, whether it is transparent or a flat colour.
