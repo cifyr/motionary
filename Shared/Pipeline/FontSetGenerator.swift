@@ -209,8 +209,11 @@ struct FontSetGenerator {
             // The wallpaper above keeps the picture as it is; only the widget's
             // own copy gets the edge line taken out of it, because the line is
             // only drawn where the widget is.
+            // Colour first, then the edge: the edge profile was measured against
+            // the wallpaper as displayed, so it belongs on content that already
+            // matches the wallpaper's colour.
             let corrected = EdgeCompensation.applied(
-                to: cropped,
+                to: WidgetTint.applied(to: cropped),
                 originY: Int(backdropRect.minY),
                 widgetRect: design.widgetRect
             )
