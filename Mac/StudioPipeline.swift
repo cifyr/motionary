@@ -80,6 +80,12 @@ struct StudioPipeline: Sendable {
         try Self.openStore()
     }
 
+    /// Rasterised catalogue icons, alongside the designs rather than inside any
+    /// one of them - the same folder `IconCache` writes to.
+    static func iconsFolder(for store: DesignStore) -> URL {
+        store.root.deletingLastPathComponent().appendingPathComponent("Icons", isDirectory: true)
+    }
+
     /// Brings designs over from the temp store the studio used to write to.
     ///
     /// Only the design and its source clip: the fonts, preview and wallpaper
@@ -240,7 +246,13 @@ struct StudioPipeline: Sendable {
         }
         try store.save(design)
 
-        let manifest = try await FontSetGenerator(store: store).build(design: design) { stage in
+        // The same artwork the bundling step installs, so the icons baked into
+        // the wallpaper line up with the live ones the widget draws over them.
+        let artwork = TileArtwork(iconsFolder: Self.iconsFolder(for: store))
+        let manifest = try await FontSetGenerator(
+            store: store,
+            tileArtwork: { artwork.image(for: $0) }
+        ).build(design: design) { stage in
             onStage(.generating(stage))
         }
         let seconds = Double(manifest.loopFrameCount) / Double(manifest.framesPerSecond)
@@ -303,8 +315,7 @@ struct StudioPipeline: Sendable {
 
         try BundleWriter(projectRoot: projectRoot).install(
             bundled,
-            iconsFolder: prepared.store.root.deletingLastPathComponent()
-                .appendingPathComponent("Icons", isDirectory: true)
+            iconsFolder: Self.iconsFolder(for: prepared.store)
         )
         let installer = DeviceInstaller(projectRoot: projectRoot)
         try installer.regenerateProject { onStage(.installing($0)) }

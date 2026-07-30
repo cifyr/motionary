@@ -100,17 +100,15 @@ struct SnapEngine {
         return result.map { (value: $0.0, guide: $0.1) }
     }
 
-    /// Keeps a tile inside `bounds`, regardless of snapping. `tileSize` should
-    /// be the rotated bounding extent, not the plate's side, or a rotated
-    /// corner can still cross the edge.
+    /// Keeps a tile on the screen, regardless of snapping. `tileSize` should be
+    /// the rotated bounding extent, not the plate's side, or a rotated corner
+    /// can still cross the edge.
     ///
-    /// The editor passes the widget frame rather than the screen. The widget is
-    /// the only thing that draws a tile and it can only draw inside its own
-    /// frame, so a tile straddling that edge is cut in half - and the wallpaper
-    /// behind it carries no tiles at all, so there is nothing on the other side
-    /// to complete it.
-    func clamp(center: CGPoint, tileSize: CGFloat, within bounds: CGRect? = nil) -> CGPoint {
-        let box = bounds ?? CGRect(origin: .zero, size: screenSize)
+    /// The screen, not the widget frame: a tile may hang over that edge, because
+    /// the wallpaper carries a baked picture of the part the widget cannot draw.
+    /// Only the part inside the frame answers a tap.
+    func clamp(center: CGPoint, tileSize: CGFloat) -> CGPoint {
+        let box = CGRect(origin: .zero, size: screenSize)
         // A tile larger than its box has no valid range; centre it rather than
         // letting the clamp invert.
         let halfX = min(tileSize / 2, box.width / 2)
@@ -121,8 +119,9 @@ struct SnapEngine {
         )
     }
 
-    /// Whether a tile is wholly drawable, for warning about designs made before
-    /// placement was bounded by the frame.
+    /// Whether the whole tile is tappable, which only the part inside the widget
+    /// frame is. The editor says how many tiles cross it, so a layout that leans
+    /// on the wallpaper does so knowingly.
     static func isFullyInside(_ tile: PlacedTile, frame: CGRect) -> Bool {
         let extent = tile.boundingExtent
         let box = CGRect(
