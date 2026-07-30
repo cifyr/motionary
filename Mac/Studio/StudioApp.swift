@@ -243,6 +243,8 @@ struct StudioView: View {
     /// from `saved` so an abandoned rename changes nothing.
     @State private var renaming: DesignDocument?
     @State private var renamedTo = ""
+    /// The design a delete has been asked for but not yet confirmed.
+    @State private var deleting: DesignDocument?
     @State private var designFilter = ""
     @State private var targeting = false
 
@@ -261,16 +263,47 @@ struct StudioView: View {
             librarySidebar
                 .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 420)
         } detail: {
-            ScrollView {
-                workColumn.padding(24)
+            if let ready = prepared {
+                EditorWindow(
+                    prepared: ready,
+                    model: model,
+                    // Saved on the way out either way: leaving the editor should
+                    // not be the thing that loses an afternoon's placement.
+                    onCancel: { edited in
+                        try? edited.store.save(edited.design)
+                        prepared = nil
+                        saved = StudioPipeline.saved()
+                    },
+                    onBuild: { edited in
+                        try? edited.store.save(edited.design)
+                        prepared = nil
+                        install(edited)
+                    }
+                )
+                // Keyed on the design: EditorWindow holds its working copy in
+                // @State, and without this SwiftUI would reuse the view when a
+                // second design is opened and go on showing the first one's.
+                .id(ready.design.id)
+            } else {
+                ScrollView {
+                    workColumn.padding(24)
+                }
+                .frame(minWidth: 480)
             }
-            .frame(minWidth: 480)
         }
-        .frame(minWidth: 860, minHeight: 640)
+        .frame(minWidth: 880, minHeight: 700)
         .task {
             refreshDevices()
             StudioPipeline.migrateLegacyDesigns()
             saved = StudioPipeline.saved()
+        }
+        .alert(item: $deleting) { design in
+            Alert(
+                title: Text("Delete \"\(design.name)\"?"),
+                message: Text("It moves to the Archive folder rather than being erased, but it leaves the library."),
+                primaryButton: .destructive(Text("Delete")) { delete(design) },
+                secondaryButton: .cancel()
+            )
         }
         .sheet(item: $renaming) { design in
             VStack(alignment: .leading, spacing: 12) {
@@ -289,27 +322,6 @@ struct StudioView: View {
             }
             .padding(20)
             .onAppear { renamedTo = design.name }
-        }
-        .sheet(item: Binding(
-            get: { prepared.map { EditorSheet(prepared: $0) } },
-            set: { if $0 == nil { prepared = nil } }
-        )) { sheet in
-            EditorWindow(
-                prepared: sheet.prepared,
-                model: model,
-                // Saved on the way out either way: closing the editor should
-                // not be the thing that loses an afternoon's placement.
-                onCancel: { edited in
-                    try? edited.store.save(edited.design)
-                    prepared = nil
-                    saved = StudioPipeline.saved()
-                },
-                onBuild: { edited in
-                    try? edited.store.save(edited.design)
-                    prepared = nil
-                    install(edited)
-                }
-            )
         }
     }
 
@@ -421,6 +433,10 @@ struct StudioView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .font(.callout)
+                        // The editor is a pane now, so the row is the only
+                        // thing saying which design is in it.
+                        .fontWeight(prepared?.design.id == design.id ? .semibold : .regular)
+                        .foregroundStyle(prepared?.design.id == design.id ? Color.accentColor : .primary)
                     HStack(spacing: 6) {
                         Text(count(design.tiles.count, "app"))
                         if !design.assets.isEmpty {
@@ -438,14 +454,19 @@ struct StudioView: View {
             .buttonStyle(.plain)
             .help("Open \(design.name)")
 
-            // Visible rather than context-menu only: a right-click is not
-            // where anyone looks first for renaming or deleting a project.
+            // Rename and duplicate are on the row because a right-click is not
+            // where anyone looks first, and neither can lose anything.
+            //
+            // Delete is deliberately NOT here. It was, as a third icon in this
+            // group, and one click per row with no confirmation: a repeated
+            // click at one point walked 18 designs out of the library, because
+            // each removal shifts the next row up under the pointer. A
+            // destructive action does not belong one pixel from a duplicate
+            // button, and it now asks first.
             Button { renaming = design } label: { Image(systemName: "pencil") }
                 .buttonStyle(.plain).help("Rename")
             Button { duplicate(design) } label: { Image(systemName: "plus.square.on.square") }
                 .buttonStyle(.plain).help("Duplicate")
-            Button { delete(design) } label: { Image(systemName: "trash") }
-                .buttonStyle(.plain).help("Delete (moved to the archive folder, not erased)")
         }
         .foregroundStyle(.secondary)
         .padding(.horizontal, 8)
@@ -457,7 +478,7 @@ struct StudioView: View {
             Button("Duplicate") { duplicate(design) }
             Divider()
             Button("Export...") { exportDesign(design) }
-            Button("Delete", role: .destructive) { delete(design) }
+            Button("Delete...", role: .destructive) { deleting = design }
         }
     }
 
@@ -808,12 +829,6 @@ struct StudioView: View {
 }
 
 
-/// Identifiable wrapper so the editor can be presented as a sheet.
-private struct EditorSheet: Identifiable {
-    let prepared: StudioPipeline.Prepared
-    var id: UUID { prepared.design.id }
-}
-
 private struct EditorWindow: View {
     @State var prepared: StudioPipeline.Prepared
     let model: DeviceModel
@@ -822,24 +837,31 @@ private struct EditorWindow: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            LayoutEditor(
-                design: $prepared.design,
-                model: model,
-                poster: prepared.poster,
-                store: prepared.store
-            )
+            // Scrolled rather than sized to fit. As a sheet this could demand
+            // its own dimensions; as a pane it has to survive whatever width
+            // the split view is dragged to, and the canvas is a fixed size.
+            ScrollView([.horizontal, .vertical]) {
+                LayoutEditor(
+                    design: $prepared.design,
+                    model: model,
+                    poster: prepared.poster,
+                    store: prepared.store
+                )
+                .frame(
+                    minWidth: LayoutEditor.width(for: model),
+                    minHeight: LayoutEditor.height(for: model)
+                )
+            }
             Divider()
             HStack {
-                Button("Close") { onCancel(prepared) }
+                // "Done", not "Close": it saves either way, and in a pane there
+                // is no sheet for "close" to refer to.
+                Button("Done") { onCancel(prepared) }
                 Spacer()
                 Button("Build and install") { onBuild(prepared) }
                     .keyboardShortcut(.defaultAction)
             }
             .padding(16)
         }
-        .frame(
-            width: LayoutEditor.width(for: model),
-            height: LayoutEditor.height(for: model) + 60
-        )
     }
 }
