@@ -99,10 +99,23 @@ cp "$GROUP/widget-status.json" "$OUT/widget-status.json" 2>/dev/null || true
 
 # The bytes on disk, which the manifest also states but which is worth measuring
 # rather than trusting.
-DESIGN_DIR=$(find "$GROUP/Designs" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | tail -1)
+#
+# The newest folder that actually holds frames, not simply the last one `find`
+# happened to walk. The store keeps lane-font designs alongside these and one of
+# those has no Frames directory at all, which under `pipefail` took the whole run
+# down after it had already succeeded.
+DESIGN_DIR=""
+for candidate in $(ls -td "$GROUP"/Designs/*/ 2>/dev/null); do
+    if [ -d "$candidate/Frames" ]; then
+        DESIGN_DIR="$candidate"
+        break
+    fi
+done
 if [ -n "$DESIGN_DIR" ]; then
-    du -sk "$DESIGN_DIR/Frames" 2>/dev/null | awk '{printf "frames on disk  %.1fMB\n", $1/1024}'
+    du -sk "$DESIGN_DIR/Frames" 2>/dev/null | awk '{printf "frames on disk  %.1fMB\n", $1/1024}' || true
     cp "$DESIGN_DIR/manifest.json" "$OUT/manifest.json" 2>/dev/null || true
+else
+    echo "frames on disk  none found"
 fi
 
 # The archived timeline: the one cost of this route that is not in the app
