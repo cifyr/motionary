@@ -71,13 +71,12 @@ final class BundleWriterTests: XCTestCase {
 
     /// The real files, so a reformat that breaks the rewrite fails here rather
     /// than on the phone.
+    ///
+    /// Read loudly: this walked one folder too few and then swallowed the miss,
+    /// so it passed for weeks without opening either plist.
     func testBothShippedPlistsCanBeRewritten() throws {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
         for relative in ["App/Info.plist", "Widget/Info.plist"] {
-            let url = root.appendingPathComponent(relative)
-            guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            let text = try ProjectRoot.text(at: relative)
             let rewritten = try BundleWriter.replacingAppFonts(in: text, with: lanes, path: relative)
             XCTAssertTrue(rewritten.contains(lanes[0]), "\(relative) did not take the lane list")
             XCTAssertTrue(rewritten.contains("CFBundle"), "\(relative) lost its other keys")
