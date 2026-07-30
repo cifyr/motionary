@@ -730,6 +730,79 @@ Also present [BIN]: `vectorGlyphAssetLibraryDatas` — SF Symbol vector data *is
 embedded as data. So the archive demonstrably can carry glyph outlines inline;
 the question is only whether that path is reachable for custom fonts.
 
+#### 6.3.1 SETTLED: the flag does not embed anything — high confidence [MEASURED]
+
+**It is reachable, it is settable, and it changes nothing.** This closes the
+route. Measured on the 26.5 simulator with `Tools/font-embed-shot.sh`, one
+runtime-registered lane font in the tree (`FontLab` route `groupProcess`: an App
+Group file, `CTFontManagerRegisterFontsForURL` with `.process` scope), archive
+read straight out of the widget extension's own PluginKit container:
+
+| | archived timeline | sfnt bytes in archive | how the font is written | flag in the environment |
+|---|---|---|---|---|
+| flag off | **12,200 bytes** | 0 | `file://…/AppGroup/…/fontlab/MLabGroupProcess.ttf#postscript-name=MLabGroupProcess-Regular` | closure never ran |
+| flag on | **12,200 bytes** | 0 | identical | `set=true observed=true symbol=true` |
+
+The two archives are the same size and differ in 610 of 12,200 bytes: the
+`archiveID` UUID, the internal view-identity UUIDs, the install's bundle-path
+UUID, and the timer string (`1:04` vs `1:07`). Nothing structural. No sfnt
+signature, no `SVG ` table, no PostScript name in UTF-16BE anywhere in the
+container — including `snapshots/` and `placeholders/`.
+
+Four things make this a real negative rather than a failed attempt:
+
+1. **The flag was verifiably `true` during the archived render, in the widget
+   extension.** Set inside `transformEnvironment(\.self)` and read back in the
+   same closure, written to its own file from inside the extension. The first
+   attempt logged this to the render log and the line vanished — `WidgetRenderLog`
+   rewrites the whole file after reading it, so a line written from inside a
+   render closure loses to a line written from the render around it. "The flag
+   was never set" and "the log ate the line" look identical.
+2. **Placement was ruled out.** The modifier is applied both at the root of the
+   archived tree and directly around the font's own use site.
+3. **The detector was proved on the same archive.** The run appends a real
+   994,891-byte lane font to the archive it just measured and requires the
+   scanner to find it (`Tools/read-archive.py` validates a table directory, not
+   just the magic — `00 01 00 00` occurs constantly in unrelated data). It
+   reports the font, its 18 tables including `SVG `, and the name in UTF-16BE.
+4. **A stale reading was caught and removed.** Installing the app is itself
+   enough to make the system ask for a timeline, and that render happens under
+   the *previous* run's flag. It made an "off" run report the flag observed
+   `true`. The harness now settles the defaults in a throwaway launch first.
+
+**What the flag actually is.** `nm` + disassembly of WidgetKit (26.5) says the
+only reader of `EnvironmentValues._wantsCustomFontsEmbeddedInArchive` is a single
+function that walks a fixed list of WidgetKit-owned environment values by name
+and key path — alongside `_encodesPreciseTextLayout`, `_widgetRenderScheme`,
+`_preferredSystemWidgetBackgroundStyle`, `showsWidgetLabel`, `isLuminanceReduced`,
+`userWantsWidgetDataWhenPasscodeLocked` — and records each into a structure.
+Nothing else in WidgetKit calls the getter, and nothing else in the whole 26.5
+runtime references the name at all (`ChronoCore`, `ChronoKit`, `ChronoServices`,
+`ChronoUIServices` all: zero). There is a second, separate type with the same
+name, `WidgetKit.WantsCustomFontsEmbeddedInArchiveKey`, conforming to
+`_WidgetEnvironmentKey` **and `CodingValue`** — i.e. it is an entry in the widget
+environment that the *host* supplies and that gets encoded, not something a
+widget's view tree contributes to. `ViewStatesArchiver.encodesCustomFontsAsURLs`
+has no callers inside WidgetKit either: it is configured from outside, before the
+tree is walked. So the most consistent reading is that this is a **host-side
+switch, plumbed through the widget environment**, and setting the SwiftUI mirror
+of it from inside the widget's content closure is both too late and in the wrong
+place. That matches the earlier inference [INF] that embedding is live for Live
+Activities (whose archives are built by ChronoKit on the *app's* side) and not
+for Home Screen widgets.
+
+**Consequence.** "Fonts must be bundled at install time" is a platform limit, not
+a policy decision, for Home Screen widgets on iOS 26.5. There is no third-party
+switch upstream of the two font failures in §6.2. The shim is kept as a probe
+behind `FONT_EMBED_PROBE` (off, and absent from a shipped build) purely so a
+future OS changing its mind is one command to detect.
+
+**Costs, for the record.** A 32-lane bundled design archives to **2,440,264
+bytes** with fonts written as URLs, against `manifestFontBytes` of **31,934,608**.
+Had embedding worked and been per-use-site as suspected, the same design would
+have wanted ~32 MB in a ~10 MB archive — so even a positive result would have
+capped this route at roughly 8-10 lanes, not 32.
+
 ### 6.4 Size limits — there are **four**, routinely conflated
 
 | # | Limit | Value | Enforcement | Confidence |
@@ -1025,25 +1098,19 @@ the first check needs no widget at all.
 
 **Confidence: high that the technique works; unverified on iOS 26/27.**
 
-### 2. Flip `_wantsCustomFontsEmbeddedInArchive`
+### 2. ~~Flip `_wantsCustomFontsEmbeddedInArchive`~~ — DEAD, and it was the good one
 
-**Measured during this report: all four accessors, including the property
-descriptor a key path needs, are exported in the iOS 26.5 SDK's `WidgetKit.tbd`
-(§6.3).** So the switch is reachable by the linker. If it can be flipped, font
-*data* is embedded into the archive rather than referenced, runtime-registered
-fonts simply work, and **the existing engine keeps working unchanged** — no
-rewrite, no bundling, no recompile. That is the least disruptive path to the goal.
+This was the least disruptive path to the goal and it does not exist. The switch
+is reachable by the linker, settable through `@_silgen_name`, and verifiably
+`true` in the widget extension's environment during the archived render — and the
+archive comes out byte-for-byte the same size with the font still written as a
+URL. Full evidence in §6.3.1; harness in `Tools/font-embed-shot.sh`.
 
-Next steps, in order: check whether these accessors were public in the
-iOS 14/15 SDK interfaces the way `_ClockHandRotationEffect` was (if so, the same
-vendored-xcframework trick applies with no `@_silgen_name`); then test with
-**one** lane font before 64.
+Do not reopen this without a new iOS major. What would justify a retest: the
+probe is one command (`Tools/font-embed-shot.sh on`) and the unit suite fails
+loudly if WidgetKit stops exporting the accessors.
 
-Risks: private API (same calculus as §5.6); and the Live Activity evidence
-suggests embedding may be **quadratic in use sites** (§6.3) — a 109 KB TTF
-inflated an archive to 2.5 MB — which for 64 lane fonts would be fatal.
-
-**Confidence: reachable (measured); effect unverified. High payoff, low cost.**
+**Confidence: high that it does nothing here. Route closed.**
 
 ### 3. Fix the diagnostics before running any more experiments
 
@@ -1233,7 +1300,7 @@ error: cannot infer key path type from context
 | Question | What would settle it |
 |---|---|
 | **Does the wedge-mask flipbook still work on iOS 26 / 27?** All prior art predates iOS 26 | Reproduce DouYinComment's construction — it works in-app too, so no widget needed for the first check |
-| Is `_wantsCustomFontsEmbeddedInArchive` linkable, and is embedding quadratic? | `grep` the `.tbd`; then a 1-lane shim |
+| ~~Is `_wantsCustomFontsEmbeddedInArchive` linkable, and is embedding quadratic?~~ | **Settled, §6.3.1. Linkable and settable; embeds nothing in a Home Screen widget's archive** |
 | Does a live *text* mask gate a static `Image` / `Color`? | Three-band device render (§4.1). Rotating-shape masks over static images are already proven |
 | Can chronod read the *extension's own* Caches directory? | Finish the `cachesProcess` lab route on device |
 | `_clockHandRotationEffect` on Lock Screen accessory families and under Always-On | No example exercises either |
