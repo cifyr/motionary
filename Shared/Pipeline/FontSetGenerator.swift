@@ -223,7 +223,11 @@ struct FontSetGenerator {
                 will still show across \(Int(crop.width))px of it
                 """)
             }
-            let data = try FrameEncoder.jpegData(corrected, quality: 0.9)
+            // 0.95 rather than 0.9: the correction above is a step of up to 79
+            // units across two or three rows, and quantisation smooths exactly
+            // that. Measured, 0.9 gave back 2-6 units of the line and 0.95 under
+            // 3, for about 130KB.
+            let data = try FrameEncoder.jpegData(corrected, quality: 0.95)
                 ?? FrameEncoder.pngData(corrected)
             try data.write(to: store.widgetBackdropURL(for: design.id), options: DesignStore.writingOptions)
             bakedBackdrop = backdropRect
