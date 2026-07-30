@@ -21,6 +21,10 @@ struct MotionaryApp: App {
             FontLab.isEnabled = wanted
             changed = true
         }
+        if let wanted = EdgeLab.launchOverride(in: arguments), wanted != EdgeLab.isEnabled {
+            EdgeLab.isEnabled = wanted
+            changed = true
+        }
         if changed { WidgetCenterBridge.reloadAll() }
     }
 
