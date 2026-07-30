@@ -49,6 +49,27 @@ struct WidgetStatus: Codable, Equatable, Sendable {
     var screenSize: CGSize = .zero
     var manifestFontBytes = 0
 
+    // Which of the two animations drew
+    //
+    // Two routes reach this widget now and they fail in different ways: lane
+    // fonts are missing from the bundle, runtime frames are missing from the app
+    // group. A report that does not name the route cannot be acted on, and both
+    // failures look the same from outside - a still picture.
+    var animationSource = AnimationSource.laneFonts.rawValue
+    var animationPath = "none"
+    var frameCycleSeconds: TimeInterval = 0
+    var framesRequested = 0
+    var framesLoaded = 0
+    var frameFilesOnDisk = 0
+    var frameLayout = "-"
+    var frameSize: CGSize = .zero
+    var frameBytesOnDisk = 0
+    /// How many times the source loop plays inside the cycle, and the speed
+    /// that made it land there. A design that reads as slightly fast is this
+    /// number, not a broken decode.
+    var sourceRepeats = 0
+    var playbackSpeed: Double = 1
+
     // Fonts on disk and in the process
     var fontFilesOnDisk = 0
     var fontBytesOnDisk = 0
@@ -113,6 +134,15 @@ struct WidgetStatus: Codable, Equatable, Sendable {
         design        \(designName ?? "none") [\(designSize ?? "?")] gen \(buildGeneration)
         id            \(designID ?? "none")
         manifest      \(manifestFound ? "found" : "MISSING")
+
+        ANIMATION
+        source        \(animationSource)
+        path          \(animationPath)
+        cycle         \(frameCycleSeconds > 0 ? String(format: "%.1fs", frameCycleSeconds) : "30.0s (timer wrap)")
+        frames        \(framesLoaded)/\(framesRequested) loaded, \(frameFilesOnDisk) files on disk
+        layout        \(frameLayout) at \(Int(frameSize.width))x\(Int(frameSize.height)), \(mb(frameBytesOnDisk))
+        loopFit       \(sourceRepeats)x the source at \(String(format: "%.3f", playbackSpeed)) speed
+
         lanes/fps     \(laneCount) / \(framesPerSecond)
         loop          \(loopFrameCount) frames
         crop          \(rect(animationCrop))
