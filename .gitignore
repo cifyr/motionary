@@ -1,5 +1,8 @@
 # Xcode build products and per-user state
 build/
+# The device build's derived data, which was committed by accident: 3,105 files
+# and 221MB of module cache, none of it source.
+build-device/
 DerivedData/
 *.xcuserstate
 **/xcuserdata/
