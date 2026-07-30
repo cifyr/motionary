@@ -108,3 +108,14 @@ pipeline run headless.
 design's backdrop and wallpaper are written at build time, so changing the
 pipeline does nothing to designs already built — an easy way to conclude a fix
 did not work when it was simply never applied.
+
+Rebuild the studio *before* the designs, for the same reason one level up:
+
+    xcodebuild -scheme MotionaryStudio -destination 'platform=macOS' build
+    MotionaryStudio --rebuild-starred
+
+A design shipped with neither the edge nor the colour correction in its backdrop
+because the binary that rebuilt it predated both, and from a screenshot that is
+indistinguishable from a correction that does not work.
+`Tools/edge-calibrate.py` reports what share of the profile is actually baked into
+a design, and refuses to calibrate against one that has none.
