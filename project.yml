@@ -85,11 +85,11 @@ targets:
       # The studio's bundling step decides whether a design reaches the widget
       # at all, and it is plain Foundation, so it is covered here rather than
       # needing a second test target.
-      - path: Mac/BundleWriter.swift
-      - path: Mac/SkinLibrary.swift
+      - path: Mac/Install/BundleWriter.swift
+      - path: Mac/Library/SkinLibrary.swift
       # Resolving a tile's artwork decides what the wallpaper bakes as well as
       # what the bundle installs, so it belongs to the same coverage.
-      - path: Mac/TileArtwork.swift
+      - path: Mac/Library/TileArtwork.swift
       - path: Resources
         buildPhase: resources
     settings:
@@ -128,28 +128,28 @@ targets:
       - Mac
       - Shared/Pipeline
       - Shared/SFNT
-      - path: Shared/DesignDocument.swift
-      - path: Shared/DesignStore.swift
-      - path: Shared/DeviceGeometry.swift
-      - path: Shared/TimerFontSpec.swift
-      - path: Shared/WidgetFamilyCompatibility.swift
+      - path: Shared/Model/DesignDocument.swift
+      - path: Shared/Storage/DesignStore.swift
+      - path: Shared/Model/DeviceGeometry.swift
+      - path: Shared/Model/TimerFontSpec.swift
+      - path: Shared/Model/WidgetFamilyCompatibility.swift
       # The editor places the same tiles the widget draws, so it shares the
       # tile view, the catalogue, the snapping, and the icon pipeline.
       - path: Shared/Icons/IconAsset.swift
       - path: Shared/Icons/SVGIconRenderer.swift
       - path: Shared/Icons/SVGPathParser.swift
-      - path: Shared/TileView.swift
-      - path: Shared/AppCatalog.swift
-      - path: Shared/ImageLoader.swift
-      - path: Shared/SnapEngine.swift
-      - path: Shared/CompositionView.swift
+      - path: Shared/Rendering/TileView.swift
+      - path: Shared/Model/AppCatalog.swift
+      - path: Shared/Storage/ImageLoader.swift
+      - path: Shared/Model/SnapEngine.swift
+      - path: Shared/Rendering/CompositionView.swift
       # The animation layer is shared so there is one renderer, not two. The
       # studio does not build runtime-frame designs - the phone does - but it
       # draws the same composition, so it needs the layer and the cycle maths
       # the composition now branches on.
-      - path: Shared/PrebuiltDesign.swift
-      - path: Shared/ActiveDesign.swift
-      - path: Shared/WidgetStatus.swift
+      - path: Shared/Storage/PrebuiltDesign.swift
+      - path: Shared/Storage/ActiveDesign.swift
+      - path: Shared/Diagnostics/WidgetStatus.swift
       - path: App/IconifyService.swift
       - path: Resources/MotionTemplate-Regular.ttf
         buildPhase: resources
