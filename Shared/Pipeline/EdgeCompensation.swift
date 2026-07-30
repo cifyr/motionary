@@ -13,9 +13,9 @@ import os
 ///
 /// - a line on the widget's top row, screen row 270;
 /// - a stronger one on its bottom row, screen row 1914 - thirteen rows below
-///   where the composition's own frame ends, because the system hands over 548pt
-///   of widget where the calibration says 544. The padded backdrop covers those
-///   rows, so the correction can reach them;
+///   where the composition's own frame ends, because the system hands over
+///   1645px of widget where the cut frame is 1632. The padded backdrop covers
+///   those rows, so the correction can reach them;
 /// - nothing down the left and right edges, which is why the lines read as top
 ///   and bottom rather than as a border. A useful check on the method, too: the
 ///   Polaroid edges in the picture itself cancelled to within two units while
@@ -84,9 +84,11 @@ enum EdgeCompensation {
     /// top and five of nine across the bottom were in that state.
     static let strength: Double = 1.0
 
-    /// The widget's real height in screen pixels, from where the bottom line
-    /// lands: row 1914, twelve past the 1901 the composition's frame ends at.
-    static let renderedHeightPixels = 1645
+    /// The widget's real height in screen pixels. From the geometry table rather
+    /// than a constant of its own: the bottom line lands on the last row the
+    /// system hands over (1914), not on the last row of the cut frame (1901), and
+    /// two copies of that height are two things to get out of step.
+    static var renderedHeightPixels: Int { Int(DeviceGeometry.renderedWidgetRect.height) }
 
     static func topEdgeRow(widgetRect: CGRect) -> Int { Int(widgetRect.minY) }
 
