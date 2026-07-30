@@ -6,6 +6,7 @@ enum DesignStoreError: Error, CustomStringConvertible {
     case designNotFound(UUID)
     case manifestMissing(designID: UUID, path: String)
     case decodeFailed(path: String, underlying: Error)
+    case assetImportFailed(source: URL, name: String, underlying: Error)
 
     var description: String {
         switch self {
@@ -17,6 +18,8 @@ enum DesignStoreError: Error, CustomStringConvertible {
             "storage: design \(id.uuidString) has no build manifest at \(path); generate it first"
         case .decodeFailed(let path, let underlying):
             "storage: could not decode \(path): \(underlying)"
+        case .assetImportFailed(let source, let name, let underlying):
+            "storage: could not copy \(source.path) in as \(name): \(underlying)"
         }
     }
 }
@@ -128,6 +131,57 @@ struct DesignStore {
     /// same picture even if the original file has moved.
     func backgroundURL(for id: UUID, name: String) -> URL {
         folder(for: id).appendingPathComponent(name)
+    }
+
+    /// Placed decoration lives with the design rather than in the shared skin
+    /// library, so exporting or deleting a design takes its pictures with it.
+    /// The library stays the right home for artwork reused across designs.
+    func assetsFolder(for id: UUID) -> URL {
+        folder(for: id).appendingPathComponent("Assets", isDirectory: true)
+    }
+
+    func assetURL(for id: UUID, name: String) -> URL {
+        assetsFolder(for: id).appendingPathComponent(name)
+    }
+
+    /// Copies a picture into the design, returning the filename to store on the
+    /// `PlacedAsset`. Names collide constantly -- every second export is called
+    /// `image.png` -- so a repeat gets a numbered suffix rather than silently
+    /// overwriting the asset already placed.
+    @discardableResult
+    func importAsset(_ source: URL, for id: UUID) throws -> String {
+        let folder = assetsFolder(for: id)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        let base = source.deletingPathExtension().lastPathComponent
+        let ext = source.pathExtension
+        var name = ext.isEmpty ? base : "\(base).\(ext)"
+        var attempt = 2
+        while FileManager.default.fileExists(atPath: folder.appendingPathComponent(name).path) {
+            name = ext.isEmpty ? "\(base)-\(attempt)" : "\(base)-\(attempt).\(ext)"
+            attempt += 1
+        }
+
+        do {
+            try FileManager.default.copyItem(at: source, to: folder.appendingPathComponent(name))
+        } catch {
+            throw DesignStoreError.assetImportFailed(source: source, name: name, underlying: error)
+        }
+        return name
+    }
+
+    /// Removes an asset's file. A missing file is not an error: the document is
+    /// the record of what exists, and a half-deleted design must still open.
+    func removeAsset(named name: String, for id: UUID) {
+        let url = assetURL(for: id, name: name)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            Self.logger.error(
+                "could not remove asset \(name, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     func wallpaperURL(for id: UUID) -> URL {
