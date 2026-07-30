@@ -234,7 +234,7 @@ enum FontLab {
     }
 
     private static func bundledControl() -> Outcome {
-        guard let manifest = PrebuiltDesign.manifest else {
+        guard let manifest = PrebuiltDesign.selectedManifest else {
             return Outcome(route: .bundled, note: "no bundled design in this build", font: nil)
         }
         let name = LaneFontBuilder.postScriptName(family: manifest.fontFamilyBase, lane: 0)
@@ -252,7 +252,7 @@ enum FontLab {
     /// the same on a black screen.
     static func coreTextProof(route: Route, side: Int) -> UIImage? {
         let name = route == .bundled
-            ? PrebuiltDesign.manifest.map { LaneFontBuilder.postScriptName(family: $0.fontFamilyBase, lane: 0) }
+            ? PrebuiltDesign.selectedManifest.map { LaneFontBuilder.postScriptName(family: $0.fontFamilyBase, lane: 0) }
             : route.postScriptName
         guard let name else { return nil }
 
