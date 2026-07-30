@@ -47,7 +47,7 @@ struct DesignWidgetView: View {
             EdgeLabView()
         } else if FontLab.isEnabled, let lab = lab() {
             lab
-        } else if let source = imported() ?? bundled() {
+        } else if let source = bundled() {
             let _ = record(source: source)
             CompositionView(
                 manifest: source.manifest,
@@ -105,33 +105,16 @@ struct DesignWidgetView: View {
         )
     }
 
-    /// The design chosen in the app, if it is built and its fonts will draw.
-    private func imported() -> Source? {
-        guard let store = try? DesignStore(),
-              let design = ActiveDesign.resolve(in: store),
-              let manifest = try? store.loadManifest(id: design.id)
-        else { return nil }
-
-        // Animated only when the lane fonts shipped in this build. Runtime
-        // registration reports every lane usable on iOS 27 and then draws
-        // nothing, so an imported design is shown as a still picture rather
-        // than gambling the whole widget on fonts that resolve but do not
-        // render. A still upload is a poor outcome; a black one is a worse
-        // outcome that looks identical to broken.
-        let bundledFonts = PrebuiltDesign.fontsAreBundled(familyBase: manifest.fontFamilyBase)
-        if bundledFonts {
-            _ = RuntimeFontRegistry.register(manifest: manifest, store: store)
-        }
-        return Source(
-            manifest: manifest,
-            backdrop: backdrop(manifest: manifest, store: store, designID: design.id),
-            fontsUsable: bundledFonts,
-            origin: "imported",
-            scope: bundledFonts ? "bundled" : "still - fonts not in this build",
-            name: design.name
-        )
-    }
-
+    /// The design compiled into this build, and the only kind there is.
+    ///
+    /// There used to be a second source: a design generated on the phone into
+    /// the app group, which this preferred. That feature is gone - a design has
+    /// to be in the extension's bundle at install time to animate at all - but
+    /// preferring it outlived it, so a phone that had ever generated one showed
+    /// that leftover forever: not the design the app was showing, not animated
+    /// because its fonts were never bundled, and deaf to switching, because the
+    /// selected id never matched anything in the store and the fallback always
+    /// returned the same stale design.
     private func bundled() -> Source? {
         // Whichever the app last chose, so the Home Screen follows a swipe.
         guard let entry = PrebuiltDesign.selected(), let manifest = entry.manifest else { return nil }
@@ -147,18 +130,6 @@ struct DesignWidgetView: View {
             scope: "UIAppFonts",
             name: entry.name
         )
-    }
-
-    private func backdrop(manifest: BuildManifest, store: DesignStore, designID: UUID) -> Image? {
-        let cropped = store.widgetBackdropURL(for: designID)
-        let usesCrop = manifest.backdropRect != nil
-            && FileManager.default.fileExists(atPath: cropped.path)
-        let url = usesCrop ? cropped : store.wallpaperURL(for: designID)
-        let covered = usesCrop
-            ? manifest.backdropRect
-            : CGRect(origin: .zero, size: manifest.screenSize)
-        let longest = Int(max(covered?.width ?? 0, covered?.height ?? 0))
-        return ImageLoader.load(at: url, maxPixelSize: longest).map { Image(decorative: $0, scale: 1) }
     }
 
     @discardableResult

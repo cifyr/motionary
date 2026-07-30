@@ -153,7 +153,7 @@ struct DeviceInstaller {
         // locked phone refuses to open anything - reporting that as a failed
         // build would be wrong about the one thing that mattered.
         //
-        // The font lab is sticky, living in the app group's defaults, so the
+        // Both labs are sticky, living in the app group's defaults, so the
         // launch is also what puts a studio install back on the design it just
         // built rather than on whatever was last being diagnosed.
         do {
@@ -161,7 +161,7 @@ struct DeviceInstaller {
                 "devicectl", "device", "process", "launch",
                 "--device", deviceID,
                 "com.caden.Motionary",
-                "--", "-MotionaryFontLabOff",
+                "--", "-MotionaryFontLabOff", "-MotionaryEdgeLabOff",
             ])
             return nil
         } catch {

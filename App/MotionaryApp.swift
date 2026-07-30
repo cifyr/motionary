@@ -25,6 +25,14 @@ struct MotionaryApp: App {
             EdgeLab.isEnabled = wanted
             changed = true
         }
+        // Switching designs is a swipe, which a test run cannot make without
+        // driving somebody's screen. This is the same switch by argument, so
+        // "does the widget follow the selection" can be answered from a script.
+        if let wanted = PrebuiltDesign.launchSelection(in: arguments),
+           wanted != ActiveDesign.identifier {
+            ActiveDesign.identifier = wanted
+            changed = true
+        }
         if changed { WidgetCenterBridge.reloadAll() }
     }
 
