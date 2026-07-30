@@ -97,3 +97,100 @@ final class SkinTrimTests: XCTestCase {
         XCTAssertEqual(scaled.height, SkinLibrary.renderedSide)
     }
 }
+
+/// Icon art often arrives on a green screen. Trimming alone would cut it from
+/// the edges and leave it filling every gap inside the artwork.
+final class ChromaKeyTests: XCTestCase {
+    private func onGreen(inner: CGRect, canvas: CGSize, gap: CGRect? = nil) throws -> CGImage {
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: Int(canvas.width),
+            height: Int(canvas.height),
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(red: 0.06, green: 0.88, blue: 0.05, alpha: 1))
+        context.fill(CGRect(origin: .zero, size: canvas))
+        context.setFillColor(CGColor(red: 0.5, green: 0.3, blue: 0.1, alpha: 1))
+        context.fill(inner)
+        if let gap {
+            // A hole in the artwork, filled with the key colour: the case
+            // trimming cannot handle.
+            context.setFillColor(CGColor(red: 0.06, green: 0.88, blue: 0.05, alpha: 1))
+            context.fill(gap)
+        }
+        return try XCTUnwrap(context.makeImage())
+    }
+
+    private func alpha(_ image: CGImage, x: Int, y: Int) throws -> UInt8 {
+        var data = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &data,
+            width: image.width,
+            height: image.height,
+            bitsPerComponent: 8,
+            bytesPerRow: image.width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return data[(y * image.width + x) * 4 + 3]
+    }
+
+    func testGreenBecomesTransparentAndTheArtworkDoesNot() throws {
+        let canvas = CGSize(width: 400, height: 400)
+        let image = try onGreen(inner: CGRect(x: 100, y: 100, width: 200, height: 200), canvas: canvas)
+        let keyed = try XCTUnwrap(SkinLibrary.keyingOut(image), "a green screen should be keyed")
+
+        XCTAssertEqual(try alpha(keyed, x: 5, y: 5), 0, "the background should be gone")
+        XCTAssertEqual(try alpha(keyed, x: 200, y: 200), 255, "the artwork should be untouched")
+    }
+
+    /// The reason keying exists rather than only trimming.
+    func testGreenInsideTheArtworkGoesToo() throws {
+        let canvas = CGSize(width: 400, height: 400)
+        let image = try onGreen(
+            inner: CGRect(x: 50, y: 50, width: 300, height: 300),
+            canvas: canvas,
+            gap: CGRect(x: 180, y: 180, width: 40, height: 40)
+        )
+        let keyed = try XCTUnwrap(SkinLibrary.keyingOut(image))
+        XCTAssertEqual(try alpha(keyed, x: 200, y: 200), 0, "a keyed hole inside the artwork should be transparent")
+        XCTAssertEqual(try alpha(keyed, x: 60, y: 60), 255)
+    }
+
+    /// White and parchment paddings are the trimmer's job. Keying those would
+    /// eat any pale part of the picture.
+    func testAPaperBackgroundIsLeftToTheTrimmer() throws {
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: 200, height: 200, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 200, height: 200))
+        context.setFillColor(CGColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1))
+        context.fill(CGRect(x: 60, y: 60, width: 80, height: 80))
+        let image = try XCTUnwrap(context.makeImage())
+
+        XCTAssertNil(SkinLibrary.keyingOut(image), "a white background must not be keyed")
+        XCTAssertNotNil(SkinLibrary.trimmed(image), "it should be trimmed instead")
+    }
+
+    /// A picture that merely starts on a vivid pixel is not a green screen.
+    func testAVividCornerAloneIsNotAKey() throws {
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: 200, height: 200, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(red: 0.4, green: 0.25, blue: 0.1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 200, height: 200))
+        context.setFillColor(CGColor(red: 0, green: 1, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 195, width: 5, height: 5))
+        let image = try XCTUnwrap(context.makeImage())
+        XCTAssertNil(SkinLibrary.keyingOut(image), "one vivid corner is not a background")
+    }
+}
