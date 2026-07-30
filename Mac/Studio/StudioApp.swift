@@ -28,7 +28,9 @@ struct MotionaryStudioApp: App {
         Window("Motionary Studio", id: "studio") {
             StudioView()
         }
-        .windowResizability(.contentSize)
+        // Was .contentSize, which pinned the window to a fixed-width column.
+        // The split view needs to be draggable to be worth having.
+        .windowResizability(.contentMinSize)
     }
 }
 
@@ -248,29 +250,23 @@ struct StudioView: View {
 
     private var isBusy: Bool { stage != nil }
 
+    /// Library on the left, the design being worked on to the right.
+    ///
+    /// It was one fixed-width column with the library wedged into the middle of
+    /// it, so the list competed for height with the drop target, the settings
+    /// and the build controls, and every one of them lost. A split view gives
+    /// the library its own resizable column and lets the work take the rest.
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            header
-            dropTarget
-            settings
-            if !saved.isEmpty { savedDesigns }
-            actions
-            if let stage { progress(stage) }
-            if let done { message(done, tint: .green) }
-            if let wallpaper {
-                HStack(spacing: 12) {
-                    Button("Save wallpaper...") { exportWallpaper(wallpaper) }
-                    Button("Show in Finder") {
-                        NSWorkspace.shared.activateFileViewerSelecting([wallpaper])
-                    }
-                }
+        NavigationSplitView {
+            librarySidebar
+                .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 420)
+        } detail: {
+            ScrollView {
+                workColumn.padding(24)
             }
-            if let failure { message(failure, tint: .red) }
+            .frame(minWidth: 480)
         }
-        .padding(24)
-        // Wider than it was: the design rows carry a name, three counts and
-        // three actions, which 520 crushed together.
-        .frame(width: 600)
+        .frame(minWidth: 860, minHeight: 640)
         .task {
             refreshDevices()
             StudioPipeline.migrateLegacyDesigns()
@@ -319,50 +315,88 @@ struct StudioView: View {
 
     /// Reopening keeps the placement. Deriving a design from the clip again
     /// would put every tile back in the middle of the frame.
+    /// Everything that is about making *this* design.
+    private var workColumn: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            header
+            dropTarget
+            settings
+            actions
+            if let stage { progress(stage) }
+            if let done { message(done, tint: .green) }
+            if let wallpaper {
+                HStack(spacing: 12) {
+                    Button("Save wallpaper...") { exportWallpaper(wallpaper) }
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([wallpaper])
+                    }
+                }
+            }
+            if let failure { message(failure, tint: .red) }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: 620, alignment: .leading)
+    }
+
     private var filteredDesigns: [DesignDocument] {
         let query = designFilter.trimmingCharacters(in: .whitespaces).lowercased()
         guard !query.isEmpty else { return saved }
         return saved.filter { $0.name.lowercased().contains(query) }
     }
 
-    private var savedDesigns: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text("Designs").font(.headline)
-                Text("\(saved.count)")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .padding(.horizontal, 6).padding(.vertical, 1)
-                    .background(.secondary.opacity(0.15), in: Capsule())
-                Spacer()
+    private var librarySidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text("Designs").font(.headline)
+                    Text("\(saved.count)")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(.secondary.opacity(0.15), in: Capsule())
+                    Spacer()
+                    Button("Import...") { importDesign() }.buttonStyle(.link)
+                }
                 // Only once the list is long enough to need it: a filter field
                 // over four designs is furniture.
                 if saved.count > 6 {
                     TextField("Filter", text: $designFilter)
                         .textFieldStyle(.roundedBorder)
-                        .frame(width: 130)
                 }
-                Button("Import...") { importDesign() }.buttonStyle(.link)
             }
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
 
-            Text("Starred designs are compiled into the app, and the phone switches between them. About 29MB each.")
-                .font(.caption2).foregroundStyle(.secondary)
-
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 1) {
+            if saved.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("No designs yet.").font(.callout)
+                    Text("Drop a video or GIF on the right to make one.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(12)
+                Spacer()
+            } else {
+                // Takes the column's whole height now, rather than the 190pt it
+                // could spare while sharing one column with everything else.
+                List {
                     ForEach(filteredDesigns) { design in
                         designRow(design)
+                            .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4))
                     }
                 }
-            }
-            // Tall enough to read the library rather than peer at it through a
-            // slot. Six rows before it scrolls, against the two it showed.
-            .frame(height: 190)
-            .background(.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                .listStyle(.sidebar)
 
-            if filteredDesigns.isEmpty, !designFilter.isEmpty {
-                Text("Nothing matches \"\(designFilter)\".")
-                    .font(.caption).foregroundStyle(.secondary)
+                if filteredDesigns.isEmpty, !designFilter.isEmpty {
+                    Text("Nothing matches \"\(designFilter)\".")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .padding(12)
+                }
             }
+
+            Divider()
+            Text("Starred designs are compiled into the app, and the phone switches between them. About 29MB each.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .padding(12)
         }
         .disabled(isBusy)
     }
