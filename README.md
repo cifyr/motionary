@@ -44,15 +44,21 @@ There is no animation API in a widget worth using for this. What there is:
 - The cycle is 30 seconds, anchored to wall-clock time so the app and the widget
   agree on which frame is showing.
 
-`Shared/CompositionView.swift` draws it; `Shared/Pipeline/` builds it.
+`Shared/Rendering/CompositionView.swift` draws it; `Shared/Pipeline/` builds it.
+
+Only the moving part of the frame goes into the glyphs. The rest is one still
+backdrop, so a design animating 24% of the widget costs a quarter of the decoded
+bitmap that a full-screen one would. `MotionaryStudio --analyse-crop` reports what
+each design actually spends.
 
 ## Layout
 
-    Mac/        Motionary Studio: the editor and the build pipeline's driver
-    Shared/     Everything both platforms need, including all of Pipeline/
+    Mac/        Motionary Studio, split into Studio / Install / Library
+    Shared/     Both platforms: Model, Rendering, Storage, Pipeline,
+                Diagnostics, Icons, SFNT — see CONTRIBUTING.md for what goes where
     App/        The iPhone viewer
     Widget/     The extension
-    Tests/      The unit suite, run on the simulator, mirroring the sections below
+    Tests/      The unit suite, run on the simulator, mirroring the sections above
     UITests/    Drives SpringBoard from inside the simulator to photograph the widget
     Tools/      Shot loops and analysis scripts
     docs/       What was measured and what it cost to find out
@@ -72,6 +78,7 @@ The same pipeline runs headless, which is how it gets tested:
     MotionaryStudio --install-starred [--device UDID]
     MotionaryStudio --rebuild-starred [--device UDID]  # regenerate every starred design
     MotionaryStudio --roundtrip                    # export a design and import it back
+    MotionaryStudio --analyse-crop [--starred]     # what each design's animated area costs, read-only
 
 `--rebuild-starred` is what to reach for after changing anything in the pipeline:
 a design's backdrop and wallpaper are written at build time, so a pipeline change
