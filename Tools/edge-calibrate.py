@@ -67,6 +67,11 @@ TINT_GAIN = (0.984, 1.035, 1.096)
 # the widget has not moved.
 BASELINE_RANGE = (14, 44)
 BINS = 9
+# Below this many usable bins an edge is not written. One design's tiles can cover
+# most of an edge, and the two bins left over disagreed by 20 units where six
+# agreed within three - writing that over a nine-bin fit is a downgrade, not a
+# refinement. Calibrate that edge from a design that does not sit on it.
+MIN_BINS_TO_WRITE = 5
 # A bin needs this much more content than the correction subtracted before its
 # residual is trusted, so a bin that only just cleared zero is not fitted.
 HEADROOM_MARGIN = 6.0
@@ -399,12 +404,20 @@ def main():
 
     updated = {}
     dumps = {}
+    writable = []
     for edge in ("top", "bottom"):
         rows = entry[edge]
         mean_residual, trusted, clamped, per_bin, bin_count = measure_edge(
             shot, wall, device, rows, edge, manifest)
         report(edge, mean_residual, trusted, clamped, rows, bin_count)
-        updated[edge] = [updated_row(rows[d], mean_residual[d]) for d in range(len(rows))]
+        if bin_count >= MIN_BINS_TO_WRITE:
+            writable.append(edge)
+            updated[edge] = [updated_row(rows[d], mean_residual[d]) for d in range(len(rows))]
+        else:
+            updated[edge] = [list(map(float, row)) for row in rows]
+            print(f"  only {bin_count} bins usable, under the {MIN_BINS_TO_WRITE} needed to "
+                  f"write: keeping the current {edge} profile. Calibrate this edge from a "
+                  "design whose tiles do not sit on it.")
         dumps[edge] = {
             "residual": np.where(np.isnan(mean_residual), None, mean_residual).tolist(),
             "trusted": trusted.tolist(),
@@ -433,13 +446,17 @@ def main():
             f"{100 * baked:.0f}% of the profile, so this measurement is the whole line "
             "rather than what is left of it. Rebuild the design first, or pass --force "
             "if you really are fitting from zero.")
+    if not writable:
+        die(f"refusing to write: neither edge had {MIN_BINS_TO_WRITE} usable bins in this "
+            "design. Its tiles cover the edges; calibrate from one whose tiles do not.")
 
     entry["top"] = updated["top"]
     entry["bottom"] = updated["bottom"]
     entry["measuredAt"] = datetime.date.today().isoformat()
     entry["measuredFrom"] = (
         f"{pathlib.Path(args.shot).name} against {wallpaper_path.name}, "
-        f"{BINS} column bins, clamped bins excluded"
+        f"{BINS} column bins, clamped bins excluded; "
+        f"rewritten: {', '.join(writable)}"
     )
     PROFILE_PATH.write_text(json.dumps(profile, indent=2) + "\n")
     print(f"\nwrote {PROFILE_PATH.relative_to(ROOT)}")
