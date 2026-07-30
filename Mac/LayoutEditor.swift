@@ -399,23 +399,28 @@ struct LayoutEditor: View {
                     y: base.y + value.translation.height / unit
                 )
                 let extent = design.tiles[index].boundingExtent
-                guard design.snapEnabled else {
-                    design.tiles[index].center = CGPoint(
-                        x: min(max(moved.x, extent / 2), model.screenPixelSize.width - extent / 2),
-                        y: min(max(moved.y, extent / 2), model.screenPixelSize.height - extent / 2)
-                    )
-                    return
-                }
                 let engine = SnapEngine(
                     screenSize: model.screenPixelSize,
                     widgetRect: design.widgetRect
                 )
+                guard design.snapEnabled else {
+                    design.tiles[index].center = engine.clamp(
+                        center: moved,
+                        tileSize: extent,
+                        within: design.widgetRect
+                    )
+                    return
+                }
                 let snapped = engine.snap(
                     center: moved,
                     tileSize: extent,
                     siblings: design.tiles.filter { $0.id != tile.id }
                 )
-                design.tiles[index].center = engine.clamp(center: snapped.center, tileSize: extent)
+                design.tiles[index].center = engine.clamp(
+                    center: snapped.center,
+                    tileSize: extent,
+                    within: design.widgetRect
+                )
             }
             .onEnded { _ in tileBase = nil }
     }
@@ -507,6 +512,30 @@ struct LayoutEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            let outside = design.tiles.filter { !SnapEngine.isFullyInside($0, frame: design.widgetRect) }
+            if !outside.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(outside.count) app\(outside.count == 1 ? "" : "s") cross the widget edge and will be cut off.")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Bring them inside") {
+                        let engine = SnapEngine(
+                            screenSize: model.screenPixelSize,
+                            widgetRect: design.widgetRect
+                        )
+                        for index in design.tiles.indices {
+                            design.tiles[index].center = engine.clamp(
+                                center: design.tiles[index].center,
+                                tileSize: design.tiles[index].boundingExtent,
+                                within: design.widgetRect
+                            )
+                        }
+                    }
+                    .buttonStyle(.link)
+                }
+            }
+
             skinPicker
 
             Toggle("Snap to grid", isOn: $design.snapEnabled)
@@ -553,7 +582,19 @@ struct LayoutEditor: View {
                 Slider(
                     value: Binding(
                         get: { design.tiles[index].size },
-                        set: { design.tiles[index].size = max(40, $0) }
+                        set: { size in
+                            design.tiles[index].size = max(40, size)
+                            // Growing a tile can push it over the edge just as
+                            // dragging can.
+                            design.tiles[index].center = SnapEngine(
+                                screenSize: model.screenPixelSize,
+                                widgetRect: design.widgetRect
+                            ).clamp(
+                                center: design.tiles[index].center,
+                                tileSize: design.tiles[index].boundingExtent,
+                                within: design.widgetRect
+                            )
+                        }
                     ),
                     in: 40 ... 400
                 )
