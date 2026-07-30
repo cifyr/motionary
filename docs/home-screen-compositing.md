@@ -27,15 +27,48 @@ Screenshots must be **full resolution**. A screenshot pasted into a chat client
 gets resampled to 0.76, which spreads a two-pixel line and halves its peak — the
 first profile fitted that way was wrong by 2× and put one edge a row out.
 
-## The widget is bigger than its frame
+## The widget is bigger than its frame, and starts 2px left of it
 
-`DeviceGeometry` says the widget occupies 1074×1632 px at (66, 270). The system
-hands over **548pt of height where the table says 544** — the rim lines land on
-screen rows **270** and **1914**, so the real extent is about 1645 px.
+`DeviceGeometry` says a design is cut to 1074×1632 px at (66, 270). What the
+system hands the extension is **1078×1645 px at (64, 270)**.
+
+That origin is the part that mattered. The composition lays its content out from
+the viewport's origin, so telling it the cut frame's origin drew every design two
+pixels left of the wallpaper behind it — the seam the whole exercise is about,
+from a table that was four pixels narrow.
+
+Measured without a rim line, by differencing a full-resolution Home Screen
+screenshot against the app's own full-screen render of the same design. The app
+draws the whole screen 1:1, so it is the picture as the design intends it:
+
+| where | dx | dy |
+|---|---|---|
+| inside the widget (1260 patches, r > 0.995) | **+1.996** | +0.003 |
+| wallpaper left of it, right of it, below it | −0.03 | −0.00 |
+
+Pure translation, no scale: fitting `dx = a·x + b` across the width gives 0.54px
+of slope over 1074px, and every column band reads +1.99 on its own. Sliding a
+5px-wide window across the boundary reads exactly `2·n/5` for the n columns of it
+that are widget, which puts the first widget column at **64** and the last at
+**1141** — so the width is 1078, and 1078 centred on a 1206px screen begins at
+64.0 exactly. The 2px is the width error halved, not an origin of its own.
+
+The extra 13px of height lands entirely at the bottom (the slot's top row is 270
+either way), which is why the rim lines are at rows 270 and 1914.
 
 The composition is still cut to the calibrated frame. The backdrop is padded by
 24px on every side, which is what covers the difference; without the padding
-there would be unpainted pixels down the right and bottom edges.
+there would be unpainted pixels down all four edges. A test asserts the padding
+still covers the rendered frame.
+
+**The simulator cannot answer this one.** It places the widget as `systemLarge` —
+1049×1095 at (79, 270), family raw value 2 — not the tall portrait family, so its
+frame is a different measurement entirely. What the simulator did establish is
+that `WidgetStatus.renderedSize × 3` equals the drawn pixel extent exactly: the
+ring target's outermost ring landed on 1049×1095, and the extension reported
+349.67×365.0 pt. Which also means the report's own `Int()` was hiding this —
+359.33pt printed as 359, so the frame looked 1px out instead of 4px. It prints two
+decimals now.
 
 ## The edges: a bright line, top and bottom only
 
@@ -111,6 +144,45 @@ After one refinement the average difference is (+0.8, −0.6, −1.4) and fallin
 but it is no longer a single offset — it varies a few units down the height of
 the widget. Driving the average to zero leaves that variation. Per-row gains
 would chase it; nobody has established it is visible.
+
+## Recalibrating, in one command
+
+    Tools/edge-calibrate.py shot.png --design <uuid-prefix>          # measure
+    Tools/edge-calibrate.py shot.png --design <uuid-prefix> --write  # and write
+
+It measures the residual per row per channel by exactly the method above — the
+design's own wallpaper as the reference, a local baseline from rows 14–43 inward
+so the colour path's own drift is not folded into the edge profile, nine column
+bins, and only the bins whose content had room to be darkened — then writes
+`Resources/edge-profile.json`, which the pipeline reads. Recalibrating does not
+need a code edit; the shipped numbers stay compiled in as the fallback.
+
+Run against the shot the profile was hand-fitted on, it reports 92% of the profile
+baked in and a top-edge residual inside ±2.5 units, which is the same conclusion
+that took three rounds by hand.
+
+### The trap it exists to catch
+
+What it measures is the light left over *after* a correction. A shot of a design
+built **without** one measures the whole line, and folding that in doubles the
+profile instead of refining it — the two are indistinguishable in the output.
+
+So it checks the design's own backdrop first, and reports the share of the profile
+actually baked into it. Below 50% it refuses to write.
+
+That check earned itself immediately. A design built at 23:32 on 2026-07-29
+carried **9%** — neither the edge subtraction nor the colour gain, its backdrop
+sitting at 1.0004× its wallpaper where the tint should make it 0.984/1.035/1.096 —
+while two designs built an hour earlier carried both. Rebuilding it from a studio
+compiled out of this source took it to **84%**, with the gain back at
+0.9853/1.0355/1.0983 and row 270 down by (70.2, 71.2, 59.2). So the pipeline was
+never wrong; the binary that built the design was stale.
+
+Two things follow. A design must be rebuilt after a pipeline change, and **the
+studio must be rebuilt before the design** — `xcodebuild -scheme MotionaryStudio`
+then `--rebuild-starred`. And a Home Screen screenshot is not self-describing: it
+cannot say which build it came from, so the tool checks the files on disk rather
+than trusting the shot.
 
 ## Reproducing any of this
 

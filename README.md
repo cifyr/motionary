@@ -92,6 +92,9 @@ mirroring a phone. It does not now:
     Tools/lab-shot.sh on|off  out.png    # the font lab, on the simulator
     Tools/edge-shot.sh on|off out.png    # the edge calibration target
     Tools/edge-profile.py shot.png       # read the target back
+    Tools/edge-calibrate.py shot.png --design <id> [--write]
+                                         # measure the edge residual off a Home
+                                         # Screen shot and write the profile back
 
 Both drive SpringBoard from inside the simulator via XCUITest, so a run needs
 nobody's screen.
@@ -113,8 +116,11 @@ falls back to the compiled-in bundle for exactly that reason.
 belong in that table — the widget's frame is not derivable, and a few pixels of
 drift shows as a seam against the wallpaper.
 
-The system hands over slightly *more* widget than the frame says: 548pt where the
-table says 544. The backdrop is padded to cover it. See
+The system hands over slightly *more* widget than the frame says, and starts it
+2px further left: 1078x1645 px at (64, 270) against a cut frame of 1074x1632 at
+(66, 270). The extension lays its content out from the rendered origin — using the
+cut frame's put every design 2px left of the wallpaper — and the backdrop is
+padded to cover the difference. See
 [docs/home-screen-compositing.md](docs/home-screen-compositing.md).
 
 ## Things that have bitten, and will again
@@ -137,3 +143,9 @@ table says 544. The backdrop is padded to cover it. See
   single-pixel step needs quality 0.95 or better.
 - **The project lists fonts by name**, so it must be regenerated whenever they
   change — not only when a device is attached.
+- **A stale studio binary silently un-applies a pipeline change.** Rebuilding
+  designs is not enough if what rebuilt them was compiled before the change: a
+  design shipped with neither the edge nor the colour correction in its backdrop
+  that way, and it looks exactly like a correction that does not work.
+  `Tools/edge-calibrate.py` checks the design's backdrop and says what share of
+  the profile is actually in it.
