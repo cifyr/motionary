@@ -22,7 +22,13 @@ enum WidgetTint {
 
     /// What to multiply the widget's content by. The inverse of the measured
     /// difference, so the display path lands back on the wallpaper's colour.
-    static let gain = (r: 0.989, g: 1.030, b: 1.080)
+    ///
+    /// Refined once against a screenshot taken with the first gain in place,
+    /// which cut the difference from (+1.6, -3.5, -7.1) to (+0.8, -0.6, -1.4);
+    /// this folds in the rest. What is left after that varies by a few units
+    /// down the height of the widget rather than being a single offset, so it is
+    /// the average that goes to zero, not every row.
+    static let gain = (r: 0.984, g: 1.035, b: 1.096)
 
     /// Clamped rather than gamut-mapped. On the design measured, 2.4% of the
     /// widget's pixels would exceed 255 in some channel, all of them already at

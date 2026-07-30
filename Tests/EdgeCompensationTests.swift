@@ -34,15 +34,28 @@ final class EdgeCompensationTests: XCTestCase {
     }
 
     /// Strongest at the edge and fading inward, matching the line it cancels.
-    func testTheCorrectionFadesInward() throws {
+    ///
+    /// Never-stronger rather than always-weaker: the measured tail plateaus for a
+    /// row or two, and rounding a real measurement to whole units is allowed to
+    /// repeat a value. What would be wrong is a correction that grows with
+    /// distance from the edge.
+    func testTheCorrectionNeverGrowsInward() throws {
         let top = EdgeCompensation.topEdgeRow(widgetRect: widgetRect)
-        var previous = Double.infinity
-        for distance in 0 ..< EdgeCompensation.topAdded.count {
-            let correction = try XCTUnwrap(
-                EdgeCompensation.correction(screenRow: top + distance, widgetRect: widgetRect)
-            )
-            XCTAssertLessThan(correction.g, previous, "distance \(distance) is not fainter than the one before")
-            previous = correction.g
+        let bottom = EdgeCompensation.bottomEdgeRow(widgetRect: widgetRect)
+        for (label, edge, step) in [("top", top, 1), ("bottom", bottom, -1)] {
+            var previous = Double.infinity
+            let depth = step == 1 ? EdgeCompensation.topAdded.count : EdgeCompensation.bottomAdded.count
+            for distance in 0 ..< depth {
+                let correction = try XCTUnwrap(
+                    EdgeCompensation.correction(screenRow: edge + distance * step, widgetRect: widgetRect)
+                )
+                XCTAssertLessThanOrEqual(
+                    correction.g,
+                    previous,
+                    "\(label) distance \(distance) is stronger than the one before it"
+                )
+                previous = correction.g
+            }
         }
     }
 
