@@ -20,7 +20,13 @@ struct CompositionView<Tile: View>: View {
     /// image as if it were full-screen is what previously left the rest of the
     /// widget black.
     var wallpaperRect: CGRect?
+    /// Draws the lane-font animation. Only true when the fonts shipped in this
+    /// build, because nothing else makes them draw.
     let isAnimated: Bool
+    /// The runtime-frame animation, when the design carries one. Independent of
+    /// `isAnimated` rather than folded into it: they are two different layers
+    /// fed from two different places, and a design uses exactly one of them.
+    var runtimeFrames: RuntimeFrameLayer.Payload?
     @ViewBuilder let tileContent: (PlacedTile, CGFloat) -> Tile
 
     var body: some View {
@@ -58,7 +64,19 @@ struct CompositionView<Tile: View>: View {
                         )
                 }
 
-                if isAnimated {
+                if let runtimeFrames, runtimeFrames.isDrawable {
+                    // Placed by the rect the frames cover, exactly like the
+                    // baked backdrop: the frames are cut to the animated crop,
+                    // not to the whole screen, so treating them as full-screen
+                    // would stretch the animation over the still picture.
+                    let covered = runtimeFrames.sequence.rect
+                    RuntimeFrameLayer(payload: runtimeFrames)
+                        .frame(width: covered.width * scale, height: covered.height * scale)
+                        .offset(
+                            x: originX + covered.minX * scale,
+                            y: originY + covered.minY * scale
+                        )
+                } else if isAnimated {
                     TimerFontLayer(
                         laneCount: manifest.laneCount,
                         framesPerSecond: manifest.framesPerSecond,
@@ -204,7 +222,14 @@ struct SingleLaneGlyph: View {
     }
 }
 
-private struct BlinkMask: View {
+/// One square wave from the bundled blink font: opaque for a second, clear for a
+/// second, with the edges moved by `blinkOffset`.
+///
+/// Not private, because it is the only design-independent piece of the animation
+/// and the runtime-frame layer is built entirely out of it. Sharing it also
+/// means that layer is masked by the mask this widget really uses rather than by
+/// a second copy of it that could drift.
+struct BlinkMask: View {
     /// Shared with the lane texts so both sides of the mask agree on phase.
     let reference: Date
     let blinkOffset: TimeInterval
