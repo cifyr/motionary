@@ -1349,3 +1349,50 @@ error: cannot infer key path type from context
 - This repo: `RESEARCH.md`, `docs/ORIGINAL_TECHNIQUE_NOTES.txt`; and the Motionary
   sibling project's `Shared/FontLab.swift`, `Shared/RuntimeFontRegistry.swift`,
   `Shared/CompositionView.swift`, `Shared/Pipeline/FrameEncoder.swift`
+
+---
+
+## 15. One glyph per SVG document is mandatory (measured, 2026-07-30)
+
+A lane font wastes most of its payload, and it cannot be recovered by sharing
+documents. Worth writing down because the arithmetic makes it look easy.
+
+**The waste.** At selection `s` the visible lane is `s mod laneCount` and the
+frame is `s mod loopFrameCount`, so a lane's 15 glyphs only show
+`loopFrameCount / gcd(laneCount, loopFrameCount)` distinct frames — five, for a
+32-lane 80-frame design, each embedded three times. Measured on a real design:
+32,448,240 bytes of JPEG carrying 10.8MB of distinct data.
+
+**Why the obvious fix fails.** The `SVG ` table addresses documents by glyph
+range, and the OpenType spec allows one document to serve many glyphs, each
+picked out by an element with `id="glyphN"`. That should permit one document per
+lane holding five `<image>` elements and fifteen groups referencing them, cutting
+every design by about 3x losslessly.
+
+CoreText does not honour it. Three configurations were built and rasterised with
+`CTFontDrawGlyphs`, checking for any non-transparent pixel:
+
+| document layout | records | draws? |
+|---|---|---|
+| one glyph per document, `id` on the root `<svg>` | one per glyph | yes |
+| all 15 glyphs in one document, `<defs>` + `<use>` | one range record | **no** |
+| all 15 glyphs in one document, own `<image>` per group | one range record | **no** |
+| all 15 glyphs in one document, own `<image>` per group | one record per glyph | **no** |
+
+Every glyph drew nothing in all three multi-glyph forms, so the renderer is not
+rejecting `<use>` or the range record specifically — it wants the glyph to *be*
+the document root. Since the fonts are the same OT-SVG payload the widget
+renderer consumes, and CoreText draws them identically elsewhere in this project,
+this is taken as binding.
+
+**What that leaves.** Nothing on the font side: cross-lane sharing is impossible
+(separate files), and within a lane the duplication is what the renderer's
+one-glyph-per-document requirement costs. The remaining levers are the crop (see
+`MotionCropDetector`, which is where the wins have actually come from) and the
+loop length — though a loop coprime with the lane count would remove the
+duplication only by giving up the seamless 30-second wrap, since the only lengths
+that both divide 480 and share no factor with 32 are 1, 3, 5 and 15.
+
+Reproduce by building a lane font in-process from the committed template and
+rasterising each animation glyph with `CTFontDrawGlyphs`; a font that is smaller
+and does not render is worse than the duplication, so that check comes first.
