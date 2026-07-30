@@ -157,6 +157,10 @@ targets:
       - path: App/IconifyService.swift
       - path: Resources/MotionTemplate-Regular.ttf
         buildPhase: resources
+      # The studio is where the edge correction is actually applied, so the
+      # calibration it reads has to be in this bundle too, not only the phone's.
+      - path: Resources/edge-profile.json
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.caden.MotionaryStudio

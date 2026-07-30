@@ -49,8 +49,18 @@ struct DeviceModel: Identifiable, Hashable, Sendable {
     let scale: CGFloat
     /// Everything is stated in device pixels, because that is what was measured.
     let screenPixelSize: CGSize
+    /// The frame a design is cut to: where tiles snap and how much backdrop is
+    /// baked. Smaller than what the system hands over, which is why the backdrop
+    /// is padded.
     let widgetOrigin: CGPoint
     let widgetPixelSize: CGSize
+    /// The frame the system really hands the extension.
+    ///
+    /// Content is laid out from *this* origin, so the widget must be told this
+    /// rect and not the cut frame above: believing the cut origin drew every
+    /// design two pixels left of the wallpaper behind it.
+    let widgetRenderedOrigin: CGPoint
+    let widgetRenderedPixelSize: CGSize
     /// Corner radius of the widget, in screen pixels.
     ///
     /// Estimated rather than measured: iOS derives a widget's corners from its
@@ -61,6 +71,10 @@ struct DeviceModel: Identifiable, Hashable, Sendable {
     var widgetCornerRadius: CGFloat = 78
 
     var widgetRect: CGRect { CGRect(origin: widgetOrigin, size: widgetPixelSize) }
+
+    var widgetRenderedRect: CGRect {
+        CGRect(origin: widgetRenderedOrigin, size: widgetRenderedPixelSize)
+    }
 
     var screenPointSize: CGSize {
         CGSize(width: screenPixelSize.width / scale, height: screenPixelSize.height / scale)
@@ -73,6 +87,23 @@ struct DeviceModel: Identifiable, Hashable, Sendable {
     /// Measured against the physical phone by the Onewheel build: the tall
     /// portrait family is 358x544 points at 3x, beginning 22 points from the
     /// left edge in the top slot, at standard Display Zoom on iOS 27.
+    ///
+    /// The rendered frame was measured separately, and differently, because that
+    /// first measurement came out 5px narrow and 13px short.
+    ///
+    /// The origin came from differencing a Home Screen screenshot against the
+    /// app's own full-screen render of the same design: the widget's content sat
+    /// 2px left of the wallpaper's and dead on vertically. The extent came from
+    /// the `EdgeLab` ring target on the device, whose outermost 1px ring lands on
+    /// the view's own bounds - rows 270 and 1914, columns 64 and 1142. Both agree
+    /// on the origin, and the rings are what the extent is taken from: the
+    /// outermost column carries the rim, so it correlates too poorly to be found
+    /// by differencing, which is what put an earlier reading a pixel short.
+    ///
+    /// So the widget grows 2px left, 3px right and 13px down of the cut frame. It
+    /// is not simply the cut frame re-centred - the left and right margins come
+    /// out 64 and 63 - and there is no known reason for that asymmetry, only the
+    /// measurement.
     static let iPhone17Pro = DeviceModel(
         id: "iphone17pro",
         name: "iPhone 17 Pro",
@@ -80,6 +111,8 @@ struct DeviceModel: Identifiable, Hashable, Sendable {
         screenPixelSize: CGSize(width: 1206, height: 2622),
         widgetOrigin: CGPoint(x: 66, y: 270),
         widgetPixelSize: CGSize(width: 1074, height: 1632),
+        widgetRenderedOrigin: CGPoint(x: 64, y: 270),
+        widgetRenderedPixelSize: CGSize(width: 1079, height: 1645),
         widgetCornerRadius: 78
     )
 
@@ -105,6 +138,11 @@ enum DeviceGeometry {
 
     /// The widget's pixel rect on the calibrated screen, before any nudge.
     static var widgetRect: CGRect { model.widgetRect }
+
+    /// What the system hands the extension, which is what the extension has to
+    /// lay its content out from. Larger than `widgetRect` and starting 2px to
+    /// the left of it - see `DeviceModel.iPhone17Pro`.
+    static var renderedWidgetRect: CGRect { model.widgetRenderedRect }
 
     /// Widget rect with the design's manual correction applied and clamped to
     /// the screen, so a large nudge can never crop outside the composition.

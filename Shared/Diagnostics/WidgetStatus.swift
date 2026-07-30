@@ -90,6 +90,10 @@ struct WidgetStatus: Codable, Equatable, Sendable {
             "(\(Int(r.minX)),\(Int(r.minY))) \(Int(r.width))x\(Int(r.height))"
         }
         func mb(_ bytes: Int) -> String { String(format: "%.1fMB", Double(bytes) / 1_000_000) }
+        // Two decimals, because truncating to whole points is what hid the real
+        // widget size: 359.33 read as 359 and the frame table looked 1px out
+        // instead of 4px.
+        func pt(_ value: CGFloat) -> String { String(format: "%.2f", value) }
 
         return """
         MOTIONARY WIDGET REPORT
@@ -98,8 +102,11 @@ struct WidgetStatus: Codable, Equatable, Sendable {
 
         FAMILY
         family        \(family) (raw \(familyRawValue))
-        rendered      \(Int(renderedSize.width))x\(Int(renderedSize.height)) pt
-        expected      \(Int(widgetRect.width / 3))x\(Int(widgetRect.height / 3)) pt
+        rendered      \(pt(renderedSize.width))x\(pt(renderedSize.height)) pt \
+        = \(Int((renderedSize.width * 3).rounded()))x\(Int((renderedSize.height * 3).rounded()))px
+        expected      \(pt(DeviceGeometry.renderedWidgetRect.width / 3))x\
+        \(pt(DeviceGeometry.renderedWidgetRect.height / 3)) pt
+        cut to        \(rect(widgetRect))
 
         STORE
         container     \(containerReachable ? "reachable" : "UNREACHABLE")

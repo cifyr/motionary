@@ -13,9 +13,9 @@ import os
 ///
 /// - a line on the widget's top row, screen row 270;
 /// - a stronger one on its bottom row, screen row 1914 - thirteen rows below
-///   where the composition's own frame ends, because the system hands over 548pt
-///   of widget where the calibration says 544. The padded backdrop covers those
-///   rows, so the correction can reach them;
+///   where the composition's own frame ends, because the system hands over
+///   1645px of widget where the cut frame is 1632. The padded backdrop covers
+///   those rows, so the correction can reach them;
 /// - nothing down the left and right edges, which is why the lines read as top
 ///   and bottom rather than as a border. A useful check on the method, too: the
 ///   Polaroid edges in the picture itself cancelled to within two units while
@@ -33,60 +33,79 @@ import os
 /// top or bottom row is nearly black keeps its line. The fix for that one is in
 /// the design, not in the pipeline - move the clip or the background so the
 /// widget's outermost rows are not the darkest part of the picture.
+///
+/// The numbers come from `Resources/edge-profile.json`, which
+/// `Tools/edge-calibrate.py` measures and writes: recalibrating is a measurement
+/// and should not need a code edit. `shipped` below is the fallback.
 enum EdgeCompensation {
     private static let logger = Logger(subsystem: "com.caden.Motionary", category: "EdgeCompensation")
 
-    /// Brightness the system adds, per channel, by distance in pixels inward from
-    /// the edge. Re-measured from a full-resolution screenshot after a first
-    /// correction was already in place, by adding back what had been subtracted -
-    /// which is why these are larger than the first pass through a downscale
-    /// suggested, and why the two edges no longer share one profile.
+    /// The numbers as shipped, from three measure-adjust rounds against the
+    /// Polaroid design at full resolution.
+    ///
+    /// Kept in source as well as in the file so that a missing or malformed
+    /// `edge-profile.json` cannot ship a design with no correction: that failure
+    /// looks exactly like the artefact this exists to remove, which is the worst
+    /// way for it to fail.
     ///
     /// The two edges are not symmetric: the top's core is two rows, the bottom's
     /// three, and the bottom peaks one row below where the composition's own frame
     /// ends. Both fade into a tail of a few units over the next several rows.
-    static let topAdded: [(r: Double, g: Double, b: Double)] = [
-        (68, 70, 63),
-        (54, 45, 47),
-        (40, 32, 23),
-        (14, 13, 10),
-        (11, 10, 8),
-        (11, 7, 6),
-        (7, 7, 5),
-        (6, 6, 4),
-        (5, 5, 4),
-    ]
+    static let shipped = EdgeProfile(
+        top: [
+            (68, 70, 63),
+            (54, 45, 47),
+            (40, 32, 23),
+            (14, 13, 10),
+            (11, 10, 8),
+            (11, 7, 6),
+            (7, 7, 5),
+            (6, 6, 4),
+            (5, 5, 4),
+        ],
+        bottom: [
+            (86, 75, 68),
+            (64, 67, 68),
+            (47, 39, 45),
+            (19, 14, 17),
+            (16, 12, 6),
+            (11, 10, 5),
+            (12, 7, 6),
+            (9, 6, 5),
+            (8, 5, 3),
+        ],
+        strength: 1.0,
+        measuredAt: "2026-07-29"
+    )
 
-    static let bottomAdded: [(r: Double, g: Double, b: Double)] = [
-        (86, 75, 68),
-        (64, 67, 68),
-        (47, 39, 45),
-        (19, 14, 17),
-        (16, 12, 6),
-        (11, 10, 5),
-        (12, 7, 6),
-        (9, 6, 5),
-        (8, 5, 3),
-    ]
+    /// What this build will subtract: the calibration file, or `shipped` if it
+    /// cannot be read. Resolved once, because a per-row disk read would run
+    /// millions of times over one backdrop.
+    static let profile = EdgeProfileStore.load(
+        deviceID: DeviceGeometry.model.id,
+        fallback: shipped
+    )
 
-    /// Full correction now that the profile was measured at full resolution
-    /// rather than estimated through a 0.76 downscale.
+    /// Brightness the system adds, per channel, by distance in pixels inward from
+    /// the edge.
+    static var topAdded: [(r: Double, g: Double, b: Double)] { profile.top }
+    static var bottomAdded: [(r: Double, g: Double, b: Double)] { profile.bottom }
+
+    /// A scale on the whole profile. 1.0 applies what was measured; anything less
+    /// deliberately under-corrects.
     ///
-    /// Refined once more against a screenshot taken with the previous profile in
-    /// place: where the content had room to be darkened, the line came back
-    /// within about two units of the picture, and those small remainders are
-    /// folded in here.
-    ///
-    /// What is left cannot be fixed from here. The system adds light, and light
-    /// can only be taken out of content that has some: where a design's own top
-    /// or bottom row is nearly black, the subtraction hits zero with the line
-    /// still showing. On the design measured, three of nine columns across the
-    /// top and five of nine across the bottom were in that state.
-    static let strength: Double = 1.0
+    /// What is left after it cannot be fixed from here. The system adds light, and
+    /// light can only be taken out of content that has some: where a design's own
+    /// top or bottom row is nearly black, the subtraction hits zero with the line
+    /// still showing. On the Polaroid design that was three of nine columns across
+    /// the top and five of nine across the bottom.
+    static var strength: Double { profile.strength }
 
-    /// The widget's real height in screen pixels, from where the bottom line
-    /// lands: row 1914, twelve past the 1901 the composition's frame ends at.
-    static let renderedHeightPixels = 1645
+    /// The widget's real height in screen pixels. From the geometry table rather
+    /// than a constant of its own: the bottom line lands on the last row the
+    /// system hands over (1914), not on the last row of the cut frame (1901), and
+    /// two copies of that height are two things to get out of step.
+    static var renderedHeightPixels: Int { Int(DeviceGeometry.renderedWidgetRect.height) }
 
     static func topEdgeRow(widgetRect: CGRect) -> Int { Int(widgetRect.minY) }
 

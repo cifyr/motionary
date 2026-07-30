@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "note": "Light the Home Screen adds along a widget's top and bottom rows, per channel, by distance in pixels inward from the edge. Written by Tools/edge-calibrate.py; the same numbers are compiled into EdgeCompensation as the shipped default, so a missing or unreadable file cannot ship a design with no correction at all. Nothing down the left and right edges: measured at both side boundaries the score was -1.9 to +0.4, i.e. noise.",
+  "devices": {
+    "iphone17pro": {
+      "measuredAt": "2026-07-29",
+      "measuredFrom": "full-resolution iPhone 17 Pro Home Screen screenshots, three measure-adjust rounds against the Polaroid design",
+      "strength": 1.0,
+      "top": [
+        [68, 70, 63],
+        [54, 45, 47],
+        [40, 32, 23],
+        [14, 13, 10],
+        [11, 10, 8],
+        [11, 7, 6],
+        [7, 7, 5],
+        [6, 6, 4],
+        [5, 5, 4]
+      ],
+      "bottom": [
+        [86, 75, 68],
+        [64, 67, 68],
+        [47, 39, 45],
+        [19, 14, 17],
+        [16, 12, 6],
+        [11, 10, 5],
+        [12, 7, 6],
+        [9, 6, 5],
+        [8, 5, 3]
+      ]
+    }
+  }
+}

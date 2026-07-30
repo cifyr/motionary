@@ -31,6 +31,61 @@ final class GeometryAndSnapTests: XCTestCase {
         XCTAssertEqual(rect.minX, rightMargin, accuracy: 1)
     }
 
+    /// What the system really hands the extension, which is not the cut frame.
+    ///
+    /// The origin is from differencing a full-resolution Home Screen screenshot
+    /// against the app's own full-screen render of the same design: the content
+    /// inside the widget sat 2px left, exact vertically. The extent is from the
+    /// EdgeLab ring target on the device, whose outermost ring lands on the view's
+    /// own bounds: rows 270 and 1914, columns 64 and 1142.
+    func testRenderedFrameIsTheMeasuredOne() {
+        XCTAssertEqual(
+            DeviceGeometry.renderedWidgetRect,
+            CGRect(x: 64, y: 270, width: 1079, height: 1645)
+        )
+    }
+
+    /// The widget is *not* the cut frame re-centred, which is worth pinning
+    /// because it is the obvious assumption and it is wrong: it grows 2px left and
+    /// 3px right, leaving margins of 64 and 63. An earlier reading came out a
+    /// pixel narrower and looked exactly like a centred 4px error, which is a
+    /// tidier story than the measurement supports.
+    func testTheRenderedFrameIsNotSimplyRecentred() {
+        let rendered = DeviceGeometry.renderedWidgetRect
+        let cut = DeviceGeometry.widgetRect
+        XCTAssertEqual(cut.minX - rendered.minX, 2)
+        XCTAssertEqual(rendered.maxX - cut.maxX, 3)
+        XCTAssertNotEqual(
+            rendered.minX,
+            (DeviceGeometry.screenPixelSize.width - rendered.width) / 2,
+            "if this ever holds, re-measure: it would mean the widget really is centred"
+        )
+    }
+
+    /// The cut frame sits inside what the system draws, and shares its top row.
+    /// A rendered frame that did not contain the cut one would mean the widget
+    /// cannot show all of what a design was cut for.
+    func testTheCutFrameSitsInsideTheRenderedOne() {
+        let rendered = DeviceGeometry.renderedWidgetRect
+        XCTAssertTrue(rendered.contains(DeviceGeometry.widgetRect))
+        XCTAssertEqual(rendered.minY, DeviceGeometry.widgetRect.minY, "the slot's top is fixed")
+        XCTAssertTrue(
+            CGRect(origin: .zero, size: DeviceGeometry.screenPixelSize).contains(rendered)
+        )
+    }
+
+    /// The backdrop is cut from the cut frame plus a fixed padding, and the
+    /// widget draws the whole rendered frame. If the padding stopped covering it
+    /// there would be unpainted pixels down the edges - which is what the padding
+    /// is for, so the invariant belongs in a test rather than in a comment.
+    func testThePaddedBackdropCoversEverythingTheWidgetDraws() {
+        let padded = DeviceGeometry.widgetRect.insetBy(dx: -24, dy: -24)
+        XCTAssertTrue(
+            padded.contains(DeviceGeometry.renderedWidgetRect),
+            "24px of padding no longer covers the rendered frame"
+        )
+    }
+
     func testNudgeIsClampedToTheScreen() {
         let rect = DeviceGeometry.widgetRect(nudge: CGPoint(x: -10_000, y: -10_000))
         XCTAssertEqual(rect.minX, 0)
