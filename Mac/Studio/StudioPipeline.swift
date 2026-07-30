@@ -1,6 +1,17 @@
 import CoreGraphics
 import Foundation
 
+enum StudioPipelineError: Error, CustomStringConvertible {
+    case noProjectFolder
+
+    var description: String {
+        switch self {
+        case .noProjectFolder:
+            "no Motionary project folder chosen; building writes into the Xcode project, so pick the folder holding project.yml"
+        }
+    }
+}
+
 /// Turns a video or GIF into a built design, natively.
 ///
 /// The old route ran this same code inside a booted simulator and waited for a
@@ -53,7 +64,13 @@ struct StudioPipeline: Sendable {
         var wallpaperURL: URL { folder.appendingPathComponent("wallpaper.png") }
     }
 
-    let projectRoot: URL
+    /// Optional, because only building needs it.
+    ///
+    /// Editing a layout reads the design and its clip out of Application
+    /// Support; the Xcode project is where a *build* is written. Requiring it
+    /// to open the editor meant a studio that could not find project.yml
+    /// silently refused to open anything, which reads as clicking not working.
+    let projectRoot: URL?
     let model: DeviceModel
 
     /// Designs live in Application Support, not a temp directory.
@@ -334,6 +351,7 @@ struct StudioPipeline: Sendable {
             ))
         }
 
+        guard let projectRoot else { throw StudioPipelineError.noProjectFolder }
         try BundleWriter(projectRoot: projectRoot).install(
             bundled,
             iconsFolder: Self.iconsFolder(for: prepared.store)
