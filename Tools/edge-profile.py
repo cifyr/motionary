@@ -13,14 +13,25 @@ in the order they matter:
   warp         where the 1px grid lines actually landed. Lines that shift as
                they near the edge mean the content is displaced, which no
                per-pixel curve can undo - that needs a pre-warp.
+  rings        what the pure primaries came back as. This is the sharpest of the
+               four: a channel drawn at 0 that returns above 0 measures added
+               light directly, with no reference image and nothing to subtract.
+  path         the three flat band levels away from every edge, which separate a
+               gain from an offset.
 
     Tools/edge-profile.py shot.png [--frame x,y,w,h]
+
+Screenshots are tagged Display P3 and the pipeline's pictures are written
+untagged, i.e. sRGB. Everything here is converted to sRGB first: sRGB red
+(255, 0, 0) is (234, 51, 35) read as P3, which is large enough to look like a
+finding on its own.
 """
 import argparse
+import io
 import sys
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageCms
 
 # The *rendered* frame from Shared/Model/DeviceGeometry.swift, not the frame a
 # design is cut to. EdgeLabView draws its rings, bands and grid to the widget's own
@@ -28,7 +39,7 @@ from PIL import Image
 # right of them and 13 rows short, which put the bounds samples on the wrong
 # columns and the rim samples on the wrong rows.
 # Passed in when a shot comes from a device whose frame is not this one.
-DEFAULT_FRAME = (64, 270, 1078, 1645)
+DEFAULT_FRAME = (64, 270, 1079, 1645)
 RINGS = [("red", (255, 0, 0)), ("green", (0, 255, 0)),
          ("blue", (0, 0, 255)), ("yellow", (255, 255, 0))]
 BAND_LEVELS = [0.25, 0.5, 0.75]
@@ -116,6 +127,88 @@ def report_warp(image, frame, depth=96):
         print(f"    drift from the grid: {drift}")
 
 
+def read_srgb(path):
+    """Pixels in sRGB, converting from whatever the file is tagged as."""
+    image = Image.open(path)
+    icc = image.info.get("icc_profile")
+    image = image.convert("RGB")
+    if icc:
+        image = ImageCms.profileToProfile(
+            image,
+            ImageCms.ImageCmsProfile(io.BytesIO(icc)),
+            ImageCms.createProfile("sRGB"),
+            outputMode="RGB",
+        )
+    return np.asarray(image).astype(float)
+
+
+def report_rings(image, frame, corner_radius=78):
+    """Added light per edge, read off the channels the rings drew at zero.
+
+    The sharpest instrument on the target. A pure primary has two channels at
+    zero, so whatever comes back in them was put there by the system - no
+    reference picture, no high-pass, nothing to cancel. Sampled inside the corner
+    radius, where the widget actually covers the edge rows.
+    """
+    x, y, w, h = frame
+    print("\n== rings ==")
+    print("what the system added, from the channels drawn at 0 (sRGB)")
+    for edge in ("top", "bottom", "left", "right"):
+        print(f"  {edge}:")
+        for inset, name, drawn in [(i, n, c) for i, (n, c) in enumerate(RINGS)]:
+            if edge in ("top", "bottom"):
+                row = y + inset if edge == "top" else y + h - 1 - inset
+                if not 0 <= row < image.shape[0]:
+                    continue
+                strip = image[row, x + corner_radius: x + w - corner_radius]
+            else:
+                column = x + inset if edge == "left" else x + w - 1 - inset
+                if not 0 <= column < image.shape[1]:
+                    continue
+                strip = image[y + corner_radius: y + h - corner_radius, column]
+            got = strip.mean(axis=0)
+            zeros = [got[c] for c in range(3) if drawn[c] == 0]
+            added = f"{np.mean(zeros):+6.1f}" if zeros else "     -"
+            print(f"    d={inset} {name:7s} got "
+                  f"({got[0]:6.1f},{got[1]:6.1f},{got[2]:6.1f})   added {added}")
+
+
+def report_path(image, frame, corner_radius=78):
+    """The display path, from the three flat levels far from every edge.
+
+    Three levels are what separate a gain from an offset, which is the whole
+    reason the target has three. If the fit needs an offset, a per-channel
+    multiply cannot express it and the colour match will drift with brightness.
+    """
+    x, y, w, h = frame
+    print("\n== path ==")
+    rows_by_level = {level: [] for level in BAND_LEVELS}
+    for row in range(y + 200, y + h - 200):
+        offset = row - y
+        if offset % GRID_SPACING == 0:
+            continue
+        rows_by_level[BAND_LEVELS[(offset // BAND_HEIGHT) % len(BAND_LEVELS)]].append(row)
+    columns = [c for c in range(x + 300, x + w - 300) if (c - x) % GRID_SPACING != 0]
+    points = []
+    for level, rows in sorted(rows_by_level.items()):
+        if not rows or not columns:
+            continue
+        got = image[np.ix_(rows, columns)].reshape(-1, 3).mean(axis=0)
+        drawn = level * 255
+        points.append((drawn, float(got.mean())))
+        print(f"  drawn {drawn:6.1f}  got ({got[0]:6.1f},{got[1]:6.1f},{got[2]:6.1f})"
+              f"  delta {got.mean() - drawn:+6.1f}")
+    if len(points) >= 2:
+        (low_in, low_out), (high_in, high_out) = points[0], points[-1]
+        slope = (high_out - low_out) / (high_in - low_in)
+        offset = low_out - slope * low_in
+        print(f"  affine fit: captured = {slope:.4f} * drawn {offset:+.2f}")
+        if abs(offset) > 2:
+            print("  that offset is why a per-channel gain alone cannot match the "
+                  "wallpaper at every brightness")
+    return points
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("shot")
@@ -130,9 +223,11 @@ def main():
             sys.exit("--frame wants x,y,w,h")
         frame = tuple(parts)
 
-    image = np.asarray(Image.open(args.shot).convert("RGB")).astype(int)
-    print(f"{args.shot}: {image.shape[1]}x{image.shape[0]}")
+    image = read_srgb(args.shot)
+    print(f"{args.shot}: {image.shape[1]}x{image.shape[0]}, read as sRGB")
     report_bounds(image, frame)
+    report_rings(image, frame)
+    report_path(image, frame)
     report_rim(image, frame)
     report_warp(image, frame)
 

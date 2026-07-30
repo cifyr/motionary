@@ -38,12 +38,13 @@ checks the pixel dimensions and refuses anything else.
 """
 import argparse
 import datetime
+import io
 import json
 import pathlib
 import sys
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageCms
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PROFILE_PATH = ROOT / "Resources" / "edge-profile.json"
@@ -55,7 +56,7 @@ RESOURCES = ROOT / "Resources"
 DEVICES = {
     "iphone17pro": {
         "screen": (1206, 2622),
-        "rendered": (64, 270, 1078, 1645),
+        "rendered": (64, 270, 1079, 1645),
         "corner_radius": 78,
     },
 }
@@ -113,6 +114,15 @@ def find_wallpaper(design):
 
 
 def read_rgb(path, expected):
+    """Pixels in sRGB, whatever the file was tagged as.
+
+    An iPhone screenshot is tagged **Display P3** and the pipeline's wallpapers
+    are written untagged, i.e. sRGB. Differencing one against the other without
+    converting compares two different meanings of the same numbers: sRGB red
+    (255, 0, 0) is (234, 51, 35) in P3, so saturated warm content picks up an
+    apparent -13 red / +14 blue that has nothing to do with any display path. The
+    local baseline hides most of it and the per-row shape keeps the rest.
+    """
     try:
         image = Image.open(path)
     except OSError as error:
@@ -122,7 +132,14 @@ def read_rgb(path, expected):
             f"{expected[0]}x{expected[1]}. Full-resolution screenshots only - a "
             "shot that has been through a chat client is resampled and will fit "
             "a profile that is wrong by about 2x.")
-    return np.asarray(image.convert("RGB")).astype(float)
+    icc = image.info.get("icc_profile")
+    image = image.convert("RGB")
+    if icc:
+        source = ImageCms.ImageCmsProfile(io.BytesIO(icc))
+        image = ImageCms.profileToProfile(
+            image, source, ImageCms.createProfile("sRGB"), outputMode="RGB"
+        )
+    return np.asarray(image).astype(float)
 
 
 def check_registration(shot, wall, device):

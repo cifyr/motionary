@@ -30,7 +30,7 @@ first profile fitted that way was wrong by 2× and put one edge a row out.
 ## The widget is bigger than its frame, and starts 2px left of it
 
 `DeviceGeometry` says a design is cut to 1074×1632 px at (66, 270). What the
-system hands the extension is **1078×1645 px at (64, 270)**.
+system hands the extension is **1079×1645 px at (64, 270)**.
 
 That origin is the part that mattered. The composition lays its content out from
 the viewport's origin, so telling it the cut frame's origin drew every design two
@@ -49,9 +49,16 @@ draws the whole screen 1:1, so it is the picture as the design intends it:
 Pure translation, no scale: fitting `dx = a·x + b` across the width gives 0.54px
 of slope over 1074px, and every column band reads +1.99 on its own. Sliding a
 5px-wide window across the boundary reads exactly `2·n/5` for the n columns of it
-that are widget, which puts the first widget column at **64** and the last at
-**1141** — so the width is 1078, and 1078 centred on a 1206px screen begins at
-64.0 exactly. The 2px is the width error halved, not an origin of its own.
+that are widget, which puts the first widget column at **64**.
+
+The *extent* comes from the ring target instead, whose outermost 1px ring lands on
+the view's own bounds: rows **270** and **1914**, columns **64** and **1142**. The
+displacement scan agreed on 64 but read the right edge a pixel short, because the
+outermost column carries the rim and correlates too poorly to locate — which is
+worth knowing, because 1078 looked like a tidy story (a 4px error, centred, half of
+it moving the origin) and 1079 is not one. The widget grows 2px left, 3px right and
+13px down, with margins of 64 and 63. There is no known reason for the asymmetry,
+only the measurement.
 
 The extra 13px of height lands entirely at the bottom (the slot's top row is 270
 either way), which is why the rim lines are at rows 270 and 1914.
@@ -111,6 +118,84 @@ across the bottom — 7.2% and 17.5% of edge pixels respectively.
 No table of numbers fixes that. The fix is in the design: move the clip or the
 background so the widget's outermost rows are not the darkest part of the
 picture. The build logs the share and warns past a quarter.
+
+## The target, on the device: what the additive model gets wrong
+
+The edge lab had only ever run on the simulator, where the widget is `systemLarge`
+and the rim is a different animal. Run on the phone (`-MotionaryEdgeLabOn`, read
+with `Tools/edge-profile.py`) it answers three things the picture-content method
+could not, because the target's pixels are known and its primaries have channels
+drawn at exactly zero — whatever comes back in those, the system put there. No
+reference image, no high-pass, nothing to cancel.
+
+**First, colour space.** An iPhone screenshot is tagged **Display P3**; the
+pipeline writes its wallpapers untagged, i.e. sRGB. sRGB red (255, 0, 0) reads as
+(234, 51, 35) in P3, so differencing a shot against a wallpaper file without
+converting invents about −13 red / +14 blue on warm content. Both tools convert to
+sRGB now. Everything below is sRGB.
+
+**Second, the sides really are the control**, and the rings say so without any
+model. Added light on the channels that were drawn at zero:
+
+| distance | top | bottom | left | right |
+|---|---|---|---|---|
+| 0 | **+54.2** | **+57.8** | +5.6 | +6.3 |
+| 1 | +3.1 | +3.4 | +2.4 | +2.4 |
+| 2 | **+34.3** | **+34.0** | +0.3 | +0.3 |
+| 3 | +0.0 | +0.3 | +0.2 | +0.0 |
+
+It is also **achromatic**: at distance 0 the two zero channels agree to within 1.5
+units (54.9 vs 53.4), and at distance 2 they agree exactly (34.3, 34.3). The
+shipped profile is per-channel — (68, 70, 63) and so on — and that per-channel
+spread is likely an artefact of fitting on coloured content rather than a property
+of the system.
+
+**Third, the row shape is not a decay.** Taking the sides as the control, the top
+edge adds +48.6, +0.7, +34.0, −0.2 over its first four rows, then +6.8, +4.7, +2.8,
++1.8 from the grey bands at distances 4–7. The shipped profile decays smoothly from
+68 to 6 over the same rows. Those are different shapes, and the alternation at rows
+1 and 3 is not something a rim that fades inward can produce.
+
+That is as far as one shot should be pushed: it is a single target on flat grey, and
+whether the same shape holds over picture content is exactly the open question. But
+it is enough to say that **a fixed per-row, per-channel subtraction is the wrong
+shape**, which is the honest explanation for something otherwise inexplicable — the
+same correction leaves a +40 line on one design and +8 on another (see below).
+
+### The display path is affine, not a gain
+
+The three flat band levels, far from every edge, come back as:
+
+    drawn  63.8 -> 69.1   (+5.4)
+    drawn 127.5 -> 125.9  (-1.6)
+    drawn 191.2 -> 189.3  (-2.0)
+    captured = 0.9426 * drawn + 9.03
+
+Three levels are why the target has three: one level cannot separate a gain from an
+offset. `WidgetTint` applies a per-channel **multiply**, which cannot express that
++9 offset at any gain — so the colour match is necessarily right at one brightness
+and wrong at the others. That is the same observation the section below records as
+"it varies a few units down the height of the widget", with the cause attached: the
+correction is the wrong shape, not merely under-fitted. (The fit is not perfectly
+affine either — the mid level predicts 129.2 and measures 125.9 — so there is a
+curve on top of it.)
+
+### Two designs, one profile, five times the line
+
+Measured on the phone with the same profile verified baked into both backdrops,
+neither clamping, comparing row 270 on screen against the rows just inside it:
+
+| design | row 270 | rows 274–278 | step |
+|---|---|---|---|
+| 5 tiles, darker at the top row | 179.6 | 140.0 | **+39.6** |
+| 2 tiles, brighter at the top row | 193.1 | 185.4 | **+7.7** |
+
+A blend toward a fixed bright colour would explain it, and fits both points — which
+is why it was tested rather than believed. Regressing what is on screen against what
+the widget drew, across 28 narrow column bins within a single shot, gives slopes of
+1.33 and 0.70 at distance 0 on the two designs (opposite sides of 1), and the same
+sub-unit slopes appear at distances 3 and 6 where there is no rim at all. So that
+slope is the display path, not the rim, and the blend is **rejected**.
 
 ## The colour: the widget reads warmer than the wallpaper
 
@@ -188,6 +273,25 @@ than trusting the shot.
 
     Tools/edge-shot.sh on /tmp/edge.png    # calibration target, simulator
     Tools/edge-profile.py /tmp/edge.png
+
+On the device there is no shot loop — screenshots are the owner's to take — but the
+target is switched the same way, by launch argument:
+
+    xcrun devicectl device process launch --device <udid> --activate \
+      --terminate-existing com.caden.Motionary -- -MotionaryEdgeLabOn
+
+`--terminate-existing` is not optional. Without it a running app is merely brought
+to the foreground, `init()` never runs again, and the argument is silently ignored —
+which looks exactly like a flag that does not work. Two flags passed in one launch
+also applied only one of them. Both times the only way to know was to read the
+setting back off the phone rather than trust the launch:
+
+    xcrun devicectl device copy from --device <udid> \
+      --domain-type appGroupDataContainer --domain-identifier group.com.caden.Motionary \
+      --source Library/Preferences/group.com.caden.Motionary.plist --destination ./x.plist
+
+That container holds nothing but `Library`, so the widget's own report still cannot
+be read this way — only the flags.
 
 The target is four saturated 1px rings on the boundary, flat grey bands at three
 levels, and a 1px grid: the rings fix the boundary to the pixel, the three levels
