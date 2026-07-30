@@ -1,95 +1,40 @@
 import SwiftUI
 
-/// One design the app can show, from either route.
-///
-/// Both kinds live in one list because the phone swipes between them and should
-/// not have to care which was compiled and which was not. What differs is only
-/// where the animation comes from: a bundled design plays the preview video the
-/// Mac baked, a runtime-frame design swaps the pictures the phone wrote.
-enum HomePage: Identifiable {
-    case bundled(PrebuiltDesign.Entry)
-    case runtime(design: DesignDocument, manifest: BuildManifest, sequence: RuntimeFrameSequence)
-
-    var id: UUID {
-        switch self {
-        case .bundled(let entry): entry.id
-        case .runtime(let design, _, _): design.id
-        }
-    }
-
-    var name: String {
-        switch self {
-        case .bundled(let entry): entry.name
-        case .runtime(let design, _, _): design.name
-        }
-    }
-
-    var wallpaperURL: URL? {
-        switch self {
-        case .bundled(let entry): entry.wallpaperURL
-        case .runtime(let design, _, _): (try? DesignStore())?.wallpaperURL(for: design.id)
-        }
-    }
-}
-
 /// The design, full screen.
 ///
-/// Designs used to be built on the Mac and compiled into this build, and this
-/// screen was a viewer with nothing to configure. It is still that for a bundled
-/// design - the only route to a loop longer than two seconds - but a design can
-/// now also be made here, from a clip in Photos, with nothing to install.
+/// Designs are built on the Mac and compiled into this build, so there is
+/// nothing here to choose, import or configure - the app's whole job is to show
+/// what the widget is showing, and to hand over the wallpaper that has to sit
+/// behind it.
 struct HomeView: View {
     @EnvironmentObject private var router: ExternalAppRouter
 
     @State private var saving = false
     @State private var note: String?
-    @State private var importing = false
     @StateObject private var icons = IconImageLoader(store: try? DesignStore())
-    @StateObject private var gallery = RuntimeFrameGallery()
 
     @State private var selection: UUID? = ActiveDesign.identifier
-    /// Bumped after an import so the store is read again. The runtime pages come
-    /// off disk, and a view that never re-reads it shows the library as it was
-    /// when the app launched.
-    @State private var storeGeneration = 0
 
     /// Whatever there is to say right now, from either source.
-    private var message: String? { note ?? gallery.failure ?? router.lastFailure }
+    private var message: String? { note ?? router.lastFailure }
 
-    private var pages: [HomePage] {
-        // Keyed off the generation so an import shows up. SwiftUI has no other
-        // reason to recompute a property that reads the filesystem.
-        _ = storeGeneration
-        var all: [HomePage] = []
-        if let store = try? DesignStore() {
-            for built in RuntimeDesignImporter.builtDesigns(in: store) {
-                guard let sequence = built.manifest.frameSequence else { continue }
-                all.append(.runtime(design: built.design, manifest: built.manifest, sequence: sequence))
-            }
-        }
-        all.append(contentsOf: PrebuiltDesign.entries.map(HomePage.bundled))
-        return all
-    }
-
-    private var page: HomePage? {
-        let all = pages
-        if let selection, let match = all.first(where: { $0.id == selection }) { return match }
-        return all.first
-    }
+    private var entries: [PrebuiltDesign.Entry] { PrebuiltDesign.entries }
+    private var entry: PrebuiltDesign.Entry? { PrebuiltDesign.selected(id: selection) }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if let page {
-                content(for: page).id(page.id)
+            if let entry, let manifest = entry.manifest {
+                composition(entry: entry, manifest: manifest)
+                    .id(entry.id)
             } else {
                 EmptyDesignView()
             }
 
-            if pages.count > 1 { PageDots(count: pages.count, index: index) }
+            if entries.count > 1 { PageDots(count: entries.count, index: index) }
 
-            BottomControls(saving: saving, save: save, importClip: { importing = true })
+            SaveButton(saving: saving) { save() }
             // A tap that opens nothing has to say why. Rewriting this view
             // dropped the alert that used to report it, so a tile with no
             // launch route failed in complete silence.
@@ -104,7 +49,7 @@ struct HomeView: View {
             router.lastFailure = nil
         }
         .ignoresSafeArea()
-        .statusBarHidden(page != nil)
+        .statusBarHidden(entry != nil)
         .persistentSystemOverlays(.hidden)
         // A swipe rather than any chrome: the whole point of this screen is to
         // be the Home Screen, and a switcher on top of it would spoil that.
@@ -115,71 +60,22 @@ struct HomeView: View {
                     switchDesign(by: value.translation.width < 0 ? 1 : -1)
                 }
         )
-        .sheet(isPresented: $importing) {
-            ImportSheet { design in
-                storeGeneration += 1
-                selection = design.id
-                note = "\(design.name) is ready. Save the wallpaper, then place the widget."
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func content(for page: HomePage) -> some View {
-        switch page {
-        case .bundled(let entry):
-            if let manifest = entry.manifest {
-                composition(entry: entry, manifest: manifest)
-            } else {
-                EmptyDesignView()
-            }
-        case .runtime(let design, let manifest, let sequence):
-            runtimeComposition(design: design, manifest: manifest, sequence: sequence)
-        }
     }
 
     private var index: Int {
-        let all = pages
-        guard let page, let position = all.firstIndex(where: { $0.id == page.id }) else { return 0 }
+        guard let entry, let position = entries.firstIndex(where: { $0.id == entry.id }) else { return 0 }
         return position
     }
 
     private func switchDesign(by step: Int) {
-        let all = pages
-        guard all.count > 1 else { return }
-        let next = all[(index + step + all.count) % all.count]
+        guard entries.count > 1 else { return }
+        let next = entries[(index + step + entries.count) % entries.count]
         selection = next.id
         // Written where the widget reads it, and pushed, so the Home Screen
         // follows the app rather than disagreeing with it.
         ActiveDesign.identifier = next.id
         WidgetCenterBridge.reloadAll()
         note = next.name
-    }
-
-    private func runtimeComposition(
-        design: DesignDocument,
-        manifest: BuildManifest,
-        sequence: RuntimeFrameSequence
-    ) -> some View {
-        RuntimeDesignView(
-            manifest: manifest,
-            sequence: sequence,
-            frames: gallery.frames,
-            wallpaper: gallery.wallpaper
-        ) { tile, side in
-            Button {
-                router.launch(appID: tile.appID)
-            } label: {
-                TileView(tile: tile, side: side, iconImage: icons.image(for: tile))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open \(AppCatalog.app(id: tile.appID)?.name ?? tile.appID)")
-        }
-        .ignoresSafeArea()
-        .task(id: design.id) {
-            guard let store = try? DesignStore() else { return }
-            gallery.load(design: design, manifest: manifest, sequence: sequence, store: store)
-        }
     }
 
     private func composition(entry: PrebuiltDesign.Entry, manifest: BuildManifest) -> some View {
@@ -218,8 +114,8 @@ struct HomeView: View {
     }
 
     private func save() {
-        guard let url = page?.wallpaperURL, FileManager.default.fileExists(atPath: url.path) else {
-            note = "This design has no wallpaper saved for it yet."
+        guard let url = entry?.wallpaperURL else {
+            note = "This build has no wallpaper in it."
             return
         }
         saving = true
@@ -267,53 +163,36 @@ private struct PageDots: View {
     }
 }
 
-private struct BottomControls: View {
+private struct SaveButton: View {
     let saving: Bool
-    let save: () -> Void
-    let importClip: () -> Void
+    let action: () -> Void
 
     var body: some View {
         VStack {
             Spacer()
-            HStack(spacing: 12) {
+            HStack {
                 Spacer()
-                GlassButton(systemImage: "plus", action: importClip)
-                    .accessibilityLabel("Add a clip from Photos")
-                GlassButton(
-                    systemImage: "square.and.arrow.down",
-                    isBusy: saving,
-                    action: save
-                )
+                Button(action: action) {
+                    Group {
+                        if saving {
+                            ProgressView().controlSize(.small).tint(.white)
+                        } else {
+                            Image(systemName: "square.and.arrow.down")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .frame(width: 46, height: 46)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
+                }
+                .disabled(saving)
                 .accessibilityLabel("Save the wallpaper to Photos")
             }
         }
         .padding(.trailing, 20)
         .padding(.bottom, 34)
-    }
-}
-
-private struct GlassButton: View {
-    let systemImage: String
-    var isBusy = false
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Group {
-                if isBusy {
-                    ProgressView().controlSize(.small).tint(.white)
-                } else {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-            }
-            .frame(width: 46, height: 46)
-            .background(.ultraThinMaterial, in: Circle())
-            .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
-        }
-        .disabled(isBusy)
     }
 }
 
@@ -347,7 +226,7 @@ private struct EmptyDesignView: View {
             Text("Motionary")
                 .font(.largeTitle.bold())
                 .foregroundStyle(.white)
-            Text("Nothing here yet. Tap + to turn a clip from Photos into a widget, or build one in Motionary Studio on the Mac for a loop longer than two seconds.")
+            Text("No design is built into this app yet. Drop a clip into Motionary Studio on the Mac and install again.")
                 .font(.callout)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.white.opacity(0.7))
