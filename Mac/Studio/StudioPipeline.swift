@@ -226,6 +226,13 @@ struct StudioPipeline: Sendable {
         // drawn. A disjoint crop builds a design that cannot be built at all.
         let detection = MotionCropDetector().detect(frames: sample, screenSize: model.screenPixelSize)
         design.animationCrop = DesignDocument.usableCrop(detection.crop, in: design.widgetRect)
+        // Worth saying out loud, because a loose box is invisible in the result
+        // and expensive in every glyph: the pixels inside it are re-encoded into
+        // all `lanes x 15` selections whether they move or not.
+        FileHandle.standardError.write(Data("""
+        ... motion in \(Int(detection.boxOccupancy * 100))% of the detected box, \
+        \(detection.discardedClusterCount) of \(detection.clusterCount) clusters left to the backdrop\n
+        """.utf8))
 
         // The payload ceiling decides whether the widget draws at all, so the
         // quality and frame rate come from real encoded frames rather than a
@@ -260,12 +267,14 @@ struct StudioPipeline: Sendable {
             manifest: manifest,
             folder: store.folder(for: design.id),
             summary: String(
-                format: "%d lanes at %dfps, %d frames (%.2fs), %.1fMB of fonts",
+                format: "%d lanes at %dfps, %d frames (%.2fs), %.1fMB of fonts, animating %.0f%% of the widget",
                 manifest.laneCount,
                 manifest.framesPerSecond,
                 manifest.loopFrameCount,
                 seconds,
-                Double(manifest.totalFontBytes) / 1_048_576
+                Double(manifest.totalFontBytes) / 1_048_576,
+                Double(manifest.animationCrop.width * manifest.animationCrop.height)
+                    / Double(manifest.widgetRect.width * manifest.widgetRect.height) * 100
             )
         )
     }
