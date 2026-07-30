@@ -46,7 +46,10 @@ struct FrameEncoder {
                     imageSize: CGSize(width: frame.width, height: frame.height)
                 )
             }
-            guard let data = Self.jpegData(cropped, quality: quality) else {
+            // The animated region is most of what the widget shows, so it needs
+            // the same colour match as the backdrop under it - otherwise the two
+            // agree with each other and both disagree with the wallpaper.
+            guard let data = Self.jpegData(WidgetTint.applied(to: cropped), quality: quality) else {
                 throw FrameEncoderError.jpegEncodeFailed(frameIndex: index, cropSize: crop.size)
             }
             return data.base64EncodedString()
