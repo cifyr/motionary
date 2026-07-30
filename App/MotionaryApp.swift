@@ -18,21 +18,25 @@ struct MotionaryApp: App {
     /// as the flag having been ignored.
     init() {
         let arguments = ProcessInfo.processInfo.arguments
-        var changed = false
-        if let routes = FontLab.launchRouteSelection(in: arguments), routes != FontLab.routeSelection {
+        // Reloaded whenever a run *asked* for a setting, not only when the value
+        // moved. A measurement run deletes the archive and then waits for a new
+        // one; if the flag already held the value it asked for, nothing reloaded
+        // and the run timed out with no archive at all, which reads as the
+        // timeline having been rejected.
+        var requested = false
+        if let routes = FontLab.launchRouteSelection(in: arguments) {
             FontLab.routeSelection = routes
-            changed = true
+            requested = true
         }
-        if let wanted = FontLab.launchOverride(in: arguments), wanted != FontLab.isEnabled {
+        if let wanted = FontLab.launchOverride(in: arguments) {
             FontLab.isEnabled = wanted
-            changed = true
+            requested = true
         }
-        if let wanted = WidgetArchiveFontEmbedding.launchOverride(in: arguments),
-           wanted != WidgetArchiveFontEmbedding.isEnabled {
+        if let wanted = WidgetArchiveFontEmbedding.launchOverride(in: arguments) {
             WidgetArchiveFontEmbedding.isEnabled = wanted
-            changed = true
+            requested = true
         }
-        if changed { WidgetCenterBridge.reloadAll() }
+        if requested { WidgetCenterBridge.reloadAll() }
     }
 
     @StateObject private var router = ExternalAppRouter()
