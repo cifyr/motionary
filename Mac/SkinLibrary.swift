@@ -120,6 +120,8 @@ struct SkinLibrary {
         let key = at(0)
         // A deliberate key colour is vivid; a paper background is not.
         guard max(key.0, key.1, key.2) - min(key.0, key.1, key.2) > 80 else { return nil }
+        // Which channel the key colour is made of, for de-spilling below.
+        let keyChannel = [key.0, key.1, key.2].enumerated().max { $0.element < $1.element }?.offset ?? 1
 
         var keyed = 0
         for index in stride(from: 0, to: data.count, by: 4) {
@@ -129,11 +131,24 @@ struct SkinLibrary {
                 data[index + 3] = 0
                 keyed += 1
             } else if distance < outer {
-                // Feathered, so the cut edge is not a staircase. The colour is
-                // left alone: correcting the key colour's spill onto the
-                // artwork's edge is a separate job this does not attempt.
+                // Feathered, so the cut edge is not a staircase.
                 let fraction = Double(distance - inner) / Double(outer - inner)
                 data[index + 3] = UInt8(Double(data[index + 3]) * fraction)
+
+                // De-spilled as well. A key colour bleeds onto the artwork's
+                // edge, and left alone it shows as a green fringe around the
+                // whole picture - visible on the first one imported. The
+                // dominant key channel is pulled back towards the other two,
+                // which removes the tint without touching the artwork's own
+                // colour anywhere the key is not dominant.
+                let channels = [Int(data[index]), Int(data[index + 1]), Int(data[index + 2])]
+                let dominant = keyChannel
+                let others = (0 ..< 3).filter { $0 != dominant }
+                let reference = (channels[others[0]] + channels[others[1]]) / 2
+                if channels[dominant] > reference {
+                    let pulled = Double(channels[dominant]) * fraction + Double(reference) * (1 - fraction)
+                    data[index + dominant] = UInt8(min(255, max(0, pulled)))
+                }
             }
         }
         // Nothing keyed means the corner was vivid but unique - a picture that
