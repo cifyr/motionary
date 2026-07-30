@@ -119,6 +119,28 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     var smoothness: MotionSmoothness = .standard
     var jpegQuality: Double = 0.62
 
+    /// Which animation this design is built for.
+    ///
+    /// A property of the design, not a global switch: the two routes are not
+    /// interchangeable. Lane fonts reach 30-second loops and need a Mac to
+    /// compile them into the extension's bundle; runtime frames are capped at
+    /// two seconds by the blink font and need nothing at all, so the phone can
+    /// make one on its own. A library holds both.
+    var animationSource: AnimationSource = .laneFonts
+
+    /// Frame rate for a runtime-frame design. The frame count follows: frames
+    /// tile the blink font's two-second cycle, so there are always twice this
+    /// many of them.
+    var runtimeFramesPerSecond: Int = 32
+
+    /// How a runtime-frame design's pictures are stored on disk.
+    var runtimeLayout: RuntimeFrameSequence.Layout = .separate
+
+    /// JPEG quality for runtime frames, kept apart from `jpegQuality` because
+    /// that one is sized against the font payload's base64 expansion and this
+    /// one is not: a frame here is written once, not once per glyph selection.
+    var runtimeQuality: Double = 0.82
+
     /// Draws the animated layer at all. Off leaves the still backdrop, which is
     /// both a usable widget and the way to tell a broken animation layer from a
     /// broken picture: the two are indistinguishable when the result is black.
@@ -176,6 +198,11 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     /// How long the built loop runs on screen.
     var loopDuration: TimeInterval {
         Double(loopFrameCount) / Double(spec.framesPerSecond)
+    }
+
+    /// How many pictures a runtime-frame build writes.
+    var runtimeFrameCount: Int {
+        BlinkCycle.frameCount(framesPerSecond: runtimeFramesPerSecond)
     }
 
     var widgetRect: CGRect {
@@ -242,6 +269,11 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         widgetNudge = try container.decodeIfPresent(CGPoint.self, forKey: .widgetNudge) ?? .zero
         smoothness = try container.decodeIfPresent(MotionSmoothness.self, forKey: .smoothness) ?? .standard
         jpegQuality = try container.decodeIfPresent(Double.self, forKey: .jpegQuality) ?? 0.62
+        animationSource = try container.decodeIfPresent(AnimationSource.self, forKey: .animationSource) ?? .laneFonts
+        runtimeFramesPerSecond = try container.decodeIfPresent(Int.self, forKey: .runtimeFramesPerSecond) ?? 32
+        runtimeLayout = try container
+            .decodeIfPresent(RuntimeFrameSequence.Layout.self, forKey: .runtimeLayout) ?? .separate
+        runtimeQuality = try container.decodeIfPresent(Double.self, forKey: .runtimeQuality) ?? 0.82
         animationEnabled = try container.decodeIfPresent(Bool.self, forKey: .animationEnabled) ?? true
         animationCrop = try container.decode(CGRect.self, forKey: .animationCrop)
         tiles = try container.decodeIfPresent([PlacedTile].self, forKey: .tiles) ?? []
@@ -302,7 +334,17 @@ struct BuildManifest: Codable, Equatable, Sendable {
     /// silently dropped rather than reported.
     var tiles: [PlacedTile]?
 
+    /// Which animation the widget should draw. Absent in every manifest written
+    /// before the runtime-frame route existed, and those are all lane-font
+    /// designs, so the fallback is not a guess.
+    var animationSource: AnimationSource?
+
+    /// Where the pictures are, for a runtime-frame design. Nil for lane fonts.
+    var frameSequence: RuntimeFrameSequence?
+
     var placedTiles: [PlacedTile] { tiles ?? [] }
+
+    var resolvedAnimationSource: AnimationSource { animationSource ?? .laneFonts }
 
     var spec: TimerFontSpec {
         TimerFontSpec(laneCount: laneCount, framesPerSecond: framesPerSecond)
