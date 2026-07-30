@@ -32,23 +32,50 @@ enum EdgeCompensation {
     private static let logger = Logger(subsystem: "com.caden.Motionary", category: "EdgeCompensation")
 
     /// Brightness the system adds, per channel, by distance in pixels inward from
-    /// the widget's top or bottom edge.
-    static let added: [(r: Double, g: Double, b: Double)] = [
-        (54, 72, 58),
-        (40, 43, 41),
-        (13, 18, 16),
-        (7, 12, 11),
-        (3, 9, 9),
+    /// the edge. Re-measured from a full-resolution screenshot after a first
+    /// correction was already in place, by adding back what had been subtracted -
+    /// which is why these are larger than the first pass through a downscale
+    /// suggested, and why the two edges no longer share one profile.
+    ///
+    /// The two edges are not symmetric: the top's core is two rows, the bottom's
+    /// three, and the bottom peaks one row below where the composition's own frame
+    /// ends. Both fade into a tail of a few units over the next several rows.
+    static let topAdded: [(r: Double, g: Double, b: Double)] = [
+        (76, 71, 56),
+        (60, 46, 42),
+        (33, 30, 26),
+        (12, 13, 11),
+        (7, 9, 9),
+        (8, 7, 6),
+        (6, 6, 5),
+        (5, 5, 4),
+        (4, 4, 4),
     ]
 
-    /// How much of the measured line to take out. See the note above on why this
-    /// is below 1.
-    static let strength: Double = 0.8
+    static let bottomAdded: [(r: Double, g: Double, b: Double)] = [
+        (70, 58, 44),
+        (60, 62, 56),
+        (43, 34, 40),
+        (16, 13, 17),
+        (14, 11, 11),
+        (8, 9, 8),
+        (10, 7, 6),
+        (8, 6, 5),
+        (7, 5, 4),
+    ]
 
-    /// The widget's real height in screen pixels, which is larger than the frame
-    /// the composition is cut to. Measured from where the two lines land: rows
-    /// 270 and 1913 inclusive.
-    static let renderedHeightPixels = 1644
+    /// Full correction now that the profile was measured at full resolution
+    /// rather than estimated through a 0.76 downscale.
+    ///
+    /// It still cannot cancel exactly. Measured across two different halves of
+    /// the width, the same row differs by around eight units - so part of what
+    /// the system adds depends on the content near the edge rather than being a
+    /// fixed line. A single profile takes out the fixed part and leaves that.
+    static let strength: Double = 1.0
+
+    /// The widget's real height in screen pixels, from where the bottom line
+    /// lands: row 1914, twelve past the 1901 the composition's frame ends at.
+    static let renderedHeightPixels = 1645
 
     static func topEdgeRow(widgetRect: CGRect) -> Int { Int(widgetRect.minY) }
 
@@ -58,10 +85,12 @@ enum EdgeCompensation {
 
     /// Rows the correction touches, as screen pixels.
     static func bands(widgetRect: CGRect) -> [ClosedRange<Int>] {
-        let depth = added.count - 1
         let top = topEdgeRow(widgetRect: widgetRect)
         let bottom = bottomEdgeRow(widgetRect: widgetRect)
-        return [top ... (top + depth), (bottom - depth) ... bottom]
+        return [
+            top ... (top + topAdded.count - 1),
+            (bottom - bottomAdded.count + 1) ... bottom,
+        ]
     }
 
     /// Whether a region includes rows the correction has to reach.
@@ -78,11 +107,14 @@ enum EdgeCompensation {
     static func correction(screenRow: Int, widgetRect: CGRect) -> (r: Double, g: Double, b: Double)? {
         let fromTop = screenRow - topEdgeRow(widgetRect: widgetRect)
         let fromBottom = bottomEdgeRow(widgetRect: widgetRect) - screenRow
-        let distance = [fromTop, fromBottom]
-            .filter { $0 >= 0 && $0 < added.count }
-            .min()
-        guard let distance else { return nil }
-        let value = added[distance]
+        let value: (r: Double, g: Double, b: Double)
+        if fromTop >= 0, fromTop < topAdded.count {
+            value = topAdded[fromTop]
+        } else if fromBottom >= 0, fromBottom < bottomAdded.count {
+            value = bottomAdded[fromBottom]
+        } else {
+            return nil
+        }
         return (value.r * strength, value.g * strength, value.b * strength)
     }
 

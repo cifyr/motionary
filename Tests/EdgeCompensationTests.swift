@@ -9,9 +9,10 @@ final class EdgeCompensationTests: XCTestCase {
 
     func testTheBandsSitAtTheWidgetsRealTopAndBottom() {
         XCTAssertEqual(EdgeCompensation.topEdgeRow(widgetRect: widgetRect), 270)
-        // 1913, not the 1901 the composition's own frame ends at: the system
-        // hands over more widget than the frame is cut to.
-        XCTAssertEqual(EdgeCompensation.bottomEdgeRow(widgetRect: widgetRect), 1913)
+        // 1914, not the 1901 the composition's own frame ends at: the system
+        // hands over more widget than the frame is cut to. A first pass put this
+        // a row short, and the bottom line survived almost untouched.
+        XCTAssertEqual(EdgeCompensation.bottomEdgeRow(widgetRect: widgetRect), 1914)
         XCTAssertGreaterThan(
             EdgeCompensation.bottomEdgeRow(widgetRect: widgetRect),
             Int(widgetRect.maxY) - 1,
@@ -36,7 +37,7 @@ final class EdgeCompensationTests: XCTestCase {
     func testTheCorrectionFadesInward() throws {
         let top = EdgeCompensation.topEdgeRow(widgetRect: widgetRect)
         var previous = Double.infinity
-        for distance in 0 ..< EdgeCompensation.added.count {
+        for distance in 0 ..< EdgeCompensation.topAdded.count {
             let correction = try XCTUnwrap(
                 EdgeCompensation.correction(screenRow: top + distance, widgetRect: widgetRect)
             )
@@ -45,15 +46,24 @@ final class EdgeCompensationTests: XCTestCase {
         }
     }
 
-    /// Under-corrects on purpose: over-correcting swaps a bright line for a dark
-    /// one, which is a new artefact rather than a smaller old one.
-    func testTheCorrectionStaysBelowTheMeasuredLine() throws {
+    func testTheCorrectionMatchesTheMeasuredLine() throws {
         XCTAssertGreaterThan(EdgeCompensation.strength, 0)
         XCTAssertLessThanOrEqual(EdgeCompensation.strength, 1)
         let top = EdgeCompensation.topEdgeRow(widgetRect: widgetRect)
         let correction = try XCTUnwrap(EdgeCompensation.correction(screenRow: top, widgetRect: widgetRect))
-        XCTAssertEqual(correction.g, EdgeCompensation.added[0].g * EdgeCompensation.strength, accuracy: 0.001)
-        XCTAssertLessThan(correction.g, EdgeCompensation.added[0].g)
+        XCTAssertEqual(correction.g, EdgeCompensation.topAdded[0].g * EdgeCompensation.strength, accuracy: 0.001)
+    }
+
+    /// The two edges were measured separately because they are not the same
+    /// shape: reusing one profile for both is what left the bottom line behind.
+    func testEachEdgeUsesItsOwnProfile() throws {
+        let top = EdgeCompensation.topEdgeRow(widgetRect: widgetRect)
+        let bottom = EdgeCompensation.bottomEdgeRow(widgetRect: widgetRect)
+        let atTop = try XCTUnwrap(EdgeCompensation.correction(screenRow: top, widgetRect: widgetRect))
+        let atBottom = try XCTUnwrap(EdgeCompensation.correction(screenRow: bottom, widgetRect: widgetRect))
+        XCTAssertEqual(atTop.r, EdgeCompensation.topAdded[0].r, accuracy: 0.001)
+        XCTAssertEqual(atBottom.r, EdgeCompensation.bottomAdded[0].r, accuracy: 0.001)
+        XCTAssertNotEqual(atTop.r, atBottom.r)
     }
 
     func testAnAnimatedCropReachingTheEdgeIsDetected() {
@@ -79,10 +89,10 @@ final class EdgeCompensationTests: XCTestCase {
 
         // The widget's top row, 24 rows into this image.
         let edgeRow = Int(widgetRect.minY) - originY
-        let expected = Double(baseline) - EdgeCompensation.added[0].g * EdgeCompensation.strength
+        let expected = Double(baseline) - EdgeCompensation.topAdded[0].g * EdgeCompensation.strength
         XCTAssertEqual(Double(pixels.at(x: 4, y: edgeRow).g), expected, accuracy: 2)
         XCTAssertEqual(pixels.at(x: 4, y: edgeRow - 1).g, baseline, "the row above the widget was darkened")
-        XCTAssertEqual(pixels.at(x: 4, y: edgeRow + EdgeCompensation.added.count).g, baseline)
+        XCTAssertEqual(pixels.at(x: 4, y: edgeRow + EdgeCompensation.topAdded.count).g, baseline)
     }
 
     /// Nothing can be subtracted past black, so a dark edge keeps some of the
