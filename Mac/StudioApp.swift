@@ -13,6 +13,9 @@ struct MotionaryStudioApp: App {
         if CommandLine.arguments.contains("--install-starred") {
             HeadlessBuild.installStarred(deviceID: HeadlessBuild.device(in: CommandLine.arguments))
         }
+        if CommandLine.arguments.contains("--rebuild-starred") {
+            HeadlessBuild.rebuildStarred(deviceID: HeadlessBuild.device(in: CommandLine.arguments))
+        }
         if let source = HeadlessBuild.requested(in: CommandLine.arguments) {
             HeadlessBuild.run(source: source)
         }
@@ -103,8 +106,10 @@ enum HeadlessBuild {
 
         do {
             let writer = try BundleWriter(projectRoot: root)
-            let result = try writer.install(bundled, iconsFolder: store.root
-                .deletingLastPathComponent().appendingPathComponent("Icons", isDirectory: true))
+            let result = try writer.install(
+                bundled,
+                iconsFolder: StudioPipeline.iconsFolder(for: store)
+            )
             print("bundled \(bundled.count) designs, \(result.fontCount) fonts, \(result.totalBytes / 1_048_576)MB")
             for design in bundled { print("  - \(design.name)") }
 
@@ -130,8 +135,6 @@ enum HeadlessBuild {
         }
         let pipeline = StudioPipeline(projectRoot: root, model: .default)
         let deviceID = device(in: CommandLine.arguments)
-        let semaphore = DispatchSemaphore(value: 0)
-        nonisolated(unsafe) var status: Int32 = 0
 
         Task.detached {
             do {
@@ -164,12 +167,50 @@ enum HeadlessBuild {
                 print("folder \(outcome.folder.path)")
             } catch {
                 FileHandle.standardError.write(Data("failed: \(error)\n".utf8))
-                status = 1
+                exit(1)
             }
-            semaphore.signal()
+            exit(0)
         }
-        semaphore.wait()
-        exit(status)
+        // Parked servicing the main queue rather than blocked on a semaphore:
+        // baking the tiles into the wallpaper needs the main actor, and a
+        // blocked main thread would never let it run.
+        dispatchMain()
+    }
+
+    /// Regenerates every starred design, then bundles them all.
+    ///
+    /// A design's wallpaper is written by its build, so a layout made before the
+    /// tiles were baked into it needs another pass to get them. In the editor
+    /// that is an open-edit-build cycle per design.
+    static func rebuildStarred(deviceID: String?) -> Never {
+        guard let root = ProjectLocator.find() else {
+            FileHandle.standardError.write(Data("failed: no Motionary project found\n".utf8))
+            exit(1)
+        }
+        let starred = StudioPipeline.saved().filter(\.isStarred)
+        guard !starred.isEmpty else {
+            FileHandle.standardError.write(Data("failed: nothing is starred\n".utf8))
+            exit(1)
+        }
+        let pipeline = StudioPipeline(projectRoot: root, model: .default)
+
+        Task.detached {
+            let report: @Sendable (StudioPipeline.Stage) -> Void = { stage in
+                FileHandle.standardError.write(Data("... \(stage.caption)\n".utf8))
+            }
+            for design in starred {
+                do {
+                    let prepared = try await pipeline.reopen(design)
+                    let built = try await pipeline.generate(prepared, loopSeconds: nil, onStage: report)
+                    print("rebuilt \(design.name): \(built.summary)")
+                } catch {
+                    FileHandle.standardError.write(Data("failed: \(design.name): \(error)\n".utf8))
+                    exit(1)
+                }
+            }
+            installStarred(deviceID: deviceID)
+        }
+        dispatchMain()
     }
 }
 
