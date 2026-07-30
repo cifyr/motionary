@@ -13,6 +13,9 @@ struct MotionaryStudioApp: App {
         if CommandLine.arguments.contains("--install-starred") {
             HeadlessBuild.installStarred(deviceID: HeadlessBuild.device(in: CommandLine.arguments))
         }
+        if CropAnalysis.requested(in: CommandLine.arguments) {
+            CropAnalysis.run()
+        }
         if CommandLine.arguments.contains("--rebuild-starred") {
             HeadlessBuild.rebuildStarred(deviceID: HeadlessBuild.device(in: CommandLine.arguments))
         }

@@ -52,7 +52,7 @@ There is no animation API in a widget worth using for this. What there is:
     Shared/     Everything both platforms need, including all of Pipeline/
     App/        The iPhone viewer
     Widget/     The extension
-    Tests/      202 unit tests, run on the simulator
+    Tests/      212 unit tests, run on the simulator
     UITests/    Drives SpringBoard from inside the simulator to photograph the widget
     Tools/      Shot loops and analysis scripts
     docs/       What was measured and what it cost to find out
@@ -72,6 +72,7 @@ The same pipeline runs headless, which is how it gets tested:
     MotionaryStudio --install-starred [--device UDID]
     MotionaryStudio --rebuild-starred [--device UDID]  # regenerate every starred design
     MotionaryStudio --roundtrip                    # export a design and import it back
+    MotionaryStudio --analyse-crop [--starred]     # what each design's animated area costs, read-only
 
 `--rebuild-starred` is what to reach for after changing anything in the pipeline:
 a design's backdrop and wallpaper are written at build time, so a pipeline change
