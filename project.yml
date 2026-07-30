@@ -144,10 +144,6 @@ targets:
       # studio does not build runtime-frame designs - the phone does - but it
       # draws the same composition, so it needs the layer and the cycle maths
       # the composition now branches on.
-      - path: Shared/BlinkCycle.swift
-      - path: Shared/RuntimeFrameSequence.swift
-      - path: Shared/RuntimeFrameLayer.swift
-      - path: Shared/RuntimeImportRequest.swift
       - path: Shared/PrebuiltDesign.swift
       - path: Shared/ActiveDesign.swift
       - path: Shared/WidgetStatus.swift
