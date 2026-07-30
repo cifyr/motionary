@@ -18,11 +18,16 @@ final class GlyphRenderingTests: XCTestCase {
 
     override func setUpWithError() throws {
         let bundle = Bundle(for: Self.self)
-        let fonts = try XCTUnwrap(bundle.urls(forResourcesWithExtension: "ttf", subdirectory: nil))
-        let lane = try XCTUnwrap(
-            fonts.first { $0.lastPathComponent.hasPrefix("MFont") && $0.lastPathComponent.contains("L0-") },
-            "no bundled lane 0 font to render with"
-        )
+        let fonts = bundle.urls(forResourcesWithExtension: "ttf", subdirectory: nil) ?? []
+        // Skipped, not failed, when no design has been built. Lane fonts are
+        // build output and are not committed, so a fresh clone has none and a new
+        // contributor's first test run would otherwise open on three red tests
+        // that say nothing about their checkout.
+        guard let lane = fonts.first(where: {
+            $0.lastPathComponent.hasPrefix("MFont") && $0.lastPathComponent.contains("L0-")
+        }) else {
+            throw XCTSkip("no lane font is bundled; build a design in Motionary Studio to cover this")
+        }
         var error: Unmanaged<CFError>?
         if !CTFontManagerRegisterFontsForURL(lane as CFURL, .process, &error) {
             let failure = error?.takeRetainedValue()
