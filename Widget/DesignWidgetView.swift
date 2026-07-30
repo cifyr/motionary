@@ -36,6 +36,27 @@ struct DesignWidgetView: View {
         let origin: String
         let scope: String
         let name: String
+        /// Set when the design animates from pictures in the app group instead
+        /// of from lane fonts in the bundle.
+        var frames: RuntimeFrameLayer.Payload?
+
+        /// Which of the two animations this render used, in words the report
+        /// prints. Two routes now reach the same widget and they fail in
+        /// different ways, so a report that does not name the route is a report
+        /// that cannot be acted on.
+        var animationPath: String {
+            if let frames {
+                return "runtime frames: \(frames.loadedCount)/\(frames.sequence.frameCount) "
+                    + "\(frames.sequence.layout.rawValue) at \(frames.sequence.framesPerSecond)fps, "
+                    + "\(Int(frames.sequence.frameSize.width))x\(Int(frames.sequence.frameSize.height))px, "
+                    + "\(String(format: "%.2f", BlinkCycle.cycleDuration))s cycle"
+            }
+            return fontsUsable
+                ? "lane fonts: \(manifest.laneCount) bundled at \(manifest.framesPerSecond)fps"
+                : "still: no animation layer drew"
+        }
+
+        var isAnimating: Bool { frames?.isDrawable == true || fontsUsable }
     }
 
     @ViewBuilder
@@ -50,7 +71,8 @@ struct DesignWidgetView: View {
                 viewport: DeviceGeometry.widgetRect,
                 wallpaper: source.backdrop,
                 wallpaperRect: source.manifest.backdropRect,
-                isAnimated: source.fontsUsable
+                isAnimated: source.fontsUsable,
+                runtimeFrames: source.frames
             ) { tile, side in
                 // Through the app rather than straight to the destination: a
                 // Link from an extension to a third-party scheme is
@@ -107,6 +129,15 @@ struct DesignWidgetView: View {
               let manifest = try? store.loadManifest(id: design.id)
         else { return nil }
 
+        if manifest.resolvedAnimationSource == .runtimeImages, let sequence = manifest.frameSequence {
+            return runtimeFrameSource(
+                design: design,
+                manifest: manifest,
+                sequence: sequence,
+                store: store
+            )
+        }
+
         // Animated only when the lane fonts shipped in this build. Runtime
         // registration reports every lane usable on iOS 27 and then draws
         // nothing, so an imported design is shown as a still picture rather
@@ -124,6 +155,40 @@ struct DesignWidgetView: View {
             origin: "imported",
             scope: bundledFonts ? "bundled" : "still - fonts not in this build",
             name: design.name
+        )
+    }
+
+    /// The runtime-frame route: pictures out of the app group, revealed by the
+    /// one font that already ships with the extension.
+    ///
+    /// Logged step by step with the footprint after each, because the memory
+    /// answer is the one that decides this. A stack of full-frame images has a
+    /// point where it stops fitting under the widget's cap, and past that point
+    /// the render is simply dropped - a blank widget, with nothing anywhere
+    /// saying why. The only way to see it coming is to watch the number climb.
+    private func runtimeFrameSource(
+        design: DesignDocument,
+        manifest: BuildManifest,
+        sequence: RuntimeFrameSequence,
+        store: DesignStore
+    ) -> Source {
+        WidgetRenderLog.append("img  enter \(sequence.summary) \(MemoryFootprint.megabytes)MB")
+        let loaded = RuntimeFrameLoader.load(sequence: sequence, designID: design.id, in: store)
+        WidgetRenderLog.append("img  loaded \(loaded.note) \(loaded.footprintMB)MB")
+
+        return Source(
+            manifest: manifest,
+            backdrop: backdrop(manifest: manifest, store: store, designID: design.id),
+            // The lane fonts are irrelevant here and there are none: saying yes
+            // would put a second animated layer on top drawing from fonts that
+            // do not exist.
+            fontsUsable: false,
+            origin: "imported",
+            scope: loaded.payload.isDrawable
+                ? "runtime frames from the app group"
+                : "still - the frames are not on disk",
+            name: design.name,
+            frames: loaded.payload
         )
     }
 
@@ -172,7 +237,21 @@ struct DesignWidgetView: View {
         if let source {
             status.outcome = source.backdrop == nil
                 ? "ok, but the picture did not load"
-                : (source.fontsUsable ? "ok" : "ok, but still - the fonts would not draw")
+                : (source.isAnimating ? "ok" : "ok, but still - no animation layer drew")
+            status.animationSource = source.manifest.resolvedAnimationSource.rawValue
+            status.animationPath = source.animationPath
+            if let frames = source.frames {
+                status.frameCycleSeconds = BlinkCycle.cycleDuration
+                status.framesRequested = frames.sequence.frameCount
+                status.framesLoaded = frames.loadedCount
+                status.frameLayout = frames.sequence.layout.rawValue
+                status.frameSize = frames.sequence.frameSize
+                status.frameBytesOnDisk = frames.sequence.totalFrameBytes
+                status.frameFilesOnDisk = (try? DesignStore())
+                    .map { $0.frameFileCount(for: source.manifest.designID) } ?? 0
+                status.sourceRepeats = frames.sequence.sourceRepeats
+                status.playbackSpeed = frames.sequence.speed
+            }
             status.manifestFound = true
             status.designName = "\(source.name) (\(source.origin))"
             status.designID = source.manifest.designID.uuidString
@@ -199,7 +278,7 @@ struct DesignWidgetView: View {
         WidgetRenderLog.append("""
         \(status.succeeded ? "OK  " : "FAIL") \(entry.isPreview ? "GALLERY" : "PLACED ") \
         \(source?.origin ?? "none")/\(source?.scope ?? "-") \
-        anim=\(source?.fontsUsable == true) \
+        path=\(source?.animationPath ?? "none") \
         \(Int(Self.lastRenderedSize.width))x\(Int(Self.lastRenderedSize.height)) \
         \(status.memoryFootprintMB)MB
         """)
