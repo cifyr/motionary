@@ -566,8 +566,11 @@ struct StudioView: View {
         saved = StudioPipeline.saved()
     }
 
+    /// No project folder needed: opening a layout reads the design and its clip
+    /// out of Application Support. This used to return here when the folder was
+    /// unset, so clicking a design did nothing at all and said nothing about
+    /// why. Building still needs it, and says so when it is missing.
     private func reopen(_ design: DesignDocument) {
-        guard let projectRoot else { return }
         done = nil
         failure = nil
         stage = .preparing
@@ -761,7 +764,7 @@ struct StudioView: View {
     /// crop and the placement are baked into the glyphs, so they have to be
     /// settled before the fonts exist.
     private func start() {
-        guard let source, let projectRoot else { return }
+        guard let source else { return }
         done = nil
         failure = nil
         log = []
@@ -787,7 +790,13 @@ struct StudioView: View {
     }
 
     private func install(_ edited: StudioPipeline.Prepared) {
-        guard let projectRoot else { return }
+        // Building is the step that genuinely needs the project, so this is the
+        // one place the missing folder is worth refusing over - and it says so
+        // rather than doing nothing.
+        guard let projectRoot else {
+            failure = String(describing: StudioPipelineError.noProjectFolder)
+            return
+        }
         stage = .preparing
         let pipeline = StudioPipeline(projectRoot: projectRoot, model: model)
         let loop = loopSeconds
