@@ -52,7 +52,10 @@ struct DesignWidgetView: View {
             CompositionView(
                 manifest: source.manifest,
                 tiles: source.manifest.placedTiles,
-                viewport: DeviceGeometry.widgetRect,
+                // The rendered rect, not the cut frame: only the viewport's
+                // origin positions content, and the system's origin is 2px left
+                // of the frame a design is cut to.
+                viewport: DeviceGeometry.renderedWidgetRect,
                 wallpaper: source.backdrop,
                 wallpaperRect: source.manifest.backdropRect,
                 isAnimated: source.fontsUsable
@@ -101,7 +104,9 @@ struct DesignWidgetView: View {
         return FontLabView(
             manifest: manifest,
             outcomes: outcomes,
-            viewport: DeviceGeometry.widgetRect
+            // Same viewport as the real render, so the lab is not a second
+            // renderer positioned differently from the one it stands in for.
+            viewport: DeviceGeometry.renderedWidgetRect
         )
     }
 
@@ -176,7 +181,8 @@ struct DesignWidgetView: View {
         \(status.succeeded ? "OK  " : "FAIL") \(entry.isPreview ? "GALLERY" : "PLACED ") \
         \(source?.origin ?? "none")/\(source?.scope ?? "-") \
         anim=\(source?.fontsUsable == true) \
-        \(Int(Self.lastRenderedSize.width))x\(Int(Self.lastRenderedSize.height)) \
+        \(Int((Self.lastRenderedSize.width * DeviceGeometry.scale).rounded()))x\
+        \(Int((Self.lastRenderedSize.height * DeviceGeometry.scale).rounded()))px \
         \(status.memoryFootprintMB)MB
         """)
         return true
