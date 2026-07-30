@@ -11,6 +11,10 @@ struct MotionaryApp: App {
     /// switched the flag but left the already-drawn home on screen, which reads
     /// as the flag having been ignored.
     init() {
+        // Before any view, because the first view builds the player, and the
+        // player is what activates the session.
+        AudioSessionPolicy.configureForSilentPlayback()
+
         let arguments = ProcessInfo.processInfo.arguments
         var changed = false
         if let routes = FontLab.launchRouteSelection(in: arguments), routes != FontLab.routeSelection {
