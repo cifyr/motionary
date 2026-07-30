@@ -241,6 +241,7 @@ struct StudioView: View {
     /// from `saved` so an abandoned rename changes nothing.
     @State private var renaming: DesignDocument?
     @State private var renamedTo = ""
+    @State private var designFilter = ""
     @State private var targeting = false
 
     @State private var projectRoot: URL? = ProjectLocator.find()
@@ -267,7 +268,9 @@ struct StudioView: View {
             if let failure { message(failure, tint: .red) }
         }
         .padding(24)
-        .frame(width: 520)
+        // Wider than it was: the design rows carry a name, three counts and
+        // three actions, which 520 crushed together.
+        .frame(width: 600)
         .task {
             refreshDevices()
             StudioPipeline.migrateLegacyDesigns()
@@ -316,55 +319,110 @@ struct StudioView: View {
 
     /// Reopening keeps the placement. Deriving a design from the clip again
     /// would put every tile back in the middle of the frame.
+    private var filteredDesigns: [DesignDocument] {
+        let query = designFilter.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty else { return saved }
+        return saved.filter { $0.name.lowercased().contains(query) }
+    }
+
     private var savedDesigns: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("Designs").font(.caption.weight(.semibold))
-                Text("star to ship").font(.caption2).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Designs").font(.headline)
+                Text("\(saved.count)")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(.secondary.opacity(0.15), in: Capsule())
                 Spacer()
+                // Only once the list is long enough to need it: a filter field
+                // over four designs is furniture.
+                if saved.count > 6 {
+                    TextField("Filter", text: $designFilter)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 130)
+                }
                 Button("Import...") { importDesign() }.buttonStyle(.link)
             }
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(saved) { design in
-                        HStack(spacing: 6) {
-                            Button {
-                                toggleStar(design)
-                            } label: {
-                                Image(systemName: design.isStarred ? "star.fill" : "star")
-                                    .foregroundStyle(design.isStarred ? .yellow : .secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Starred designs are compiled into the app, and the phone switches between them. About 29MB each.")
 
-                            Button { reopen(design) } label: {
-                            HStack {
-                                Text(design.name).lineLimit(1)
-                                Spacer()
-                                Text("\(design.tiles.count) app\(design.tiles.count == 1 ? "" : "s")")
-                                    .foregroundStyle(.secondary)
-                                Text(design.updatedAt.formatted(date: .abbreviated, time: .shortened))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .font(.callout)
-                            .contentShape(Rectangle())
-                        }
-                            .buttonStyle(.plain)
-                        }
-                        .contextMenu {
-                            Button(design.isStarred ? "Unstar" : "Star") { toggleStar(design) }
-                            Button("Rename...") { renaming = design }
-                            Button("Duplicate") { duplicate(design) }
-                            Divider()
-                            Button("Export...") { exportDesign(design) }
-                            Button("Delete", role: .destructive) { delete(design) }
-                        }
+            Text("Starred designs are compiled into the app, and the phone switches between them. About 29MB each.")
+                .font(.caption2).foregroundStyle(.secondary)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    ForEach(filteredDesigns) { design in
+                        designRow(design)
                     }
                 }
             }
-            .frame(maxHeight: 88)
+            // Tall enough to read the library rather than peer at it through a
+            // slot. Six rows before it scrolls, against the two it showed.
+            .frame(height: 190)
+            .background(.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+
+            if filteredDesigns.isEmpty, !designFilter.isEmpty {
+                Text("Nothing matches \"\(designFilter)\".")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .disabled(isBusy)
+    }
+
+    private func designRow(_ design: DesignDocument) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                toggleStar(design)
+            } label: {
+                Image(systemName: design.isStarred ? "star.fill" : "star")
+                    .foregroundStyle(design.isStarred ? .yellow : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Compile this design into the app")
+
+            Button { reopen(design) } label: {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(design.name).lineLimit(1).font(.callout)
+                    HStack(spacing: 6) {
+                        Text(count(design.tiles.count, "app"))
+                        if !design.assets.isEmpty {
+                            Text("·")
+                            Text(count(design.assets.count, "picture"))
+                        }
+                        Text("·")
+                        Text(design.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                    }
+                    .font(.caption2).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Open \(design.name)")
+
+            // Visible rather than context-menu only: a right-click is not
+            // where anyone looks first for renaming or deleting a project.
+            Button { renaming = design } label: { Image(systemName: "pencil") }
+                .buttonStyle(.plain).help("Rename")
+            Button { duplicate(design) } label: { Image(systemName: "plus.square.on.square") }
+                .buttonStyle(.plain).help("Duplicate")
+            Button { delete(design) } label: { Image(systemName: "trash") }
+                .buttonStyle(.plain).help("Delete (moved to the archive folder, not erased)")
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button(design.isStarred ? "Unstar" : "Star") { toggleStar(design) }
+            Button("Rename...") { renaming = design }
+            Button("Duplicate") { duplicate(design) }
+            Divider()
+            Button("Export...") { exportDesign(design) }
+            Button("Delete", role: .destructive) { delete(design) }
+        }
+    }
+
+    private func count(_ value: Int, _ noun: String) -> String {
+        "\(value) \(noun)\(value == 1 ? "" : "s")"
     }
 
     /// A copy is the safe way to try a variation: the design that already
