@@ -26,6 +26,7 @@ struct LayoutEditor: View {
     @State private var labelsDefault = true
     @State private var skins: [SkinLibrary.Skin] = []
     @State private var background: CGImage?
+    @State private var skinNote: String?
 
     /// Points per screen pixel, so the canvas is the phone at a readable size.
     static let zoom: CGFloat = 0.62
@@ -135,24 +136,48 @@ struct LayoutEditor: View {
         panel.allowsMultipleSelection = true
         panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
         guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
-        try? SkinLibrary().importing(panel.urls)
-        reloadSkins()
+        do {
+            // Counted and reported. Swallowing this with `try?` made a failed
+            // import look exactly like a successful one, which is how an
+            // import that worked came to look like an import that did nothing.
+            let added = try SkinLibrary().importing(panel.urls)
+            reloadSkins()
+            let failed = panel.urls.count - added.count
+            skinNote = failed == 0
+                ? "Added \(added.count) skin\(added.count == 1 ? "" : "s")."
+                : "Added \(added.count), could not read \(failed)."
+        } catch {
+            skinNote = "Import failed: \(error.localizedDescription)"
+        }
     }
 
-    /// The library, offered for the selected tile.
-    private func skinPicker(index: Int) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    /// The library, always reachable.
+    ///
+    /// It used to live inside the selected tile's section, which meant there was
+    /// nowhere to import a skin until a tile happened to be selected - and no
+    /// way to tell that was why nothing appeared to happen.
+    private var skinPicker: some View {
+        let index = selection.flatMap { id in design.tiles.firstIndex { $0.id == id } }
+        return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Skin").font(.caption.weight(.semibold))
+                Text("Skins").font(.caption.weight(.semibold))
                 Spacer()
                 Button("Import...") { importSkins() }.buttonStyle(.link)
             }
+            if let skinNote {
+                Text(skinNote).font(.caption2).foregroundStyle(.secondary)
+            }
             if skins.isEmpty {
-                Text("No skins yet. Import icon artwork and it stays available for every design.")
+                Text("No skins yet. Import icon artwork - a green screen is removed automatically - and it stays available for every design.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            } else {
+            } else if index == nil {
+                Text("\(skins.count) skin\(skins.count == 1 ? "" : "s") ready. Select a tile to put one on it.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let index {
                 ScrollView {
                     LazyVGrid(columns: Array(repeating: GridItem(.fixed(44), spacing: 6), count: 4), spacing: 6) {
                         Button {
@@ -477,6 +502,8 @@ struct LayoutEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            skinPicker
+
             Toggle("Snap to grid", isOn: $design.snapEnabled)
 
             Toggle("Icon labels", isOn: Binding(
@@ -540,8 +567,6 @@ struct LayoutEditor: View {
                 get: { design.tiles[index].showsLabel },
                 set: { design.tiles[index].showsLabel = $0 }
             ))
-
-            skinPicker(index: index)
 
             HStack {
                 Button("Remove", role: .destructive) {
