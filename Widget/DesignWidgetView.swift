@@ -46,7 +46,7 @@ struct DesignWidgetView: View {
         /// that cannot be acted on.
         var animationPath: String {
             if let frames {
-                return "runtime frames: \(frames.loadedCount)/\(frames.sequence.frameCount) "
+                return "runtime frames: \(frames.foundCount)/\(frames.sequence.frameCount) "
                     + "\(frames.sequence.layout.rawValue) at \(frames.sequence.framesPerSecond)fps, "
                     + "\(Int(frames.sequence.frameSize.width))x\(Int(frames.sequence.frameSize.height))px, "
                     + "\(String(format: "%.2f", BlinkCycle.cycleDuration))s cycle"
@@ -243,7 +243,7 @@ struct DesignWidgetView: View {
             if let frames = source.frames {
                 status.frameCycleSeconds = BlinkCycle.cycleDuration
                 status.framesRequested = frames.sequence.frameCount
-                status.framesLoaded = frames.loadedCount
+                status.framesLoaded = frames.foundCount
                 status.frameLayout = frames.sequence.layout.rawValue
                 status.frameSize = frames.sequence.frameSize
                 status.frameBytesOnDisk = frames.sequence.totalFrameBytes

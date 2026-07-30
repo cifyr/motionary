@@ -52,12 +52,22 @@ struct RuntimeFrameLayer: View {
         var frames: [Image] = []
         /// Populated for `.sheet`.
         var sheet: Image?
+        /// Slots whose file would not decode, filled from a neighbour. Carried
+        /// with the payload rather than left in the loader, because the widget
+        /// report is the only place it can be seen.
+        var missing: [Int] = []
 
+        /// How many slots have a picture in them, after gaps were filled.
         var loadedCount: Int {
             sequence.layout == .sheet ? (sheet == nil ? 0 : sequence.frameCount) : frames.count
         }
 
-        var isDrawable: Bool { loadedCount > 0 }
+        /// How many slots had a picture of their own.
+        var foundCount: Int { max(0, loadedCount - missing.count) }
+
+        /// Every slot has to be filled, or the ones that are not draw nothing and
+        /// the widget flashes black for its share of the cycle.
+        var isDrawable: Bool { loadedCount == sequence.frameCount }
     }
 
     let payload: Payload
@@ -146,15 +156,18 @@ private struct SheetWindow: View {
 enum RuntimeFrameLoader {
     struct Result {
         var payload: RuntimeFrameLayer.Payload
-        var missing: [Int] = []
         var footprintMB = 0
+
+        var missing: [Int] { payload.missing }
 
         var note: String {
             let sequence = payload.sequence
-            var text = "\(payload.loadedCount)/\(sequence.frameCount) \(sequence.layout.rawValue)"
+            var text = "\(payload.foundCount)/\(sequence.frameCount) \(sequence.layout.rawValue)"
             if !missing.isEmpty {
-                text += " MISSING \(missing.prefix(6).map(String.init).joined(separator: ","))"
+                text += " FILLED \(missing.prefix(6).map(String.init).joined(separator: ","))"
+                if missing.count > 6 { text += "..(\(missing.count))" }
             }
+            if !payload.isDrawable { text += " NOT DRAWABLE" }
             return text
         }
     }
@@ -169,17 +182,24 @@ enum RuntimeFrameLoader {
 
         switch sequence.layout {
         case .separate:
-            var frames: [Image] = []
+            var frames: [Image?] = []
             frames.reserveCapacity(sequence.frameCount)
             for index in 0 ..< sequence.frameCount {
                 let url = store.frameURL(for: designID, index: index)
                 guard let decoded = ImageLoader.load(at: url, maxPixelSize: longest) else {
-                    result.missing.append(index)
+                    result.payload.missing.append(index)
+                    frames.append(nil)
                     continue
                 }
                 frames.append(Image(decorative: decoded, scale: 1))
             }
-            result.payload.frames = frames
+            // Gaps are filled from the nearest frame that did load rather than
+            // left empty. An empty slot draws nothing for its share of the
+            // cycle, so a folder caught mid-write - the app archiving the old
+            // design while a render lands - flashed black several times a
+            // second. A repeated frame is a stutter; a hole is a strobe. The
+            // gaps are still named in the report either way.
+            result.payload.frames = Self.filled(frames)
         case .sheet:
             // The strip is `frameCount` frames tall, so the cap has to allow
             // for that or the whole sheet comes back shrunk to one frame's
@@ -189,11 +209,28 @@ enum RuntimeFrameLoader {
             if let decoded = ImageLoader.load(at: url, maxPixelSize: max(cap, longest)) {
                 result.payload.sheet = Image(decorative: decoded, scale: 1)
             } else {
-                result.missing = Array(0 ..< sequence.frameCount)
+                result.payload.missing = Array(0 ..< sequence.frameCount)
             }
         }
 
         result.footprintMB = MemoryFootprint.megabytes
         return result
+    }
+
+    /// Replaces each gap with the closest frame that did load. Empty if none did.
+    static func filled(_ frames: [Image?]) -> [Image] {
+        guard frames.contains(where: { $0 != nil }) else { return [] }
+        var forward: [Image?] = frames
+        var carried: Image?
+        for index in forward.indices {
+            if let frame = forward[index] { carried = frame } else { forward[index] = carried }
+        }
+        // A gap at the very start has nothing before it, so it is filled from
+        // whatever comes after instead.
+        carried = nil
+        for index in forward.indices.reversed() {
+            if let frame = forward[index] { carried = frame } else { forward[index] = carried }
+        }
+        return forward.compactMap { $0 }
     }
 }
