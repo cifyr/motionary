@@ -72,14 +72,21 @@ struct FontSetGenerator {
     /// cache supplies it; the default bakes SF Symbol fallbacks.
     let tileArtwork: WallpaperComposer.ArtworkProvider
 
+    /// Keyed artwork for a placed picture. Supplied by the caller for the same
+    /// reason `tileArtwork` is: reading and keying the file belongs to whoever
+    /// owns the store, not to the generator.
+    let assetArtwork: WallpaperComposer.AssetProvider
+
     init(
         store: DesignStore,
         bundle: Bundle = .main,
-        tileArtwork: @escaping WallpaperComposer.ArtworkProvider = { _ in nil }
+        tileArtwork: @escaping WallpaperComposer.ArtworkProvider = { _ in nil },
+        assetArtwork: @escaping WallpaperComposer.AssetProvider = { _ in nil }
     ) {
         self.store = store
         self.bundle = bundle
         self.tileArtwork = tileArtwork
+        self.assetArtwork = assetArtwork
     }
 
     func build(
@@ -185,8 +192,10 @@ struct FontSetGenerator {
         let poster = await WallpaperComposer.compose(
             frame: frames[0],
             tiles: design.tiles,
+            assets: design.assets,
             screenSize: DeviceGeometry.screenPixelSize,
-            artwork: tileArtwork
+            artwork: tileArtwork,
+            assetArtwork: assetArtwork
         )
         let wallpaper = try FrameEncoder.pngData(poster)
         try wallpaper.write(to: store.wallpaperURL(for: design.id), options: DesignStore.writingOptions)

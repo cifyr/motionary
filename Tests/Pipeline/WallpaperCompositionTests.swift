@@ -167,5 +167,61 @@ final class WallpaperCompositionTests: XCTestCase {
             let pixel = at(x: x, y: y)
             return pixel.b > 150 && pixel.r < 90 && pixel.g < 90
         }
+
+        func isGreen(x: Int, y: Int) -> Bool {
+            let pixel = at(x: x, y: y)
+            return pixel.g > 150 && pixel.r < 90 && pixel.b < 90
+        }
+    }
+
+    /// A placed picture has to survive the whole way to the baked wallpaper,
+    /// not merely appear in the editor. It is the wallpaper that ships.
+    func testAPlacedAssetIsBakedIntoTheWallpaper() throws {
+        let base = try Self.solid(red: 0, green: 0, blue: 1, size: screen)
+        let asset = PlacedAsset(
+            fileName: "sticker.png",
+            center: CGPoint(x: 200, y: 400),
+            size: CGSize(width: 100, height: 100)
+        )
+
+        let composed = WallpaperComposer.compose(
+            frame: base,
+            tiles: [],
+            assets: [asset],
+            screenSize: screen,
+            assetArtwork: { _ in
+                try? Self.solid(red: 1, green: 0, blue: 0, size: CGSize(width: 64, height: 64))
+            }
+        )
+
+        let pixels = try Pixels(composed)
+        XCTAssertTrue(pixels.isRed(x: 200, y: 400), "the asset was not baked in")
+        XCTAssertTrue(pixels.isBlue(x: 20, y: 20), "the asset covered pixels it does not occupy")
+    }
+
+    /// Decoration under launchers: a picture must never cover the thing that
+    /// answers a tap, whatever order they were added in.
+    func testATileDrawsOverAnAssetInTheSamePlace() throws {
+        let base = try Self.solid(red: 0, green: 0, blue: 1, size: screen)
+        let centre = CGPoint(x: 200, y: 400)
+        let asset = PlacedAsset(
+            fileName: "sticker.png",
+            center: centre,
+            size: CGSize(width: 200, height: 200)
+        )
+
+        let composed = WallpaperComposer.compose(
+            frame: base,
+            tiles: [skinnedTile(at: centre, size: 120)],
+            assets: [asset],
+            screenSize: screen,
+            artwork: { _ in try? Self.solid(red: 0, green: 1, blue: 0, size: CGSize(width: 64, height: 64)) },
+            assetArtwork: { _ in try? Self.solid(red: 1, green: 0, blue: 0, size: CGSize(width: 64, height: 64)) }
+        )
+
+        let pixels = try Pixels(composed)
+        XCTAssertTrue(pixels.isGreen(x: 200, y: 400), "the asset was drawn over the tile")
+        // Just outside the tile but inside the asset, the asset still shows.
+        XCTAssertTrue(pixels.isRed(x: 200, y: 480))
     }
 }

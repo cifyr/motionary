@@ -307,6 +307,11 @@ struct LayoutEditor: View {
                 clipLayer(poster: poster)
             }
             widgetFrame
+            // Under the tiles, matching what the wallpaper bakes, so the canvas
+            // shows the stacking the phone will actually have.
+            ForEach(design.assets.sorted { $0.zIndex < $1.zIndex }) { asset in
+                assetView(asset)
+            }
             ForEach(design.tiles) { tile in
                 tileView(tile)
             }
@@ -339,6 +344,58 @@ struct LayoutEditor: View {
             .offset(x: tile.rect.minX * unit, y: tile.rect.minY * unit)
             .gesture(tileDrag(tile))
             .onTapGesture { selection = tile.id }
+    }
+
+    private func assetView(_ asset: PlacedAsset) -> some View {
+        let width = asset.size.width * unit
+        let height = asset.size.height * unit
+        return Group {
+            if let image = assetImage(asset) {
+                Image(decorative: image, scale: 1).resizable()
+            } else {
+                // A missing file is shown rather than skipped: an asset that
+                // silently vanishes reads as a bug in placement.
+                ZStack {
+                    Rectangle().fill(.red.opacity(0.15))
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.red)
+                }
+            }
+        }
+        .frame(width: width, height: height)
+        .rotationEffect(.degrees(asset.rotation))
+        .opacity(asset.opacity)
+        .overlay {
+            if selection == asset.id {
+                Rectangle().strokeBorder(.white.opacity(0.9), lineWidth: 1)
+                    .rotationEffect(.degrees(asset.rotation))
+            }
+        }
+        .offset(x: asset.rect.minX * unit, y: asset.rect.minY * unit)
+        .gesture(assetDrag(asset))
+        .onTapGesture { selection = asset.id }
+    }
+
+    private func assetImage(_ asset: PlacedAsset) -> CGImage? {
+        guard let store else { return nil }
+        return AssetArtwork.image(for: asset, designID: design.id, store: store)
+    }
+
+    private func assetDrag(_ asset: PlacedAsset) -> some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard let index = design.assets.firstIndex(where: { $0.id == asset.id })
+                else { return }
+                let base = tileBase ?? asset.center
+                if tileBase == nil {
+                    tileBase = base
+                    selection = asset.id
+                }
+                design.assets[index].center = CGPoint(
+                    x: base.x + value.translation.width / unit,
+                    y: base.y + value.translation.height / unit
+                )
+            }
+            .onEnded { _ in tileBase = nil }
     }
 
     // MARK: - Gestures
@@ -420,6 +477,193 @@ struct LayoutEditor: View {
             .onEnded { _ in tileBase = nil }
     }
 
+    // MARK: - Assets
+
+    private var selectedAssetIndex: Int? {
+        guard let selection else { return nil }
+        return design.assets.firstIndex { $0.id == selection }
+    }
+
+    @ViewBuilder
+    private var assetsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Pictures").font(.caption.weight(.semibold))
+                Spacer()
+                Button("Add...") { importAssets() }.buttonStyle(.link)
+            }
+
+            if design.assets.isEmpty {
+                Text("Any image, placed anywhere and drawn under the app tiles. A coloured backdrop is keyed out, and it can be retuned here at any time.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            } else {
+                ForEach(design.assets.sorted { $0.zIndex < $1.zIndex }) { asset in
+                    HStack(spacing: 6) {
+                        Image(systemName: selection == asset.id ? "largecircle.fill.circle" : "circle")
+                            .foregroundStyle(.secondary)
+                        Text(asset.fileName).lineLimit(1).font(.caption)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { selection = asset.id }
+                    .contextMenu {
+                        Button("Bring to front") { restack(asset, toFront: true) }
+                        Button("Send to back") { restack(asset, toFront: false) }
+                        Button("Remove", role: .destructive) { removeAsset(asset) }
+                    }
+                }
+            }
+
+            if let index = selectedAssetIndex {
+                assetInspector(index: index)
+            }
+        }
+        .disabled(store == nil)
+    }
+
+    @ViewBuilder
+    private func assetInspector(index: Int) -> some View {
+        let asset = design.assets[index]
+        Divider()
+        VStack(alignment: .leading, spacing: 4) {
+            Text(asset.fileName).font(.caption.weight(.semibold)).lineLimit(1)
+
+            LabeledContent("Width", value: "\(Int(asset.size.width)) px")
+                .font(.caption2)
+            // Height follows width: an asset is scaled, not stretched. The
+            // aspect comes from the size it was imported at.
+            Slider(
+                value: Binding(
+                    get: { design.assets[index].size.width },
+                    set: { newWidth in
+                        let current = design.assets[index].size
+                        let aspect = current.height / max(current.width, 1)
+                        design.assets[index].size = CGSize(
+                            width: newWidth,
+                            height: newWidth * aspect
+                        )
+                    }
+                ),
+                in: 40 ... model.screenPixelSize.width * 1.5
+            )
+
+            LabeledContent("Rotation", value: "\(Int(asset.rotation))°").font(.caption2)
+            Slider(value: $design.assets[index].rotation, in: -180 ... 180)
+
+            LabeledContent("Opacity", value: String(format: "%.2f", asset.opacity)).font(.caption2)
+            Slider(value: $design.assets[index].opacity, in: 0 ... 1)
+
+            Divider()
+            keyingControls(index: index)
+        }
+    }
+
+    @ViewBuilder
+    private func keyingControls(index: Int) -> some View {
+        let chroma = design.assets[index].chroma ?? ChromaKey.Settings.default
+        Toggle("Remove backdrop", isOn: Binding(
+            get: { design.assets[index].chroma?.enabled ?? false },
+            set: { on in
+                var settings = design.assets[index].chroma ?? ChromaKey.Settings.default
+                settings.enabled = on
+                design.assets[index].chroma = settings
+            }
+        ))
+        .font(.caption)
+
+        if chroma.enabled {
+            LabeledContent("Tolerance", value: String(format: "%.2f", chroma.tolerance))
+                .font(.caption2)
+            Slider(value: binding(index: index, \.tolerance), in: 0 ... 2)
+
+            LabeledContent("Edge softness", value: String(format: "%.2f", chroma.softness))
+                .font(.caption2)
+            Slider(value: binding(index: index, \.softness), in: 0 ... 2)
+
+            LabeledContent("Spill removal", value: String(format: "%.2f", chroma.spill))
+                .font(.caption2)
+            Slider(value: binding(index: index, \.spill), in: 0 ... 1)
+
+            HStack {
+                Text(chroma.keyColor == nil ? "Colour: detected" : "Colour: chosen")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                if chroma.keyColor != nil {
+                    Button("Redetect") {
+                        design.assets[index].chroma?.setKeyColor(nil)
+                    }
+                    .buttonStyle(.link).font(.caption2)
+                }
+            }
+        }
+    }
+
+    private func binding(
+        index: Int,
+        _ path: WritableKeyPath<ChromaKey.Settings, Double>
+    ) -> Binding<Double> {
+        Binding(
+            get: { (design.assets[index].chroma ?? .default)[keyPath: path] },
+            set: { newValue in
+                var settings = design.assets[index].chroma ?? ChromaKey.Settings.default
+                settings[keyPath: path] = newValue
+                design.assets[index].chroma = settings
+            }
+        )
+    }
+
+    private func importAssets() {
+        guard let store else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = true
+        guard panel.runModal() == .OK else { return }
+
+        for url in panel.urls {
+            do {
+                let name = try store.importAsset(url, for: design.id)
+                let placed = store.assetURL(for: design.id, name: name)
+                design.assets.append(newAsset(named: name, at: placed))
+            } catch {
+                skinNote = "Could not add \(url.lastPathComponent): \(error)"
+            }
+        }
+    }
+
+    /// Placed in the middle of the widget frame, at a size that fits it, so a
+    /// picture lands somewhere visible rather than off-screen at full
+    /// resolution.
+    private func newAsset(named name: String, at url: URL) -> PlacedAsset {
+        let rect = design.widgetRect
+        var size = CGSize(width: rect.width * 0.5, height: rect.width * 0.5)
+        if let image = ImageLoader.load(at: url, maxPixelSize: 64) {
+            let aspect = CGFloat(image.height) / CGFloat(max(image.width, 1))
+            size = CGSize(width: rect.width * 0.5, height: rect.width * 0.5 * aspect)
+        }
+        return PlacedAsset(
+            fileName: name,
+            center: CGPoint(x: rect.midX, y: rect.midY),
+            size: size,
+            zIndex: (design.assets.map(\.zIndex).max() ?? 0) + 1
+        )
+    }
+
+    private func restack(_ asset: PlacedAsset, toFront: Bool) {
+        guard let index = design.assets.firstIndex(where: { $0.id == asset.id }) else { return }
+        let levels = design.assets.map(\.zIndex)
+        design.assets[index].zIndex = toFront
+            ? (levels.max() ?? 0) + 1
+            : (levels.min() ?? 0) - 1
+    }
+
+    /// Takes the file with it. An asset lives in the design, so leaving the
+    /// picture behind would grow the folder every time one is swapped out.
+    private func removeAsset(_ asset: PlacedAsset) {
+        design.assets.removeAll { $0.id == asset.id }
+        if selection == asset.id { selection = nil }
+        store?.removeAsset(named: asset.fileName, for: design.id)
+    }
+
     // MARK: - Sidebar
 
     private var sidebar: some View {
@@ -437,6 +681,8 @@ struct LayoutEditor: View {
                     showingCatalogue = false
                 }
             }
+
+            assetsSection
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
