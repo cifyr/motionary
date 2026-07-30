@@ -113,6 +113,10 @@ struct LoopingVideoView: UIViewRepresentable {
             stop()
 
             let player = AVQueuePlayer()
+            // Belt only. The preview has no audio track to begin with, and mute
+            // does nothing about the session an AVPlayer activates - that is
+            // AudioSessionPolicy's job, and it was the actual cause of the app
+            // silencing whatever the phone was already playing.
             player.isMuted = true
             // AVPlayerLooper repeats gaplessly; restarting on the
             // did-play-to-end notification visibly stutters at the wrap.
