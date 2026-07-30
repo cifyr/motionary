@@ -15,6 +15,9 @@ struct HomeView: View {
 
     @State private var selection: UUID? = ActiveDesign.identifier
 
+    /// Whatever there is to say right now, from either source.
+    private var message: String? { note ?? router.lastFailure }
+
     private var entries: [PrebuiltDesign.Entry] { PrebuiltDesign.entries }
     private var entry: PrebuiltDesign.Entry? { PrebuiltDesign.selected(id: selection) }
 
@@ -35,7 +38,15 @@ struct HomeView: View {
             // A tap that opens nothing has to say why. Rewriting this view
             // dropped the alert that used to report it, so a tile with no
             // launch route failed in complete silence.
-            if let note = note ?? router.lastFailure { Toast(text: note) }
+            if let message { Toast(text: message).transition(.opacity) }
+        }
+        // Cleared on its own. A message that stays forever stops being a
+        // message and becomes part of the picture.
+        .task(id: message) {
+            guard message != nil else { return }
+            try? await Task.sleep(for: .seconds(4))
+            note = nil
+            router.lastFailure = nil
         }
         .ignoresSafeArea()
         .statusBarHidden(entry != nil)
