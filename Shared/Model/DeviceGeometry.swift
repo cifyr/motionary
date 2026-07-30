@@ -89,13 +89,21 @@ struct DeviceModel: Identifiable, Hashable, Sendable {
     /// left edge in the top slot, at standard Display Zoom on iOS 27.
     ///
     /// The rendered frame was measured separately, and differently, because that
-    /// first measurement came out 4px narrow and 13px short. A Home Screen
-    /// screenshot differenced against the app's own full-screen render of the
-    /// same design puts the widget's content 2px left of the wallpaper's, dead
-    /// on vertically, with the displacement falling to zero outside columns 64
-    /// and 1141 and below row 1914. 1078 centred on 1206 begins at exactly 64,
-    /// so the two pixels are the width error halved - not an origin of its own.
-    /// The extra height lands entirely at the bottom; the slot's top is fixed.
+    /// first measurement came out 5px narrow and 13px short.
+    ///
+    /// The origin came from differencing a Home Screen screenshot against the
+    /// app's own full-screen render of the same design: the widget's content sat
+    /// 2px left of the wallpaper's and dead on vertically. The extent came from
+    /// the `EdgeLab` ring target on the device, whose outermost 1px ring lands on
+    /// the view's own bounds - rows 270 and 1914, columns 64 and 1142. Both agree
+    /// on the origin, and the rings are what the extent is taken from: the
+    /// outermost column carries the rim, so it correlates too poorly to be found
+    /// by differencing, which is what put an earlier reading a pixel short.
+    ///
+    /// So the widget grows 2px left, 3px right and 13px down of the cut frame. It
+    /// is not simply the cut frame re-centred - the left and right margins come
+    /// out 64 and 63 - and there is no known reason for that asymmetry, only the
+    /// measurement.
     static let iPhone17Pro = DeviceModel(
         id: "iphone17pro",
         name: "iPhone 17 Pro",
@@ -104,7 +112,7 @@ struct DeviceModel: Identifiable, Hashable, Sendable {
         widgetOrigin: CGPoint(x: 66, y: 270),
         widgetPixelSize: CGSize(width: 1074, height: 1632),
         widgetRenderedOrigin: CGPoint(x: 64, y: 270),
-        widgetRenderedPixelSize: CGSize(width: 1078, height: 1645),
+        widgetRenderedPixelSize: CGSize(width: 1079, height: 1645),
         widgetCornerRadius: 78
     )
 
