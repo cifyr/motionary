@@ -143,6 +143,88 @@ final class DesignStoreAssetTests: XCTestCase {
         store.removeAsset(named: "never-existed.png", for: designID)
     }
 
+    // MARK: - Duplicating
+
+    private func design(name: String = "Board") -> DesignDocument {
+        let json = """
+        {
+          "id":"\(designID.uuidString)",
+          "name":"\(name)","createdAt":0,"updatedAt":0,
+          "sourceVideoName":"source.mov",
+          "animationCrop":[[0,0],[100,100]]
+        }
+        """
+        // swiftlint:disable:next force_try
+        return try! JSONDecoder().decode(DesignDocument.self, from: Data(json.utf8))
+    }
+
+    func testDuplicatingCarriesTheClipAndThePictures() throws {
+        var original = design()
+        try Data("clip".utf8).write(to: store.folder(for: designID).appendingPathComponent("source.mov"))
+        let asset = try store.importAsset(try sourceFile(named: "sticker.png", bytes: "art"), for: designID)
+        original.assets = [PlacedAsset(
+            fileName: asset, center: .zero, size: CGSize(width: 10, height: 10)
+        )]
+        try store.save(original)
+
+        let copy = try store.duplicate(original)
+
+        XCTAssertNotEqual(copy.id, original.id)
+        XCTAssertEqual(copy.assets.map(\.fileName), [asset])
+        XCTAssertEqual(
+            try String(contentsOf: store.assetURL(for: copy.id, name: asset), encoding: .utf8),
+            "art",
+            "the copy did not get its own picture"
+        )
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: store.folder(for: copy.id).appendingPathComponent("source.mov").path
+        ))
+    }
+
+    /// Editing the copy's pictures must not reach back into the original.
+    func testTheCopyOwnsItsPicturesIndependently() throws {
+        var original = design()
+        let asset = try store.importAsset(try sourceFile(named: "sticker.png", bytes: "art"), for: designID)
+        original.assets = [PlacedAsset(
+            fileName: asset, center: .zero, size: CGSize(width: 10, height: 10)
+        )]
+        try store.save(original)
+
+        let copy = try store.duplicate(original)
+        store.removeAsset(named: asset, for: copy.id)
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: store.assetURL(for: designID, name: asset).path),
+            "removing the copy's picture deleted the original's"
+        )
+    }
+
+    /// A duplicate must not quietly add ~29MB of fonts to the next install.
+    func testACopyIsNeverStarred() throws {
+        var original = design()
+        original.isStarred = true
+        try store.save(original)
+
+        XCTAssertFalse(try store.duplicate(original).isStarred)
+    }
+
+    /// Build outputs belong to the id that produced them; carrying them over
+    /// would leave the copy claiming a build it does not have.
+    func testACopyDoesNotInheritTheBuild() throws {
+        let original = design()
+        try store.save(original)
+        try Data("{}".utf8).write(to: store.manifestURL(for: designID))
+
+        let copy = try store.duplicate(original)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.manifestURL(for: copy.id).path))
+    }
+
+    func testCopyNamesDoNotCollideWhenDuplicatingTwice() {
+        XCTAssertEqual(DesignStore.copyName(for: "Board"), "Board copy")
+        XCTAssertEqual(DesignStore.copyName(for: "Board copy"), "Board copy 2")
+        XCTAssertEqual(DesignStore.copyName(for: "Board copy 2"), "Board copy 3")
+    }
+
     func testAssetsLiveInsideTheDesignFolder() {
         XCTAssertTrue(
             store.assetsFolder(for: designID).path.hasPrefix(store.folder(for: designID).path),

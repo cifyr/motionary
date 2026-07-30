@@ -237,6 +237,10 @@ struct StudioView: View {
     @State private var log: [String] = []
     @State private var wallpaper: URL?
     @State private var saved: [DesignDocument] = []
+    /// The design being renamed, and the text field's working copy. Held apart
+    /// from `saved` so an abandoned rename changes nothing.
+    @State private var renaming: DesignDocument?
+    @State private var renamedTo = ""
     @State private var targeting = false
 
     @State private var projectRoot: URL? = ProjectLocator.find()
@@ -268,6 +272,24 @@ struct StudioView: View {
             refreshDevices()
             StudioPipeline.migrateLegacyDesigns()
             saved = StudioPipeline.saved()
+        }
+        .sheet(item: $renaming) { design in
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Rename design").font(.headline)
+                TextField("Name", text: $renamedTo)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 260)
+                    .onSubmit { commitRename() }
+                HStack {
+                    Spacer()
+                    Button("Cancel") { renaming = nil }.keyboardShortcut(.cancelAction)
+                    Button("Rename") { commitRename() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(renamedTo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding(20)
+            .onAppear { renamedTo = design.name }
         }
         .sheet(item: Binding(
             get: { prepared.map { EditorSheet(prepared: $0) } },
@@ -331,6 +353,9 @@ struct StudioView: View {
                         }
                         .contextMenu {
                             Button(design.isStarred ? "Unstar" : "Star") { toggleStar(design) }
+                            Button("Rename...") { renaming = design }
+                            Button("Duplicate") { duplicate(design) }
+                            Divider()
                             Button("Export...") { exportDesign(design) }
                             Button("Delete", role: .destructive) { delete(design) }
                         }
@@ -340,6 +365,37 @@ struct StudioView: View {
             .frame(maxHeight: 88)
         }
         .disabled(isBusy)
+    }
+
+    /// A copy is the safe way to try a variation: the design that already
+    /// builds stays exactly as it is.
+    private func duplicate(_ design: DesignDocument) {
+        guard let store = try? StudioPipeline.openStore() else { return }
+        do {
+            let copy = try store.duplicate(design)
+            saved = StudioPipeline.saved()
+            done = "Duplicated as \(copy.name). It carries the clip, the background and the pictures, but not the build."
+            failure = nil
+        } catch {
+            failure = "Could not duplicate \(design.name): \(error)"
+        }
+    }
+
+    private func commitRename() {
+        guard let design = renaming else { return }
+        let trimmed = renamedTo.trimmingCharacters(in: .whitespacesAndNewlines)
+        renaming = nil
+        guard !trimmed.isEmpty, trimmed != design.name else { return }
+        guard let store = try? StudioPipeline.openStore() else { return }
+
+        var updated = design
+        updated.name = trimmed
+        do {
+            try store.save(updated)
+            saved = StudioPipeline.saved()
+        } catch {
+            failure = "Could not rename \(design.name): \(error)"
+        }
     }
 
     private func toggleStar(_ design: DesignDocument) {

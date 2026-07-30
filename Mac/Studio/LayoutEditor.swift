@@ -27,6 +27,8 @@ struct LayoutEditor: View {
     @State private var skins: [SkinLibrary.Skin] = []
     @State private var background: CGImage?
     @State private var skinNote: String?
+    /// The asset whose key colour is being picked by clicking it.
+    @State private var pickingKeyFor: UUID?
 
     /// Points per screen pixel, so the canvas is the phone at a readable size.
     static let zoom: CGFloat = 0.62
@@ -362,6 +364,22 @@ struct LayoutEditor: View {
             }
         }
         .frame(width: width, height: height)
+        // Before the rotation on purpose: the tap then lands in the picture's
+        // own unrotated space, which maps straight onto its pixels.
+        .overlay {
+            if pickingKeyFor == asset.id {
+                Rectangle()
+                    .fill(.clear)
+                    .contentShape(Rectangle())
+                    .gesture(SpatialTapGesture().onEnded { value in
+                        pickKey(
+                            for: asset,
+                            at: value.location,
+                            in: CGSize(width: width, height: height)
+                        )
+                    })
+            }
+        }
         .rotationEffect(.degrees(asset.rotation))
         .opacity(asset.opacity)
         .overlay {
@@ -595,6 +613,14 @@ struct LayoutEditor: View {
                     .buttonStyle(.link).font(.caption2)
                 }
             }
+
+            let asset = design.assets[index]
+            Button(pickingKeyFor == asset.id ? "Click the backdrop..." : "Pick colour") {
+                pickingKeyFor = pickingKeyFor == asset.id ? nil : asset.id
+            }
+            .buttonStyle(.link)
+            .font(.caption2)
+            .help("Detection reads the border. Pick instead when the backdrop is not what surrounds the picture.")
         }
     }
 
@@ -646,6 +672,30 @@ struct LayoutEditor: View {
             size: size,
             zIndex: (design.assets.map(\.zIndex).max() ?? 0) + 1
         )
+    }
+
+    /// Samples the colour under a click and keys on that instead of the
+    /// detected border colour. Detection reads the border, which is wrong
+    /// whenever the backdrop is not what surrounds the picture.
+    private func pickKey(for asset: PlacedAsset, at point: CGPoint, in size: CGSize) {
+        guard let store,
+              let index = design.assets.firstIndex(where: { $0.id == asset.id }),
+              size.width > 0, size.height > 0
+        else { return }
+
+        let unitPoint = CGPoint(x: point.x / size.width, y: point.y / size.height)
+        guard let colour = AssetArtwork.sampleColor(
+            in: asset, designID: design.id, store: store, at: unitPoint
+        ) else {
+            skinNote = "Could not read that pixel - it may be fully transparent."
+            return
+        }
+
+        var settings = design.assets[index].chroma ?? ChromaKey.Settings.default
+        settings.enabled = true
+        settings.setKeyColor(colour)
+        design.assets[index].chroma = settings
+        pickingKeyFor = nil
     }
 
     private func restack(_ asset: PlacedAsset, toFront: Bool) {
