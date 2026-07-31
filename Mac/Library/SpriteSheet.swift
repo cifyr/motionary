@@ -301,34 +301,18 @@ enum SpriteSheet {
         // half the icons.
         discardStrays(&outside, width: width, height: height)
 
-        // Clear what the fill reached, and take the backdrop's colour cast out
-        // of what borders it - an antialiased edge is part icon, part
-        // backdrop, and left alone it reads as a coloured rim.
-        for point in 0 ..< width * height {
+        for point in 0 ..< width * height where outside[point] {
             let index = point * 4
-            if outside[point] {
-                pixels[index] = 0
-                pixels[index + 1] = 0
-                pixels[index + 2] = 0
-                pixels[index + 3] = 0
-                continue
-            }
-            let x = point % width
-            let y = point / width
-            let touchesOutside =
-                (x > 0 && outside[point - 1]) ||
-                (x < width - 1 && outside[point + 1]) ||
-                (y > 0 && outside[point - width]) ||
-                (y < height - 1 && outside[point + width])
-            guard touchesOutside else { continue }
-            // Only where the key's dominant channel is over-represented, so a
-            // genuinely green pixel of artwork is left as it is.
-            let green = Int(pixels[index + 1])
-            let others = max(Int(pixels[index]), Int(pixels[index + 2]))
-            if keyG > keyR, keyG > keyB, green > others {
-                pixels[index + 1] = UInt8(others)
-            }
+            pixels[index] = 0
+            pixels[index + 1] = 0
+            pixels[index + 2] = 0
+            pixels[index + 3] = 0
         }
+
+        unmix(
+            &pixels, width: width, height: height, outside: outside,
+            keyRed: keyR, keyGreen: keyG, keyBlue: keyB
+        )
 
         return pixels.withUnsafeMutableBytes { raw -> CGImage? in
             guard let context = CGContext(
@@ -341,6 +325,122 @@ enum SpriteSheet {
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             ) else { return nil }
             return context.makeImage()
+        }
+    }
+
+    /// How much of a pixel is backdrop rather than artwork, from 0 to 1.
+    ///
+    /// The flood fill answers yes or no, and an edge is neither: a pixel where
+    /// the icon meets the backdrop is a mixture of the two, and keeping it
+    /// whole leaves the backdrop's colour in it. That mixture is what shows up
+    /// as a rim around every plate.
+    ///
+    /// Measured as a difference key on chromaticity - how far the key's
+    /// dominant channel leads the other two, against how far it leads them in
+    /// the key itself. On chromaticity rather than raw values because the
+    /// shadow an icon casts onto the green is still the green, and at a third
+    /// of the brightness a raw comparison says it is not.
+    static func backdropFraction(
+        red: Int, green: Int, blue: Int,
+        keyRed: Int, keyGreen: Int, keyBlue: Int
+    ) -> Double {
+        let sum = Double(red + green + blue)
+        let keySum = Double(keyRed + keyGreen + keyBlue)
+        // Near-black carries no useful chromaticity: the ratios are one or two
+        // units of noise apart and any of the three can come out on top. The
+        // floor is low because the last of a rim is very dark - a (0,24,0) is
+        // still unmistakably the key, and a dozen of them read as a green line.
+        guard sum > 10, keySum > 24 else { return 0 }
+
+        let key = [Double(keyRed) / keySum, Double(keyGreen) / keySum, Double(keyBlue) / keySum]
+        guard let dominant = key.indices.max(by: { key[$0] < key[$1] }) else { return 0 }
+        let keyLead = key[dominant] - key.indices.filter { $0 != dominant }.map { key[$0] }.max()!
+        // A grey backdrop leads by nothing, and dividing by that would call
+        // every pixel in the picture backdrop.
+        guard keyLead > 0.05 else { return 0 }
+
+        let pixel = [Double(red) / sum, Double(green) / sum, Double(blue) / sum]
+        let lead = pixel[dominant] - pixel.indices.filter { $0 != dominant }.map { pixel[$0] }.max()!
+        return min(max(lead / keyLead, 0), 1)
+    }
+
+    /// Takes the backdrop back out of the pixels it is mixed into.
+    ///
+    /// Walks inwards from everything the fill cleared - and from the picture's
+    /// own edge, since a cell cut tight has its icon running to it - through
+    /// pixels that still carry some backdrop. Each one is recovered as what it
+    /// would have been over nothing: the mixture solved for the icon's own
+    /// colour, and the backdrop's share taken out of the alpha instead. That
+    /// is what turns a green rim into a soft edge.
+    ///
+    /// Bounded to a few pixels, because the artwork on these sheets is often
+    /// green itself: an unbounded walk would dissolve Spotify from its edge
+    /// inwards the moment its green touched the fill.
+    private static func unmix(
+        _ pixels: inout [UInt8], width: Int, height: Int, outside: [Bool],
+        keyRed: Int, keyGreen: Int, keyBlue: Int, reach: Int = 3
+    ) {
+        var depth = [Int](repeating: .max, count: width * height)
+        var queue: [Int] = []
+        for point in 0 ..< width * height where !outside[point] {
+            let x = point % width
+            let y = point / width
+            let borders = x == 0 || y == 0 || x == width - 1 || y == height - 1
+                || (x > 0 && outside[point - 1])
+                || (x < width - 1 && outside[point + 1])
+                || (y > 0 && outside[point - width])
+                || (y < height - 1 && outside[point + width])
+            if borders {
+                depth[point] = 1
+                queue.append(point)
+            }
+        }
+
+        var head = 0
+        while head < queue.count {
+            let point = queue[head]
+            head += 1
+            let index = point * 4
+            let fraction = backdropFraction(
+                red: Int(pixels[index]), green: Int(pixels[index + 1]), blue: Int(pixels[index + 2]),
+                keyRed: keyRed, keyGreen: keyGreen, keyBlue: keyBlue
+            )
+            // Clean artwork: nothing to take out, and nothing beyond it can be
+            // contaminated either, so the walk stops here.
+            guard fraction > 0.06 else { continue }
+
+            if fraction > 0.94 {
+                pixels[index] = 0
+                pixels[index + 1] = 0
+                pixels[index + 2] = 0
+                pixels[index + 3] = 0
+            } else {
+                let keep = 1 - fraction
+                // The mixture solved for the icon: what is left once the
+                // backdrop's share of the colour is subtracted.
+                let recovered = [
+                    (Double(pixels[index]) - fraction * Double(keyRed)) / keep,
+                    (Double(pixels[index + 1]) - fraction * Double(keyGreen)) / keep,
+                    (Double(pixels[index + 2]) - fraction * Double(keyBlue)) / keep,
+                ]
+                for channel in 0 ..< 3 {
+                    pixels[index + channel] = UInt8(min(max(recovered[channel], 0), 255))
+                }
+                pixels[index + 3] = UInt8(min(max(keep * Double(pixels[index + 3]), 0), 255))
+            }
+
+            guard depth[point] < reach else { continue }
+            let x = point % width
+            let y = point / width
+            for neighbour in [
+                x > 0 ? point - 1 : nil,
+                x < width - 1 ? point + 1 : nil,
+                y > 0 ? point - width : nil,
+                y < height - 1 ? point + width : nil,
+            ].compactMap({ $0 }) where !outside[neighbour] && depth[neighbour] == .max {
+                depth[neighbour] = depth[point] + 1
+                queue.append(neighbour)
+            }
         }
     }
 
