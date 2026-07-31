@@ -75,6 +75,21 @@ struct SkinLibrary {
         return added
     }
 
+    /// Imports artwork already in memory, under a name the caller chooses.
+    ///
+    /// The same keying, trimming, squaring and scaling a file import gets, so
+    /// a cell cut out of a sprite sheet ends up indistinguishable from the
+    /// same icon imported on its own.
+    func importing(_ image: CGImage, named name: String) throws {
+        let keyed = Self.keyingOut(image) ?? image
+        let trimmed = Self.trimmed(keyed) ?? keyed
+        let squared = Self.squared(trimmed) ?? trimmed
+        guard let scaled = Self.scaled(squared, to: Self.renderedSide) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        try Self.writePNG(scaled, to: url(for: name))
+    }
+
     /// A stable, readable filename, so importing the same file twice replaces
     /// rather than accumulates.
     private static func name(for url: URL) -> String {

@@ -45,6 +45,8 @@ struct LayoutEditor: View {
     @State private var skinSets: [SkinSet] = []
     /// The set collecting a new entry from the catalogue popover.
     @State private var addingEntryTo: UUID?
+    /// The sprite-sheet importer, which turns one picture into a whole set.
+    @State private var importingSheet = false
     /// The variant whose clip is standing in for the primary on the canvas.
     @State var previewedVariantID: UUID?
     @State private var variantPoster: CGImage?
@@ -220,6 +222,14 @@ struct LayoutEditor: View {
             statusBar
         }
         .background(StudioTheme.canvasWell)
+        .sheet(isPresented: $importingSheet) {
+            SpriteSheetImporter { imported in
+                skinSets.append(imported)
+                saveSkinSets()
+                reloadSkins()
+                skinNote = "Imported \(imported.name): \(imported.entries.count) app\(imported.entries.count == 1 ? "" : "s"). Apply it to a tile to offer the rest as swaps."
+            }
+        }
         // A fixed dark theme: the canvas is a phone screen, and a panel that
         // changed weight with the system appearance would change what the
         // artwork beside it looks like.
@@ -1031,6 +1041,9 @@ struct LayoutEditor: View {
             HStack {
                 StudioTheme.eyebrow("Skin sets").foregroundStyle(StudioTheme.textTertiary)
                 Spacer()
+                Button("Sheet...") { importingSheet = true }
+                    .buttonStyle(.link)
+                    .help("Cut a sprite sheet into a set, using a table of names")
                 Button("New set") {
                     skinSets.append(SkinSet(name: "Set \(skinSets.count + 1)"))
                     saveSkinSets()
