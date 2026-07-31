@@ -64,3 +64,33 @@ plain verbs, sentence case, name things by what the user controls.
   screen the same way a drag is.
 - Looks = skins + skin sets. Pictures = placed pictures. Clips = variants,
   with click-to-preview.
+
+## Decisions implemented (second pass, from the Claude Design mockup)
+
+Source: `Layout Editor.dc.html` in the "Motionary Studio layout editor" design
+project. Its own summary line is the thesis: *selection drives the inspector,
+libraries stay put, alignment is a button, not a guess.*
+
+- **Three panes under a toolbar, over a status bar.** Layers on the left,
+  canvas in the middle, inspector and libraries on the right.
+- **Layers** lists Scene, Tiles (each with its cell, or "off grid"), Pictures
+  and Clip with its variants. Selecting there selects on the canvas. The draw
+  order is fixed by the compositor, so the list finds things rather than
+  restacking them.
+- **A tile grid inside the widget frame**, `columns × rows` set in Scene,
+  default 4×2. New tiles fill the next free cell, left to right; a tile dragged
+  near a free cell snaps into it; "Snap to cell" puts a stray one back. Off
+  grid stays legal - the wallpaper carries anything crossing the frame.
+- **Alignment as toolbar buttons**: six edges, Space evenly, Make a row.
+  Several tiles align to the selection's own box, a lone tile to the widget
+  frame. `LayoutActions` is pure, so the rules are tested rather than eyeballed.
+- **Multi-select** with command-click; option-drag duplicates where dropped.
+- **Inspector** leads with EDITING and what is selected: for a tile, which app
+  it Opens, its Caption, typed X/Y/Size, and its Cell.
+- **Status bar** carries the device, the selection readout, the keyboard hints
+  and Snap to grid.
+
+Deferred: **Looks** (named tile styles - Glass/Ink/Paper/Chalk - saved and
+re-applied, editing one changing every tile using it). It is a third artwork
+concept beside skins and skin sets, and deserves its own pass rather than a
+half-migration.
