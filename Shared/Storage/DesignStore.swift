@@ -202,12 +202,67 @@ struct DesignStore {
         folder(for: id).appendingPathComponent("widget-backdrop.jpg")
     }
 
+    /// A variant's own backdrop: the clips differ inside the widget frame, and
+    /// that frame is exactly what the backdrop is.
+    func widgetBackdropURL(for id: UUID, variant: UUID) -> URL {
+        folder(for: id).appendingPathComponent("widget-backdrop-\(variant.uuidString.lowercased()).jpg")
+    }
+
     func previewVideoURL(for id: UUID) -> URL {
         folder(for: id).appendingPathComponent("preview.mp4")
     }
 
+    func previewVideoURL(for id: UUID, variant: UUID) -> URL {
+        folder(for: id).appendingPathComponent("preview-\(variant.uuidString.lowercased()).mp4")
+    }
+
     func sourceVideoURL(for design: DesignDocument) -> URL {
         folder(for: design.id).appendingPathComponent(design.sourceVideoName)
+    }
+
+    /// A variant clip lives beside the primary one, addressed by the filename
+    /// stored on the `ClipVariant`.
+    func variantClipURL(for id: UUID, name: String) -> URL {
+        folder(for: id).appendingPathComponent(name)
+    }
+
+    /// Copies a variant clip into the design, returning the filename to store.
+    /// Suffixed on collision like `importAsset`, because the design folder
+    /// already holds the primary clip and every build output.
+    @discardableResult
+    func importVariantClip(_ source: URL, for id: UUID) throws -> String {
+        try createFolder(for: id)
+        let destination = folder(for: id)
+
+        let base = source.deletingPathExtension().lastPathComponent
+        let ext = source.pathExtension
+        var name = ext.isEmpty ? base : "\(base).\(ext)"
+        var attempt = 2
+        while FileManager.default.fileExists(atPath: destination.appendingPathComponent(name).path) {
+            name = ext.isEmpty ? "\(base)-\(attempt)" : "\(base)-\(attempt).\(ext)"
+            attempt += 1
+        }
+
+        do {
+            try FileManager.default.copyItem(at: source, to: destination.appendingPathComponent(name))
+        } catch {
+            throw DesignStoreError.assetImportFailed(source: source, name: name, underlying: error)
+        }
+        return name
+    }
+
+    /// Removes a variant's clip. Missing is fine, like `removeAsset`: the
+    /// document is the record, and a half-deleted design must still open.
+    func removeVariantClip(named name: String, for id: UUID) {
+        let url = variantClipURL(for: id, name: name)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            Self.logger.error(
+                "could not remove variant clip \(name, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     func fontURL(for id: UUID, familyBase: String, lane: Int) -> URL {
@@ -287,6 +342,9 @@ struct DesignStore {
         let destination = folder(for: copy.id)
         var carried: [String] = [design.sourceVideoName]
         if let background = design.backgroundName { carried.append(background) }
+        // Variant clips are inputs like the primary one; without them the copy
+        // would list variants whose files exist only in the original.
+        carried += design.variants.map(\.sourceVideoName)
 
         for name in carried {
             let from = source.appendingPathComponent(name)

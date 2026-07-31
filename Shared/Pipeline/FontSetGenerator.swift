@@ -8,6 +8,7 @@ enum GeneratorError: Error, CustomStringConvertible {
     case loopDoesNotDivideCycle(loopFrames: Int, totalFrames: Int)
     case payloadTooLarge(estimated: Int, limit: Int)
     case laneWriteFailed(lane: Int, path: String, underlying: Error)
+    case variantFailed(name: String, underlying: Error)
 
     var description: String {
         switch self {
@@ -22,6 +23,8 @@ enum GeneratorError: Error, CustomStringConvertible {
             "generate: estimated payload \(estimated) bytes exceeds the \(limit)-byte hard limit; shrink the crop or lower quality"
         case .laneWriteFailed(let lane, let path, let underlying):
             "generate: could not write lane \(lane) to \(path): \(underlying)"
+        case .variantFailed(let name, let underlying):
+            "generate: variant \"\(name)\" failed: \(underlying)"
         }
     }
 }
@@ -39,6 +42,9 @@ struct FontSetGenerator {
         case encoding(progress: Double)
         case writingFonts(completed: Int, total: Int)
         case writingWallpaper
+        /// The stages after this repeat per variant; the name is what says
+        /// which clip the restarted progress belongs to.
+        case buildingVariant(name: String)
         case done(manifest: BuildManifest)
 
         var caption: String {
@@ -48,6 +54,7 @@ struct FontSetGenerator {
             case .encoding: "Encoding frames"
             case .writingFonts(let completed, let total): "Building fonts (\(completed)/\(total))"
             case .writingWallpaper: "Saving wallpaper"
+            case .buildingVariant(let name): "Building variant \"\(name)\""
             case .done: "Done"
             }
         }
@@ -60,6 +67,7 @@ struct FontSetGenerator {
             case .writingFonts(let completed, let total):
                 0.45 + (total > 0 ? Double(completed) / Double(total) : 0) * 0.50
             case .writingWallpaper: 0.97
+            case .buildingVariant: 0.02
             case .done: 1
             }
         }
@@ -112,13 +120,105 @@ struct FontSetGenerator {
 
         Self.logger.info("""
         build start design=\(design.id.uuidString, privacy: .public) \
-        lanes=\(spec.laneCount) loop=\(design.loopFrameCount) \
+        lanes=\(spec.laneCount) loop=\(design.loopFrameCount) variants=\(design.variants.count) \
         crop=\(String(describing: crop), privacy: .public) quality=\(design.jpegQuality)
         """)
 
+        // Once for the whole design, not per clip: every variant's lanes land
+        // in this folder, and clearing between clips would delete the set the
+        // previous one just wrote.
+        try store.clearFonts(for: design.id)
+
+        // The primary clip is the default variant, and the only one that
+        // writes the wallpapers - variants differ inside the widget frame, and
+        // the wallpaper is everything outside it.
+        let primary = try await buildClip(
+            design: design,
+            spec: spec,
+            crop: crop,
+            templateURL: templateURL,
+            source: store.sourceVideoURL(for: design),
+            familyBase: design.fontFamilyBase,
+            variantID: nil,
+            onStage: onStage
+        )
+
+        var builtVariants: [BuildManifest.VariantBuild] = []
+        for variant in design.variants {
+            onStage(.buildingVariant(name: variant.name))
+            do {
+                let result = try await buildClip(
+                    design: design,
+                    spec: spec,
+                    crop: crop,
+                    templateURL: templateURL,
+                    source: store.variantClipURL(for: design.id, name: variant.sourceVideoName),
+                    familyBase: design.fontFamilyBase(for: variant),
+                    variantID: variant.id,
+                    onStage: onStage
+                )
+                builtVariants.append(.init(
+                    id: variant.id,
+                    name: variant.name,
+                    fontFamilyBase: design.fontFamilyBase(for: variant),
+                    totalFontBytes: result.totalBytes
+                ))
+            } catch {
+                // Named, because five clips build in one run and "payload too
+                // large" without a name points at the wrong one four times
+                // out of five.
+                throw GeneratorError.variantFailed(name: variant.name, underlying: error)
+            }
+        }
+
+        let manifest = BuildManifest(
+            designID: design.id,
+            buildGeneration: design.buildGeneration + 1,
+            fontFamilyBase: design.fontFamilyBase,
+            laneCount: spec.laneCount,
+            framesPerSecond: spec.framesPerSecond,
+            loopFrameCount: design.loopFrameCount,
+            animationCrop: crop,
+            widgetRect: design.widgetRect,
+            screenSize: DeviceGeometry.screenPixelSize,
+            wallpaperName: "wallpaper.png",
+            totalFontBytes: primary.totalBytes,
+            builtAt: Date(),
+            backdropRect: primary.bakedBackdrop,
+            tiles: design.tiles,
+            clipVariants: builtVariants.isEmpty ? nil : builtVariants
+        )
+        try store.save(manifest)
+
+        Self.logger.info("""
+        build done design=\(design.id.uuidString, privacy: .public) \
+        bytes=\(primary.totalBytes) variants=\(builtVariants.count)
+        """)
+        onStage(.done(manifest: manifest))
+        return manifest
+    }
+
+    private struct ClipBuild {
+        let totalBytes: Int
+        let bakedBackdrop: CGRect?
+    }
+
+    /// One clip's full output: fonts, backdrop, preview - and for the primary
+    /// clip only, the wallpapers. Everything positional is the design's, so
+    /// every variant lands on exactly the pixels the layout was authored on.
+    private func buildClip(
+        design: DesignDocument,
+        spec: TimerFontSpec,
+        crop: CGRect,
+        templateURL: URL,
+        source: URL,
+        familyBase: String,
+        variantID: UUID?,
+        onStage: @Sendable @escaping (Stage) -> Void
+    ) async throws -> ClipBuild {
         onStage(.decoding(progress: 0))
         let extractor = MediaFrameExtractor(
-            url: store.sourceVideoURL(for: design),
+            url: source,
             transform: design.mediaTransform,
             background: design.backgroundName.flatMap {
                 ImageLoader.load(
@@ -163,15 +263,14 @@ struct FontSetGenerator {
             factory: SVGGlyphFactory(cropRect: crop, screenSize: DeviceGeometry.screenPixelSize)
         )
 
-        try store.clearFonts(for: design.id)
         var totalBytes = 0
         for lane in 0 ..< spec.laneCount {
             onStage(.writingFonts(completed: lane, total: spec.laneCount))
-            let url = store.fontURL(for: design.id, familyBase: design.fontFamilyBase, lane: lane)
+            let url = store.fontURL(for: design.id, familyBase: familyBase, lane: lane)
             do {
                 let data = try builder.font(
                     lane: lane,
-                    familyBase: design.fontFamilyBase,
+                    familyBase: familyBase,
                     encodedFrames: encodedFrames
                 )
                 try data.write(to: url, options: DesignStore.writingOptions)
@@ -184,36 +283,38 @@ struct FontSetGenerator {
         }
         onStage(.writingFonts(completed: spec.laneCount, total: spec.laneCount))
 
-        onStage(.writingWallpaper)
-        // The wallpaper carries the tiles; the widget backdrop below does not.
-        // The widget draws its own live tiles, and only inside its frame - so a
-        // tile crossing that edge is completed by the wallpaper behind it, and
-        // baking them into the backdrop too would draw those halves twice.
-        let poster = await WallpaperComposer.compose(
-            frame: frames[0],
-            tiles: design.tiles,
-            assets: design.assets,
-            screenSize: DeviceGeometry.screenPixelSize,
-            artwork: tileArtwork,
-            assetArtwork: assetArtwork
-        )
-        let wallpaper = try FrameEncoder.pngData(poster)
-        try wallpaper.write(to: store.wallpaperURL(for: design.id), options: DesignStore.writingOptions)
+        if variantID == nil {
+            onStage(.writingWallpaper)
+            // The wallpaper carries the tiles; the widget backdrop below does not.
+            // The widget draws its own live tiles, and only inside its frame - so a
+            // tile crossing that edge is completed by the wallpaper behind it, and
+            // baking them into the backdrop too would draw those halves twice.
+            let poster = await WallpaperComposer.compose(
+                frame: frames[0],
+                tiles: design.tiles,
+                assets: design.assets,
+                screenSize: DeviceGeometry.screenPixelSize,
+                artwork: tileArtwork,
+                assetArtwork: assetArtwork
+            )
+            let wallpaper = try FrameEncoder.pngData(poster)
+            try wallpaper.write(to: store.wallpaperURL(for: design.id), options: DesignStore.writingOptions)
 
-        // The same picture without the tiles, for the phone to bake its own
-        // onto: which app occupies a slot is chosen there, and a wallpaper
-        // baked with the authored occupants would continue the wrong icon past
-        // the widget's edge after a swap. Assets stay baked - they are not
-        // slot-dependent, and their source files never ship.
-        let plain = await WallpaperComposer.compose(
-            frame: frames[0],
-            tiles: [],
-            assets: design.assets,
-            screenSize: DeviceGeometry.screenPixelSize,
-            assetArtwork: assetArtwork
-        )
-        try FrameEncoder.pngData(plain)
-            .write(to: store.plainWallpaperURL(for: design.id), options: DesignStore.writingOptions)
+            // The same picture without the tiles, for the phone to bake its own
+            // onto: which app occupies a slot is chosen there, and a wallpaper
+            // baked with the authored occupants would continue the wrong icon past
+            // the widget's edge after a swap. Assets stay baked - they are not
+            // slot-dependent, and their source files never ship.
+            let plain = await WallpaperComposer.compose(
+                frame: frames[0],
+                tiles: [],
+                assets: design.assets,
+                screenSize: DeviceGeometry.screenPixelSize,
+                assetArtwork: assetArtwork
+            )
+            try FrameEncoder.pngData(plain)
+                .write(to: store.plainWallpaperURL(for: design.id), options: DesignStore.writingOptions)
+        }
 
         // The full screen costs about 12.6MB decompressed and the widget only
         // ever shows its own frame. On this phone the extension peaked at
@@ -257,7 +358,9 @@ struct FontSetGenerator {
             // 3, for about 130KB.
             let data = try FrameEncoder.jpegData(corrected, quality: 0.95)
                 ?? FrameEncoder.pngData(corrected)
-            try data.write(to: store.widgetBackdropURL(for: design.id), options: DesignStore.writingOptions)
+            let destination = variantID.map { store.widgetBackdropURL(for: design.id, variant: $0) }
+                ?? store.widgetBackdropURL(for: design.id)
+            try data.write(to: destination, options: DesignStore.writingOptions)
             bakedBackdrop = backdropRect
             Self.logger.info("""
             widget backdrop \(Int(backdropRect.width))x\(Int(backdropRect.height)), \
@@ -272,31 +375,16 @@ struct FontSetGenerator {
         try await PreviewVideoWriter(
             size: DeviceGeometry.screenPixelSize,
             framesPerSecond: spec.framesPerSecond
-        ).write(frames: frames, to: store.previewVideoURL(for: design.id))
-
-        let manifest = BuildManifest(
-            designID: design.id,
-            buildGeneration: design.buildGeneration + 1,
-            fontFamilyBase: design.fontFamilyBase,
-            laneCount: spec.laneCount,
-            framesPerSecond: spec.framesPerSecond,
-            loopFrameCount: design.loopFrameCount,
-            animationCrop: crop,
-            widgetRect: design.widgetRect,
-            screenSize: DeviceGeometry.screenPixelSize,
-            wallpaperName: "wallpaper.png",
-            totalFontBytes: totalBytes,
-            builtAt: Date(),
-            backdropRect: bakedBackdrop,
-            tiles: design.tiles
+        ).write(
+            frames: frames,
+            to: variantID.map { store.previewVideoURL(for: design.id, variant: $0) }
+                ?? store.previewVideoURL(for: design.id)
         )
-        try store.save(manifest)
 
         Self.logger.info("""
-        build done design=\(design.id.uuidString, privacy: .public) \
+        clip done family=\(familyBase, privacy: .public) \
         bytes=\(totalBytes) estimated=\(budget.estimatedTotalBytes)
         """)
-        onStage(.done(manifest: manifest))
-        return manifest
+        return ClipBuild(totalBytes: totalBytes, bakedBackdrop: bakedBackdrop)
     }
 }

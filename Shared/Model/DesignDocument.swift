@@ -190,6 +190,26 @@ struct PlacedAsset: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+/// An alternative clip for the same design - the same layout, the same crop,
+/// a different animated part.
+///
+/// Like a game shipping five idle animations: the composition is settled once
+/// and each variant only changes what plays inside the animated area. Every
+/// variant costs a full lane-font set in the install, so the list is authored
+/// deliberately rather than derived.
+struct ClipVariant: Codable, Equatable, Identifiable, Sendable {
+    var id: UUID = UUID()
+    var name: String
+    /// Filename inside the design's folder, alongside the primary clip.
+    var sourceVideoName: String
+
+    init(id: UUID = UUID(), name: String, sourceVideoName: String) {
+        self.id = id
+        self.name = name
+        self.sourceVideoName = sourceVideoName
+    }
+}
+
 /// Everything needed to rebuild and render a design.
 struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     var id: UUID = UUID()
@@ -232,6 +252,9 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     var tiles: [PlacedTile] = []
     /// Decoration placed on the composition, drawn beneath the tiles.
     var assets: [PlacedAsset] = []
+    /// Alternative clips for the animated part. The design's own clip is the
+    /// default; the phone chooses among all of them after install.
+    var variants: [ClipVariant] = []
     var snapEnabled: Bool = true
 
     /// A chosen background image, by filename inside the design's folder.
@@ -316,6 +339,13 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         "MFont\(id.uuidString.prefix(8).lowercased())L"
     }
 
+    /// A variant's font family, distinct per variant for the same reason the
+    /// design's is per design: every set has to coexist in one bundle.
+    /// Lowercase, so the `v` can never read as the `L` the lane number follows.
+    func fontFamilyBase(for variant: ClipVariant) -> String {
+        "MFont\(id.uuidString.prefix(8).lowercased())v\(variant.id.uuidString.prefix(8).lowercased())L"
+    }
+
     static func new(name: String, sourceVideoName: String) -> DesignDocument {
         let now = Date()
         return DesignDocument(
@@ -350,6 +380,7 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         animationCrop = try container.decode(CGRect.self, forKey: .animationCrop)
         tiles = try container.decodeIfPresent([PlacedTile].self, forKey: .tiles) ?? []
         assets = try container.decodeIfPresent([PlacedAsset].self, forKey: .assets) ?? []
+        variants = try container.decodeIfPresent([ClipVariant].self, forKey: .variants) ?? []
         snapEnabled = try container.decodeIfPresent(Bool.self, forKey: .snapEnabled) ?? true
         backgroundName = try container.decodeIfPresent(String.self, forKey: .backgroundName)
         widgetCornerRadius = try container.decodeIfPresent(CGFloat.self, forKey: .widgetCornerRadius)
@@ -408,6 +439,21 @@ struct BuildManifest: Codable, Equatable, Sendable {
     var tiles: [PlacedTile]?
 
     var placedTiles: [PlacedTile] { tiles ?? [] }
+
+    /// What one built variant amounts to at render time. Everything else -
+    /// crop, lanes, frame rate, loop, tiles - is the design's, shared.
+    struct VariantBuild: Codable, Equatable, Identifiable, Sendable {
+        var id: UUID
+        var name: String
+        var fontFamilyBase: String
+        var totalFontBytes: Int
+    }
+
+    /// The built alternative clips, in the order they were authored. Optional
+    /// for the same decoding reason `tiles` is.
+    var clipVariants: [VariantBuild]?
+
+    var builtVariants: [VariantBuild] { clipVariants ?? [] }
 
     var spec: TimerFontSpec {
         TimerFontSpec(laneCount: laneCount, framesPerSecond: framesPerSecond)

@@ -50,6 +50,21 @@ enum PrebuiltDesign {
         var plainWallpaperURL: URL? { PrebuiltDesign.resource(named: resource("wallpaper-plain"), extension: "png") }
         var previewURL: URL? { PrebuiltDesign.resource(named: resource("preview"), extension: "mp4") }
 
+        /// A clip variant's own backdrop and preview, addressed by variant id.
+        func backdropURL(variant: UUID) -> URL? {
+            PrebuiltDesign.resource(
+                named: resource("backdrop-\(variant.uuidString.lowercased())"),
+                extension: "jpg"
+            )
+        }
+
+        func previewURL(variant: UUID) -> URL? {
+            PrebuiltDesign.resource(
+                named: resource("preview-\(variant.uuidString.lowercased())"),
+                extension: "mp4"
+            )
+        }
+
         var manifest: BuildManifest? {
             guard let url = PrebuiltDesign.resource(named: manifestName, extension: "json"),
                   let data = try? Data(contentsOf: url)

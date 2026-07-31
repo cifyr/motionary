@@ -13,12 +13,31 @@ struct SlotSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     /// Working copy of the stored choices, so the rows update as menus change.
     @State private var choices: [String: String] = [:]
+    /// nil is the primary clip, mirroring `VariantChoice`.
+    @State private var variantID: UUID?
 
     private var tiles: [PlacedTile] { manifest.placedTiles }
 
     var body: some View {
         NavigationStack {
             List {
+                if !manifest.builtVariants.isEmpty {
+                    Section {
+                        Picker("Animation", selection: variantBinding) {
+                            Text("Standard").tag(UUID?.none)
+                            ForEach(manifest.builtVariants) { variant in
+                                Text(variant.name).tag(UUID?.some(variant.id))
+                            }
+                        }
+                        .pickerStyle(.inline)
+                        .labelsHidden()
+                    } header: {
+                        Text("Animation")
+                    } footer: {
+                        Text("The same design with a different clip in the animated area.")
+                    }
+                }
+
                 Section {
                     ForEach(tiles) { tile in
                         slotRow(tile)
@@ -40,7 +59,7 @@ struct SlotSettingsView: View {
                     }
                 }
             }
-            .navigationTitle("App slots")
+            .navigationTitle("Design options")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -49,7 +68,24 @@ struct SlotSettingsView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .onAppear { choices = SlotChoices.stored(designID: manifest.designID) }
+        .onAppear {
+            choices = SlotChoices.stored(designID: manifest.designID)
+            // Validated against this build, so a stale stored id shows as the
+            // Standard row it will actually draw as.
+            variantID = VariantChoice.resolved(in: manifest)?.id
+        }
+    }
+
+    private var variantBinding: Binding<UUID?> {
+        Binding(
+            get: { variantID },
+            set: { id in
+                variantID = id
+                VariantChoice.set(id, designID: manifest.designID)
+                WidgetCenterBridge.reloadAll()
+                onChange()
+            }
+        )
     }
 
     private func slotRow(_ tile: PlacedTile) -> some View {
