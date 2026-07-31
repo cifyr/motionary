@@ -126,9 +126,26 @@ struct BundleWriter {
             try copy(design.folder.appendingPathComponent("manifest.json"), to: "prebuilt-\(key)-manifest.json")
             try copy(design.folder.appendingPathComponent("widget-backdrop.jpg"), to: "prebuilt-\(key)-backdrop.jpg")
             try copy(design.folder.appendingPathComponent("wallpaper.png"), to: "prebuilt-\(key)-wallpaper.png")
+            // Tile-free, so the phone can bake whichever occupants its slots
+            // hold at export time. `copy` skips it for designs built before it
+            // existed, and the phone falls back to the pre-baked wallpaper.
+            try copy(design.folder.appendingPathComponent("wallpaper-plain.png"), to: "prebuilt-\(key)-wallpaper-plain.png")
             // The app plays this rather than drawing the lane fonts: only the
             // widget renderer advances timer text.
             try copy(design.folder.appendingPathComponent("preview.mp4"), to: "prebuilt-\(key)-preview.mp4")
+            // Each variant's backdrop and preview; its fonts are already in
+            // the lane glob above, since every clip writes into one folder.
+            for variant in design.manifest.builtVariants {
+                let vid = variant.id.uuidString.lowercased()
+                try copy(
+                    design.folder.appendingPathComponent("widget-backdrop-\(vid).jpg"),
+                    to: "prebuilt-\(key)-backdrop-\(vid).jpg"
+                )
+                try copy(
+                    design.folder.appendingPathComponent("preview-\(vid).mp4"),
+                    to: "prebuilt-\(key)-preview-\(vid).mp4"
+                )
+            }
             try installIcons(manifest: design.manifest, from: iconsFolder)
         }
 
@@ -168,6 +185,19 @@ struct BundleWriter {
         let manager = FileManager.default
         let artwork = TileArtwork(iconsFolder: iconsFolder)
         for tile in manifest.placedTiles {
+            // Alternates first: they cannot stop the authored icon shipping.
+            // Only skinned ones have a file at all - the rest draw their
+            // catalogue SF Symbol on the phone, exactly like a missing icon.
+            for alternate in tile.alternates {
+                guard let skin = alternate.skin, let rendered = artwork.url(forSkin: skin) else { continue }
+                let name = PrebuiltDesign.iconResource(
+                    tileID: tile.id,
+                    appID: alternate.appID,
+                    authoredAppID: tile.appID
+                )
+                try manager.copyItem(at: rendered, to: resources.appendingPathComponent("\(name).png"))
+            }
+
             guard let rendered = artwork.url(for: tile) else {
                 // Not fatal: the tile falls back to its catalogue SF Symbol,
                 // which is a worse icon rather than a missing one.

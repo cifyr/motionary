@@ -14,6 +14,10 @@ struct HomeView: View {
     @StateObject private var icons = IconImageLoader(store: try? DesignStore())
 
     @State private var selection: UUID? = ActiveDesign.identifier
+    @State private var choosingSlots = false
+    /// Bumped by the slots sheet so the composition re-reads the choices; the
+    /// store itself is UserDefaults, which SwiftUI does not observe.
+    @State private var slotsEdition = 0
 
     /// Whatever there is to say right now, from either source.
     private var message: String? { note ?? router.lastFailure }
@@ -26,8 +30,10 @@ struct HomeView: View {
             Color.black.ignoresSafeArea()
 
             if let entry, let manifest = entry.manifest {
+                // Identity includes the chosen variant so picking another one
+                // rebuilds the player rather than looping the old clip.
                 composition(entry: entry, manifest: manifest)
-                    .id(entry.id)
+                    .id("\(entry.id.uuidString)-\(VariantChoice.resolved(in: manifest)?.id.uuidString ?? "primary")")
             } else {
                 EmptyDesignView()
             }
@@ -35,6 +41,11 @@ struct HomeView: View {
             if entries.count > 1 { PageDots(count: entries.count, index: index) }
 
             SaveButton(saving: saving) { save() }
+            // Anything to choose at all: slot occupants, or a clip variant.
+            if let manifest = entry?.manifest,
+               !manifest.placedTiles.isEmpty || !manifest.builtVariants.isEmpty {
+                SlotsButton { choosingSlots = true }
+            }
             // A tap that opens nothing has to say why. Rewriting this view
             // dropped the alert that used to report it, so a tile with no
             // launch route failed in complete silence.
@@ -51,6 +62,11 @@ struct HomeView: View {
         .ignoresSafeArea()
         .statusBarHidden(entry != nil)
         .persistentSystemOverlays(.hidden)
+        .sheet(isPresented: $choosingSlots) {
+            if let entry, let manifest = entry.manifest {
+                SlotSettingsView(manifest: manifest) { slotsEdition += 1 }
+            }
+        }
         // A swipe rather than any chrome: the whole point of this screen is to
         // be the Home Screen, and a switcher on top of it would spoil that.
         .gesture(
@@ -80,13 +96,28 @@ struct HomeView: View {
 
     private func composition(entry: PrebuiltDesign.Entry, manifest: BuildManifest) -> some View {
         let spec = TimerFontSpec(laneCount: manifest.laneCount, framesPerSecond: manifest.framesPerSecond)
-        let loop = manifest.loopFrameCount
+        // The same slot choices the widget applies, so the app never shows a
+        // different set of apps than the Home Screen it imitates. slotsEdition
+        // is what makes this line re-run after the sheet writes a choice.
+        let _ = slotsEdition
+        let authored = Dictionary(
+            manifest.placedTiles.map { ($0.id, $0.appID) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        // The chosen clip variant's preview; the wallpaper stays the design's,
+        // because variants only differ inside the widget frame. The loop is
+        // the variant's own - lengths need not match across variants.
+        let variant = VariantChoice.resolved(in: manifest)
+        let loop = variant?.loopFrameCount ?? manifest.loopFrameCount
         return LoopingCompositionView(
             screenSize: manifest.screenSize,
             viewport: CGRect(origin: .zero, size: manifest.screenSize),
-            tiles: manifest.placedTiles,
-            videoURL: entry.previewURL,
-            wallpaper: entry.wallpaperURL
+            tiles: SlotChoices.apply(to: manifest.placedTiles, designID: manifest.designID),
+            videoURL: variant.flatMap { entry.previewURL(variant: $0.id) } ?? entry.previewURL,
+            // The tile-free variant when the build has one: the live tiles
+            // drawn over it are the occupants the phone chose, and a swapped
+            // one over its baked authored self would ghost through the plate.
+            wallpaper: (entry.plainWallpaperURL ?? entry.wallpaperURL)
                 .flatMap { UIImage(contentsOfFile: $0.path) }
                 .map { Image(uiImage: $0) },
             scaleMode: .device,
@@ -101,7 +132,11 @@ struct HomeView: View {
                 TileView(
                     tile: tile,
                     side: side,
-                    iconImage: PrebuiltDesign.iconURL(tileID: tile.id)
+                    iconImage: PrebuiltDesign.iconURL(
+                        tileID: tile.id,
+                        appID: tile.appID,
+                        authoredAppID: authored[tile.id] ?? tile.appID
+                    )
                         .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(side * 3)) }
                         .map { Image(decorative: $0, scale: 1) }
                         ?? icons.image(for: tile)
@@ -114,14 +149,14 @@ struct HomeView: View {
     }
 
     private func save() {
-        guard let url = entry?.wallpaperURL else {
+        guard let entry, let manifest = entry.manifest else {
             note = "This build has no wallpaper in it."
             return
         }
         saving = true
         Task {
             do {
-                try await WallpaperExporter.saveToPhotos(url: url)
+                try await export(entry: entry, manifest: manifest)
                 await MainActor.run {
                     saving = false
                     note = "Saved to Photos. Set it as your wallpaper, then place the widget over it."
@@ -136,6 +171,47 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    /// The wallpaper with the slots as they are right now.
+    ///
+    /// The shipped wallpaper was baked with the authored occupants, so after a
+    /// swap it would continue the wrong icon past the widget's edge - which is
+    /// the whole reason tiles are baked into it. So the phone bakes the
+    /// effective tiles onto the tile-free variant itself. Designs built before
+    /// that variant shipped fall back to the pre-baked file.
+    private func export(entry: PrebuiltDesign.Entry, manifest: BuildManifest) async throws {
+        let longest = Int(max(manifest.screenSize.width, manifest.screenSize.height))
+        guard let plainURL = entry.plainWallpaperURL,
+              let base = ImageLoader.load(at: plainURL, maxPixelSize: longest)
+        else {
+            guard let url = entry.wallpaperURL else {
+                throw ExportError.wallpaperMissing(path: "prebuilt wallpaper for \(entry.name)")
+            }
+            try await WallpaperExporter.saveToPhotos(url: url)
+            return
+        }
+
+        let authored = Dictionary(
+            manifest.placedTiles.map { ($0.id, $0.appID) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let composed = await WallpaperComposer.compose(
+            frame: base,
+            tiles: SlotChoices.apply(to: manifest.placedTiles, designID: manifest.designID),
+            // Already baked into the plain wallpaper; they are not slot-dependent.
+            assets: [],
+            screenSize: manifest.screenSize,
+            artwork: { tile in
+                PrebuiltDesign.iconURL(
+                    tileID: tile.id,
+                    appID: tile.appID,
+                    authoredAppID: authored[tile.id] ?? tile.appID
+                )
+                .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(tile.size)) }
+            }
+        )
+        try await WallpaperExporter.saveToPhotos(image: composed)
     }
 }
 
@@ -192,6 +268,32 @@ private struct SaveButton: View {
             }
         }
         .padding(.trailing, 20)
+        .padding(.bottom, 34)
+    }
+}
+
+/// Opens the slot settings, mirroring the save button on the other corner.
+private struct SlotsButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Button(action: action) {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 46, height: 46)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
+                        .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
+                }
+                .accessibilityLabel("Design options: choose the animation and which apps fill the slots")
+                Spacer()
+            }
+        }
+        .padding(.leading, 20)
         .padding(.bottom, 34)
     }
 }

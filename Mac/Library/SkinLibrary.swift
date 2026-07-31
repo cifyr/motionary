@@ -111,60 +111,14 @@ struct SkinLibrary {
     /// Only saturated backgrounds are keyed. White and parchment paddings are
     /// the trimmer's job, and keying those would eat any pale part of the
     /// picture - the corner colour decides which case this is.
-    static func keyingOut(_ image: CGImage, inner: Int = 70, outer: Int = 120) -> CGImage? {
-        guard var (data, width, height) = pixels(image), width > 2, height > 2 else { return nil }
-
-        func at(_ index: Int) -> (Int, Int, Int) {
-            (Int(data[index]), Int(data[index + 1]), Int(data[index + 2]))
-        }
-        let key = at(0)
-        // A deliberate key colour is vivid; a paper background is not.
-        guard max(key.0, key.1, key.2) - min(key.0, key.1, key.2) > 80 else { return nil }
-        // Which channel the key colour is made of, for de-spilling below.
-        let keyChannel = [key.0, key.1, key.2].enumerated().max { $0.element < $1.element }?.offset ?? 1
-
-        var keyed = 0
-        for index in stride(from: 0, to: data.count, by: 4) {
-            let pixel = at(index)
-            let distance = max(abs(pixel.0 - key.0), abs(pixel.1 - key.1), abs(pixel.2 - key.2))
-            if distance <= inner {
-                data[index + 3] = 0
-                keyed += 1
-            } else if distance < outer {
-                // Feathered, so the cut edge is not a staircase.
-                let fraction = Double(distance - inner) / Double(outer - inner)
-                data[index + 3] = UInt8(Double(data[index + 3]) * fraction)
-
-                // De-spilled as well. A key colour bleeds onto the artwork's
-                // edge, and left alone it shows as a green fringe around the
-                // whole picture - visible on the first one imported. The
-                // dominant key channel is pulled back towards the other two,
-                // which removes the tint without touching the artwork's own
-                // colour anywhere the key is not dominant.
-                let channels = [Int(data[index]), Int(data[index + 1]), Int(data[index + 2])]
-                let dominant = keyChannel
-                let others = (0 ..< 3).filter { $0 != dominant }
-                let reference = (channels[others[0]] + channels[others[1]]) / 2
-                if channels[dominant] > reference {
-                    let pulled = Double(channels[dominant]) * fraction + Double(reference) * (1 - fraction)
-                    data[index + dominant] = UInt8(min(255, max(0, pulled)))
-                }
-            }
-        }
-        // Nothing keyed means the corner was vivid but unique - a picture that
-        // happens to start on a bright pixel, not a background.
-        guard keyed > (width * height) / 50 else { return nil }
-
-        guard let context = CGContext(
-            data: &data,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: width * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-        return context.makeImage()
+    /// Import-time keying for skins, which get no inspector of their own.
+    ///
+    /// The work is `ChromaKey`'s. This keyer used to read its key from pixel 0
+    /// and measure across R, G and B together, which meant a lit backdrop only
+    /// keyed where it matched that one corner, and every antialiased edge
+    /// stayed opaque with a green rim. See Shared/Pipeline/ChromaKey.swift.
+    static func keyingOut(_ image: CGImage) -> CGImage? {
+        ChromaKey.apply(to: image, settings: .default)
     }
 
     /// Crops away a uniform border, whether it is transparent or a flat colour.

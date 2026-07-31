@@ -1,6 +1,17 @@
 import CoreGraphics
 import Foundation
 
+enum StudioPipelineError: Error, CustomStringConvertible {
+    case noProjectFolder
+
+    var description: String {
+        switch self {
+        case .noProjectFolder:
+            "no Motionary project folder chosen; building writes into the Xcode project, so pick the folder holding project.yml"
+        }
+    }
+}
+
 /// Turns a video or GIF into a built design, natively.
 ///
 /// The old route ran this same code inside a booted simulator and waited for a
@@ -53,7 +64,13 @@ struct StudioPipeline: Sendable {
         var wallpaperURL: URL { folder.appendingPathComponent("wallpaper.png") }
     }
 
-    let projectRoot: URL
+    /// Optional, because only building needs it.
+    ///
+    /// Editing a layout reads the design and its clip out of Application
+    /// Support; the Xcode project is where a *build* is written. Requiring it
+    /// to open the editor meant a studio that could not find project.yml
+    /// silently refused to open anything, which reads as clicking not working.
+    let projectRoot: URL?
     let model: DeviceModel
 
     /// Designs live in Application Support, not a temp directory.
@@ -115,7 +132,9 @@ struct StudioPipeline: Sendable {
                 if !manager.fileExists(atPath: destination.path) {
                     try manager.copyItem(at: source, to: destination)
                 }
-                try store.save(design)
+                // Not touched: carrying a design across stores is not editing
+                // it, and the library sorts on updatedAt.
+                try store.save(design, touch: false)
                 moved += 1
             } catch {
                 continue
@@ -163,8 +182,14 @@ struct StudioPipeline: Sendable {
         // Named for what the bytes are rather than what they were called: the
         // extractor picks its decoder from the extension.
         let isGIF = data.starts(with: Data("GIF8".utf8))
+        // Numbered against the library, because the same clip gets dropped
+        // repeatedly while a layout is worked out and rows that read
+        // identically cannot be told apart afterwards.
         var design = DesignDocument.new(
-            name: source.deletingPathExtension().lastPathComponent,
+            name: DesignStore.uniqueName(
+                DesignStore.suggestedName(for: source.deletingPathExtension().lastPathComponent),
+                among: store.loadAll().map(\.name)
+            ),
             sourceVideoName: isGIF ? "source.gif" : "source.mov"
         )
         try store.createFolder(for: design.id)
@@ -256,9 +281,13 @@ struct StudioPipeline: Sendable {
         // The same artwork the bundling step installs, so the icons baked into
         // the wallpaper line up with the live ones the widget draws over them.
         let artwork = TileArtwork(iconsFolder: Self.iconsFolder(for: store))
+        // Keyed on the way into the bake, from the design's own Assets folder,
+        // so what ships is what the editor showed.
+        let designID = design.id
         let manifest = try await FontSetGenerator(
             store: store,
-            tileArtwork: { artwork.image(for: $0) }
+            tileArtwork: { artwork.image(for: $0) },
+            assetArtwork: { AssetArtwork.image(for: $0, designID: designID, store: store) }
         ).build(design: design) { stage in
             onStage(.generating(stage))
         }
@@ -322,6 +351,7 @@ struct StudioPipeline: Sendable {
             ))
         }
 
+        guard let projectRoot else { throw StudioPipelineError.noProjectFolder }
         try BundleWriter(projectRoot: projectRoot).install(
             bundled,
             iconsFolder: Self.iconsFolder(for: prepared.store)

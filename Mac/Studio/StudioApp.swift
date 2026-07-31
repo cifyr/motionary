@@ -28,7 +28,9 @@ struct MotionaryStudioApp: App {
         Window("Motionary Studio", id: "studio") {
             StudioView()
         }
-        .windowResizability(.contentSize)
+        // Was .contentSize, which pinned the window to a fixed-width column.
+        // The split view needs to be draggable to be worth having.
+        .windowResizability(.contentMinSize)
     }
 }
 
@@ -237,18 +239,100 @@ struct StudioView: View {
     @State private var log: [String] = []
     @State private var wallpaper: URL?
     @State private var saved: [DesignDocument] = []
+    /// The design being renamed, and the text field's working copy. Held apart
+    /// from `saved` so an abandoned rename changes nothing.
+    @State private var renaming: DesignDocument?
+    @State private var renamedTo = ""
+    /// The design a delete has been asked for but not yet confirmed.
+    @State private var deleting: DesignDocument?
+    @State private var designFilter = ""
     @State private var targeting = false
 
     @State private var projectRoot: URL? = ProjectLocator.find()
 
     private var isBusy: Bool { stage != nil }
 
+    /// Library on the left, the design being worked on to the right.
+    ///
+    /// It was one fixed-width column with the library wedged into the middle of
+    /// it, so the list competed for height with the drop target, the settings
+    /// and the build controls, and every one of them lost. A split view gives
+    /// the library its own resizable column and lets the work take the rest.
     var body: some View {
+        NavigationSplitView {
+            librarySidebar
+                .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 420)
+        } detail: {
+            if let ready = prepared {
+                EditorWindow(
+                    prepared: ready,
+                    model: model,
+                    // Saved on the way out either way: leaving the editor should
+                    // not be the thing that loses an afternoon's placement.
+                    onCancel: { edited in
+                        try? edited.store.save(edited.design)
+                        prepared = nil
+                        saved = StudioPipeline.saved()
+                    },
+                    onBuild: { edited in
+                        try? edited.store.save(edited.design)
+                        prepared = nil
+                        install(edited)
+                    }
+                )
+                // Keyed on the design: EditorWindow holds its working copy in
+                // @State, and without this SwiftUI would reuse the view when a
+                // second design is opened and go on showing the first one's.
+                .id(ready.design.id)
+            } else {
+                ScrollView {
+                    workColumn.padding(24)
+                }
+                .frame(minWidth: 480)
+            }
+        }
+        .frame(minWidth: 880, minHeight: 700)
+        .task {
+            refreshDevices()
+            StudioPipeline.migrateLegacyDesigns()
+            saved = StudioPipeline.saved()
+        }
+        .alert(item: $deleting) { design in
+            Alert(
+                title: Text("Delete \"\(design.name)\"?"),
+                message: Text("It moves to the Archive folder rather than being erased, but it leaves the library."),
+                primaryButton: .destructive(Text("Delete")) { delete(design) },
+                secondaryButton: .cancel()
+            )
+        }
+        .sheet(item: $renaming) { design in
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Rename design").font(.headline)
+                TextField("Name", text: $renamedTo)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 260)
+                    .onSubmit { commitRename() }
+                HStack {
+                    Spacer()
+                    Button("Cancel") { renaming = nil }.keyboardShortcut(.cancelAction)
+                    Button("Rename") { commitRename() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(renamedTo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding(20)
+            .onAppear { renamedTo = design.name }
+        }
+    }
+
+    /// Reopening keeps the placement. Deriving a design from the clip again
+    /// would put every tile back in the middle of the frame.
+    /// Everything that is about making *this* design.
+    private var workColumn: some View {
         VStack(alignment: .leading, spacing: 18) {
             header
             dropTarget
             settings
-            if !saved.isEmpty { savedDesigns }
             actions
             if let stage { progress(stage) }
             if let done { message(done, tint: .green) }
@@ -261,85 +345,176 @@ struct StudioView: View {
                 }
             }
             if let failure { message(failure, tint: .red) }
+            Spacer(minLength: 0)
         }
-        .padding(24)
-        .frame(width: 520)
-        .task {
-            refreshDevices()
-            StudioPipeline.migrateLegacyDesigns()
-            saved = StudioPipeline.saved()
-        }
-        .sheet(item: Binding(
-            get: { prepared.map { EditorSheet(prepared: $0) } },
-            set: { if $0 == nil { prepared = nil } }
-        )) { sheet in
-            EditorWindow(
-                prepared: sheet.prepared,
-                model: model,
-                // Saved on the way out either way: closing the editor should
-                // not be the thing that loses an afternoon's placement.
-                onCancel: { edited in
-                    try? edited.store.save(edited.design)
-                    prepared = nil
-                    saved = StudioPipeline.saved()
-                },
-                onBuild: { edited in
-                    try? edited.store.save(edited.design)
-                    prepared = nil
-                    install(edited)
+        .frame(maxWidth: 620, alignment: .leading)
+    }
+
+    private var filteredDesigns: [DesignDocument] {
+        let query = designFilter.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty else { return saved }
+        return saved.filter { $0.name.lowercased().contains(query) }
+    }
+
+    private var librarySidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text("Designs").font(.headline)
+                    Text("\(saved.count)")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(.secondary.opacity(0.15), in: Capsule())
+                    Spacer()
+                    Button("Import...") { importDesign() }.buttonStyle(.link)
                 }
-            )
+                // Only once the list is long enough to need it: a filter field
+                // over four designs is furniture.
+                if saved.count > 6 {
+                    TextField("Filter", text: $designFilter)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+
+            if saved.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("No designs yet.").font(.callout)
+                    Text("Drop a video or GIF on the right to make one.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(12)
+                Spacer()
+            } else {
+                // Takes the column's whole height now, rather than the 190pt it
+                // could spare while sharing one column with everything else.
+                List {
+                    ForEach(filteredDesigns) { design in
+                        designRow(design)
+                            .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4))
+                    }
+                }
+                .listStyle(.sidebar)
+
+                if filteredDesigns.isEmpty, !designFilter.isEmpty {
+                    Text("Nothing matches \"\(designFilter)\".")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .padding(12)
+                }
+            }
+
+            Divider()
+            Text("Starred designs are compiled into the app, and the phone switches between them. About 29MB each.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .padding(12)
+        }
+        .disabled(isBusy)
+    }
+
+    private func designRow(_ design: DesignDocument) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                toggleStar(design)
+            } label: {
+                Image(systemName: design.isStarred ? "star.fill" : "star")
+                    .foregroundStyle(design.isStarred ? .yellow : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Compile this design into the app")
+
+            Button { reopen(design) } label: {
+                VStack(alignment: .leading, spacing: 1) {
+                    // Truncated in the middle, not at the end: what tells two
+                    // designs apart is the number on the tail, and clipping
+                    // that is what made a numbered library still unreadable.
+                    Text(design.name)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .font(.callout)
+                        // The editor is a pane now, so the row is the only
+                        // thing saying which design is in it.
+                        .fontWeight(prepared?.design.id == design.id ? .semibold : .regular)
+                        .foregroundStyle(prepared?.design.id == design.id ? Color.accentColor : .primary)
+                    HStack(spacing: 6) {
+                        Text(count(design.tiles.count, "app"))
+                        if !design.assets.isEmpty {
+                            Text("·")
+                            Text(count(design.assets.count, "picture"))
+                        }
+                        Text("·")
+                        Text(design.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                    }
+                    .font(.caption2).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Open \(design.name)")
+
+            // Rename and duplicate are on the row because a right-click is not
+            // where anyone looks first, and neither can lose anything.
+            //
+            // Delete is deliberately NOT here. It was, as a third icon in this
+            // group, and one click per row with no confirmation: a repeated
+            // click at one point walked 18 designs out of the library, because
+            // each removal shifts the next row up under the pointer. A
+            // destructive action does not belong one pixel from a duplicate
+            // button, and it now asks first.
+            Button { renaming = design } label: { Image(systemName: "pencil") }
+                .buttonStyle(.plain).help("Rename")
+            Button { duplicate(design) } label: { Image(systemName: "plus.square.on.square") }
+                .buttonStyle(.plain).help("Duplicate")
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button(design.isStarred ? "Unstar" : "Star") { toggleStar(design) }
+            Button("Rename...") { renaming = design }
+            Button("Duplicate") { duplicate(design) }
+            Divider()
+            Button("Export...") { exportDesign(design) }
+            Button("Delete...", role: .destructive) { deleting = design }
         }
     }
 
-    /// Reopening keeps the placement. Deriving a design from the clip again
-    /// would put every tile back in the middle of the frame.
-    private var savedDesigns: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("Designs").font(.caption.weight(.semibold))
-                Text("star to ship").font(.caption2).foregroundStyle(.secondary)
-                Spacer()
-                Button("Import...") { importDesign() }.buttonStyle(.link)
-            }
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(saved) { design in
-                        HStack(spacing: 6) {
-                            Button {
-                                toggleStar(design)
-                            } label: {
-                                Image(systemName: design.isStarred ? "star.fill" : "star")
-                                    .foregroundStyle(design.isStarred ? .yellow : .secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Starred designs are compiled into the app, and the phone switches between them. About 29MB each.")
+    private func count(_ value: Int, _ noun: String) -> String {
+        "\(value) \(noun)\(value == 1 ? "" : "s")"
+    }
 
-                            Button { reopen(design) } label: {
-                            HStack {
-                                Text(design.name).lineLimit(1)
-                                Spacer()
-                                Text("\(design.tiles.count) app\(design.tiles.count == 1 ? "" : "s")")
-                                    .foregroundStyle(.secondary)
-                                Text(design.updatedAt.formatted(date: .abbreviated, time: .shortened))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .font(.callout)
-                            .contentShape(Rectangle())
-                        }
-                            .buttonStyle(.plain)
-                        }
-                        .contextMenu {
-                            Button(design.isStarred ? "Unstar" : "Star") { toggleStar(design) }
-                            Button("Export...") { exportDesign(design) }
-                            Button("Delete", role: .destructive) { delete(design) }
-                        }
-                    }
-                }
-            }
-            .frame(maxHeight: 88)
+    /// A copy is the safe way to try a variation: the design that already
+    /// builds stays exactly as it is.
+    private func duplicate(_ design: DesignDocument) {
+        guard let store = try? StudioPipeline.openStore() else { return }
+        do {
+            let copy = try store.duplicate(design)
+            saved = StudioPipeline.saved()
+            done = "Duplicated as \(copy.name). It carries the clip, the background and the pictures, but not the build."
+            failure = nil
+        } catch {
+            failure = "Could not duplicate \(design.name): \(error)"
         }
-        .disabled(isBusy)
+    }
+
+    private func commitRename() {
+        guard let design = renaming else { return }
+        let trimmed = renamedTo.trimmingCharacters(in: .whitespacesAndNewlines)
+        renaming = nil
+        guard !trimmed.isEmpty, trimmed != design.name else { return }
+        guard let store = try? StudioPipeline.openStore() else { return }
+
+        var updated = design
+        updated.name = trimmed
+        do {
+            try store.save(updated)
+            saved = StudioPipeline.saved()
+        } catch {
+            failure = "Could not rename \(design.name): \(error)"
+        }
     }
 
     private func toggleStar(_ design: DesignDocument) {
@@ -391,8 +566,11 @@ struct StudioView: View {
         saved = StudioPipeline.saved()
     }
 
+    /// No project folder needed: opening a layout reads the design and its clip
+    /// out of Application Support. This used to return here when the folder was
+    /// unset, so clicking a design did nothing at all and said nothing about
+    /// why. Building still needs it, and says so when it is missing.
     private func reopen(_ design: DesignDocument) {
-        guard let projectRoot else { return }
         done = nil
         failure = nil
         stage = .preparing
@@ -586,7 +764,7 @@ struct StudioView: View {
     /// crop and the placement are baked into the glyphs, so they have to be
     /// settled before the fonts exist.
     private func start() {
-        guard let source, let projectRoot else { return }
+        guard let source else { return }
         done = nil
         failure = nil
         log = []
@@ -612,7 +790,15 @@ struct StudioView: View {
     }
 
     private func install(_ edited: StudioPipeline.Prepared) {
-        guard let projectRoot else { return }
+        // Building is the step that genuinely needs the project folder, so a
+        // missing one is asked for right here - the chooser button lives on
+        // the front page, and this press usually comes from the editor, where
+        // there was nothing to do about the refusal.
+        if projectRoot == nil { chooseProject() }
+        guard let projectRoot else {
+            failure = String(describing: StudioPipelineError.noProjectFolder)
+            return
+        }
         stage = .preparing
         let pipeline = StudioPipeline(projectRoot: projectRoot, model: model)
         let loop = loopSeconds
@@ -654,38 +840,61 @@ struct StudioView: View {
 }
 
 
-/// Identifiable wrapper so the editor can be presented as a sheet.
-private struct EditorSheet: Identifiable {
-    let prepared: StudioPipeline.Prepared
-    var id: UUID { prepared.design.id }
-}
-
 private struct EditorWindow: View {
     @State var prepared: StudioPipeline.Prepared
     let model: DeviceModel
     let onCancel: (StudioPipeline.Prepared) -> Void
     let onBuild: (StudioPipeline.Prepared) -> Void
 
+    @Environment(\.undoManager) private var windowUndoManager
+    @State private var undo = UndoCoordinator()
+    /// What the autosave last wrote, so opening a design does not restamp it.
+    @State private var lastSaved: DesignDocument?
+
     var body: some View {
         VStack(spacing: 0) {
-            LayoutEditor(
-                design: $prepared.design,
-                model: model,
-                poster: prepared.poster,
-                store: prepared.store
-            )
+            // Scrolled rather than sized to fit. As a sheet this could demand
+            // its own dimensions; as a pane it has to survive whatever width
+            // the split view is dragged to, and the canvas is a fixed size.
+            ScrollView([.horizontal, .vertical]) {
+                LayoutEditor(
+                    design: $prepared.design,
+                    model: model,
+                    poster: prepared.poster,
+                    store: prepared.store
+                )
+                .frame(
+                    minWidth: LayoutEditor.width(for: model),
+                    minHeight: LayoutEditor.height(for: model)
+                )
+            }
             Divider()
             HStack {
-                Button("Close") { onCancel(prepared) }
+                // "Done", not "Close": it saves either way, and in a pane there
+                // is no sheet for "close" to refer to.
+                Button("Done") { onCancel(prepared) }
                 Spacer()
                 Button("Build and install") { onBuild(prepared) }
                     .keyboardShortcut(.defaultAction)
             }
             .padding(16)
         }
-        .frame(
-            width: LayoutEditor.width(for: model),
-            height: LayoutEditor.height(for: model) + 60
-        )
+        .onAppear {
+            lastSaved = prepared.design
+            undo.apply = { prepared.design = $0 }
+            undo.current = { prepared.design }
+        }
+        .onChange(of: prepared.design) { old, _ in
+            undo.designChanged(from: old, undoManager: windowUndoManager)
+        }
+        // Autosave, debounced: the id restarts this on every change, so only a
+        // pause in editing writes. An afternoon's placement should not depend
+        // on remembering to press Done.
+        .task(id: prepared.design) {
+            guard prepared.design != lastSaved else { return }
+            guard (try? await Task.sleep(for: .milliseconds(800))) != nil else { return }
+            try? prepared.store.save(prepared.design)
+            lastSaved = prepared.design
+        }
     }
 }

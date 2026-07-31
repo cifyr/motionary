@@ -62,6 +62,53 @@ final class ManifestTileTests: XCTestCase {
         )
     }
 
+    /// A slot's alternates travel in the manifest like the tiles themselves:
+    /// it is the only part of a design the phone can read.
+    func testAlternatesSurviveTheManifest() throws {
+        let tile = PlacedTile(
+            appID: "spotify",
+            center: CGPoint(x: 300, y: 900),
+            size: 180,
+            alternates: [TileAlternate(appID: "apple-music", skin: "vinyl.png")]
+        )
+        let decoded = try roundTrip(manifest(tiles: [tile]))
+
+        XCTAssertEqual(decoded.placedTiles.first?.alternates.count, 1)
+        XCTAssertEqual(decoded.placedTiles.first?.alternates.first?.appID, "apple-music")
+        XCTAssertEqual(decoded.placedTiles.first?.alternates.first?.skin, "vinyl.png")
+    }
+
+    /// A tile written before alternates existed has no such key, and Swift does
+    /// not apply property defaults to missing keys - a design that will not
+    /// decode silently leaves the library.
+    func testATileWithoutAlternatesStillDecodes() throws {
+        let tile = PlacedTile(appID: "spotify", center: CGPoint(x: 300, y: 900), size: 180)
+        var json = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: try JSONEncoder().encode(tile)) as? [String: Any]
+        )
+        json.removeValue(forKey: "alternates")
+        let decoded = try JSONDecoder().decode(
+            PlacedTile.self,
+            from: try JSONSerialization.data(withJSONObject: json)
+        )
+        XCTAssertTrue(decoded.alternates.isEmpty)
+    }
+
+    /// The authored occupant keeps the un-suffixed name older builds wrote;
+    /// an alternate's file is per app, so a swap can never show one app's icon
+    /// on a tile that launches another.
+    func testOccupantIconNamingSeparatesAuthoredFromAlternate() {
+        let id = UUID()
+        XCTAssertEqual(
+            PrebuiltDesign.iconResource(tileID: id, appID: "spotify", authoredAppID: "spotify"),
+            PrebuiltDesign.iconResource(tileID: id)
+        )
+        XCTAssertEqual(
+            PrebuiltDesign.iconResource(tileID: id, appID: "Apple-Music", authoredAppID: "spotify"),
+            "prebuilt-icon-\(id.uuidString.lowercased())-apple-music"
+        )
+    }
+
     func testLaunchLinkRoundTripsAnAppID() throws {
         let url = LaunchLink.url(for: "spotify")
         XCTAssertEqual(LaunchLink.appID(from: url), "spotify")
