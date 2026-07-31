@@ -241,6 +241,33 @@ enum PrebuiltDesign {
         "prebuilt-picture-\(assetID.uuidString.lowercased())"
     }
 
+    /// A skin from the design's own library, shipped so the phone can put any
+    /// of them on any slot rather than only the icon baked for that app.
+    static func skinResource(designID: UUID, skin: String) -> String {
+        let safe = skin
+            .replacingOccurrences(of: "[^A-Za-z0-9]+", with: "-", options: .regularExpression)
+            .lowercased()
+        return "prebuilt-skin-\(designID.uuidString.lowercased())-\(safe.prefix(60))"
+    }
+
+    static func skinIndexResource(designID: UUID) -> String {
+        "prebuilt-skins-\(designID.uuidString.lowercased())"
+    }
+
+    static func skinURL(designID: UUID, skin: String) -> URL? {
+        resource(named: skinResource(designID: designID, skin: skin), extension: "png")
+    }
+
+    /// The names of every skin that shipped with a design, for the phone's
+    /// icon picker. Empty when the design was built before they travelled.
+    static func skinNames(designID: UUID) -> [String] {
+        guard let url = resource(named: skinIndexResource(designID: designID), extension: "json"),
+              let data = try? Data(contentsOf: url),
+              let names = try? JSONDecoder().decode([String].self, from: data)
+        else { return [] }
+        return names
+    }
+
     /// Whether every lane font declared in `UIAppFonts` actually resolved.
     ///
     /// Bundled fonts are registered by the system before any code runs, so this

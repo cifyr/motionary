@@ -152,6 +152,7 @@ struct BundleWriter {
                 skinsFolder: store?.skinsFolder(for: design.manifest.designID)
             )
             try installPictures(manifest: design.manifest, store: store)
+            try installSkins(designID: design.manifest.designID, store: store)
         }
 
         try writeIndex(designs)
@@ -248,6 +249,31 @@ struct BundleWriter {
             try FileManager.default.removeItem(at: destination)
         }
         try FileManager.default.copyItem(at: source, to: destination)
+    }
+
+    /// Every skin the design owns, so the phone can put any of them on any
+    /// slot. The icons baked per tile stay as they are - they are what draws
+    /// by default; this is the library behind the phone's own picker.
+    private func installSkins(designID: UUID, store: DesignStore?) throws {
+        guard let store, let library = try? SkinLibrary(root: store.skinsFolder(for: designID)) else { return }
+        let skins = library.all()
+        guard !skins.isEmpty else { return }
+
+        var names: [String] = []
+        for skin in skins {
+            let resource = PrebuiltDesign.skinResource(designID: designID, skin: skin.id)
+            try replace(skin.url, with: "\(resource).png")
+            names.append(skin.id)
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(names.sorted()).write(
+            to: resources.appendingPathComponent(
+                "\(PrebuiltDesign.skinIndexResource(designID: designID)).json"
+            ),
+            options: .atomic
+        )
     }
 
     private func copy(_ source: URL, to name: String) throws {
