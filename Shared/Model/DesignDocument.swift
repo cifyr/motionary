@@ -1,6 +1,27 @@
 import CoreGraphics
 import Foundation
 
+/// An app the phone may put in a tile's slot instead of the authored one.
+///
+/// The authored `appID` on the tile is the default occupant - the first of the
+/// slot's list - and these are the rest of it. An alternate's artwork is a skin
+/// or nothing: the catalogue's SF Symbol plate covers a candidate with no
+/// artwork of its own, the same way a tile drew before icons existed.
+struct TileAlternate: Codable, Equatable, Identifiable, Sendable {
+    var appID: String
+    /// Artwork by filename in the skin library, like `PlacedTile.skin`.
+    var skin: String?
+
+    /// The appID: one slot offering the same app twice would make the phone's
+    /// stored choice ambiguous, so the editor refuses duplicates instead.
+    var id: String { appID }
+
+    init(appID: String, skin: String? = nil) {
+        self.appID = appID
+        self.skin = skin
+    }
+}
+
 /// One app tile placed on the composition.
 ///
 /// Positions are stored in screen pixel space so the editor, the exported
@@ -27,6 +48,10 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
     /// Clockwise rotation in degrees, so tiles can follow an angled element in
     /// the footage instead of always sitting square to the screen.
     var rotation: Double = 0
+    /// Apps the phone may swap into this slot, after `appID` in the slot's
+    /// list. Which one occupies the slot is the phone's choice, stored in the
+    /// app group - the one part of a design that is not frozen at install time.
+    var alternates: [TileAlternate] = []
 
     var rect: CGRect {
         CGRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size)
@@ -51,7 +76,8 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         icon: IconAsset? = nil,
         skin: String? = nil,
         tintHex: String? = nil,
-        rotation: Double = 0
+        rotation: Double = 0,
+        alternates: [TileAlternate] = []
     ) {
         self.id = id
         self.appID = appID
@@ -64,6 +90,7 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         self.skin = skin
         self.tintHex = tintHex
         self.rotation = rotation
+        self.alternates = alternates
     }
 
     /// Decoded field by field rather than by the synthesised initialiser.
@@ -85,6 +112,101 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         skin = try container.decodeIfPresent(String.self, forKey: .skin)
         tintHex = try container.decodeIfPresent(String.self, forKey: .tintHex)
         rotation = try container.decodeIfPresent(Double.self, forKey: .rotation) ?? 0
+        alternates = try container.decodeIfPresent([TileAlternate].self, forKey: .alternates) ?? []
+    }
+}
+
+/// An arbitrary image placed on the composition, as decoration.
+///
+/// Kept distinct from `PlacedTile` because a tile means an *app*: it carries a
+/// bundle id, a hit region the widget answers taps in, a label and a square
+/// plate. An asset is just a picture — any aspect, any angle, and nothing taps
+/// it — so folding the two together would give every asset launcher fields it
+/// can never use.
+///
+/// Positions are in screen pixel space, the same as `PlacedTile`, so the
+/// editor, the baked wallpaper and the widget crop all read the same numbers.
+struct PlacedAsset: Codable, Equatable, Identifiable, Sendable {
+    var id: UUID = UUID()
+    /// Filename inside the design's own `Assets` folder.
+    var fileName: String
+    var center: CGPoint
+    /// Rendered size in screen pixels. Free aspect: an asset is not a tile.
+    var size: CGSize
+    /// Clockwise degrees, to follow an angled element in the footage.
+    var rotation: Double = 0
+    var opacity: Double = 1
+    /// Draw order among assets. Higher draws later, so over the others.
+    var zIndex: Int = 0
+    /// Keying settings, applied when the asset is drawn.
+    ///
+    /// Non-destructive on purpose: the imported file is never rewritten, so a
+    /// key can be retuned or switched off long after import. Skin import bakes
+    /// its keying into the PNG and leaves no way back, which is exactly the
+    /// thing to not repeat here.
+    var chroma: ChromaKey.Settings?
+
+    var rect: CGRect {
+        CGRect(
+            x: center.x - size.width / 2,
+            y: center.y - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
+    }
+
+    init(
+        id: UUID = UUID(),
+        fileName: String,
+        center: CGPoint,
+        size: CGSize,
+        rotation: Double = 0,
+        opacity: Double = 1,
+        zIndex: Int = 0,
+        chroma: ChromaKey.Settings? = nil
+    ) {
+        self.id = id
+        self.fileName = fileName
+        self.center = center
+        self.size = size
+        self.rotation = rotation
+        self.opacity = opacity
+        self.zIndex = zIndex
+        self.chroma = chroma
+    }
+
+    /// Field by field, for the same reason `PlacedTile` is: a design written
+    /// before a field existed must still decode rather than vanish.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        fileName = try container.decode(String.self, forKey: .fileName)
+        center = try container.decode(CGPoint.self, forKey: .center)
+        size = try container.decode(CGSize.self, forKey: .size)
+        rotation = try container.decodeIfPresent(Double.self, forKey: .rotation) ?? 0
+        opacity = try container.decodeIfPresent(Double.self, forKey: .opacity) ?? 1
+        zIndex = try container.decodeIfPresent(Int.self, forKey: .zIndex) ?? 0
+        chroma = try container.decodeIfPresent(ChromaKey.Settings.self, forKey: .chroma)
+    }
+}
+
+/// An alternative clip for the same design - the same layout, the same crop,
+/// a different animated part.
+///
+/// Like a game shipping five idle animations: the composition is settled once
+/// and each variant only changes what plays inside the animated area. Every
+/// variant costs a full lane-font set in the install, so the list is authored
+/// deliberately rather than derived.
+struct ClipVariant: Codable, Equatable, Identifiable, Sendable {
+    var id: UUID = UUID()
+    var name: String
+    /// Filename inside the design's folder, alongside the primary clip.
+    var sourceVideoName: String
+
+    init(id: UUID = UUID(), name: String, sourceVideoName: String) {
+        self.id = id
+        self.name = name
+        self.sourceVideoName = sourceVideoName
     }
 }
 
@@ -128,6 +250,11 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     /// import and then adjustable.
     var animationCrop: CGRect
     var tiles: [PlacedTile] = []
+    /// Decoration placed on the composition, drawn beneath the tiles.
+    var assets: [PlacedAsset] = []
+    /// Alternative clips for the animated part. The design's own clip is the
+    /// default; the phone chooses among all of them after install.
+    var variants: [ClipVariant] = []
     var snapEnabled: Bool = true
 
     /// A chosen background image, by filename inside the design's folder.
@@ -212,6 +339,13 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         "MFont\(id.uuidString.prefix(8).lowercased())L"
     }
 
+    /// A variant's font family, distinct per variant for the same reason the
+    /// design's is per design: every set has to coexist in one bundle.
+    /// Lowercase, so the `v` can never read as the `L` the lane number follows.
+    func fontFamilyBase(for variant: ClipVariant) -> String {
+        "MFont\(id.uuidString.prefix(8).lowercased())v\(variant.id.uuidString.prefix(8).lowercased())L"
+    }
+
     static func new(name: String, sourceVideoName: String) -> DesignDocument {
         let now = Date()
         return DesignDocument(
@@ -245,6 +379,8 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         animationEnabled = try container.decodeIfPresent(Bool.self, forKey: .animationEnabled) ?? true
         animationCrop = try container.decode(CGRect.self, forKey: .animationCrop)
         tiles = try container.decodeIfPresent([PlacedTile].self, forKey: .tiles) ?? []
+        assets = try container.decodeIfPresent([PlacedAsset].self, forKey: .assets) ?? []
+        variants = try container.decodeIfPresent([ClipVariant].self, forKey: .variants) ?? []
         snapEnabled = try container.decodeIfPresent(Bool.self, forKey: .snapEnabled) ?? true
         backgroundName = try container.decodeIfPresent(String.self, forKey: .backgroundName)
         widgetCornerRadius = try container.decodeIfPresent(CGFloat.self, forKey: .widgetCornerRadius)
@@ -303,6 +439,25 @@ struct BuildManifest: Codable, Equatable, Sendable {
     var tiles: [PlacedTile]?
 
     var placedTiles: [PlacedTile] { tiles ?? [] }
+
+    /// What one built variant amounts to at render time. Everything else -
+    /// crop, lanes, frame rate, tiles - is the design's, shared.
+    struct VariantBuild: Codable, Equatable, Identifiable, Sendable {
+        var id: UUID
+        var name: String
+        var fontFamilyBase: String
+        var totalFontBytes: Int
+        /// The variant's own loop, sized to its own clip - lengths need not
+        /// match across variants. Optional because manifests written before it
+        /// existed must still decode; nil falls back to the design's loop.
+        var loopFrameCount: Int?
+    }
+
+    /// The built alternative clips, in the order they were authored. Optional
+    /// for the same decoding reason `tiles` is.
+    var clipVariants: [VariantBuild]?
+
+    var builtVariants: [VariantBuild] { clipVariants ?? [] }
 
     var spec: TimerFontSpec {
         TimerFontSpec(laneCount: laneCount, framesPerSecond: framesPerSecond)

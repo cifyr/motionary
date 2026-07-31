@@ -20,20 +20,26 @@ enum WallpaperComposer {
     /// `@Sendable` because the bake happens on the main actor - `ImageRenderer`
     /// is main-actor-only - while the build that asks for it does not.
     typealias ArtworkProvider = @Sendable (PlacedTile) -> CGImage?
+    /// Already keyed, so the composer never has to know about `ChromaKey`.
+    typealias AssetProvider = @Sendable (PlacedAsset) -> CGImage?
 
     @MainActor
     static func compose(
         frame: CGImage,
         tiles: [PlacedTile],
+        assets: [PlacedAsset] = [],
         screenSize: CGSize,
-        artwork: @escaping ArtworkProvider = { _ in nil }
+        artwork: @escaping ArtworkProvider = { _ in nil },
+        assetArtwork: @escaping AssetProvider = { _ in nil }
     ) -> CGImage {
-        guard !tiles.isEmpty else { return frame }
+        guard !tiles.isEmpty || !assets.isEmpty else { return frame }
 
         let layer = TileLayer(
             tiles: tiles,
+            assets: assets.sorted { $0.zIndex < $1.zIndex },
             screenSize: screenSize,
-            artwork: { artwork($0).map { Image(decorative: $0, scale: 1) } }
+            artwork: { artwork($0).map { Image(decorative: $0, scale: 1) } },
+            assetArtwork: { assetArtwork($0).map { Image(decorative: $0, scale: 1) } }
         )
         // Laid out at one point per screen pixel, so the tile geometry the
         // widget expresses in points at 3x lands on the same pixels here.
@@ -70,17 +76,20 @@ enum WallpaperComposer {
             logger.error("composed wallpaper could not be read back; shipping the untiled frame")
             return frame
         }
-        logger.info("baked \(tiles.count) tiles into the wallpaper")
+        logger.info("baked \(tiles.count) tiles and \(assets.count) assets into the wallpaper")
         return composed
     }
 }
 
-/// The tiles alone, on nothing, positioned the way `CompositionView` positions
-/// them - from `tile.rect` in screen pixels, at one point per pixel.
+/// The tiles and assets alone, on nothing, positioned the way `CompositionView`
+/// positions them - from `rect` in screen pixels, at one point per pixel.
 private struct TileLayer: View {
     let tiles: [PlacedTile]
+    /// Pre-sorted by `zIndex`.
+    let assets: [PlacedAsset]
     let screenSize: CGSize
     let artwork: (PlacedTile) -> Image?
+    let assetArtwork: (PlacedAsset) -> Image?
 
     var body: some View {
         // An overlay cannot enlarge its base, so a tile bigger than the screen
@@ -91,6 +100,18 @@ private struct TileLayer: View {
             .overlay(alignment: .topLeading) {
                 ZStack(alignment: .topLeading) {
                     Color.clear.frame(width: screenSize.width, height: screenSize.height)
+                    // Assets first: decoration sits under the launchers, so a
+                    // picture can never cover the thing that answers a tap.
+                    ForEach(assets) { asset in
+                        if let image = assetArtwork(asset) {
+                            image
+                                .resizable()
+                                .frame(width: asset.size.width, height: asset.size.height)
+                                .rotationEffect(.degrees(asset.rotation))
+                                .opacity(asset.opacity)
+                                .offset(x: asset.rect.minX, y: asset.rect.minY)
+                        }
+                    }
                     ForEach(tiles) { tile in
                         TileView(tile: tile, side: tile.size, iconImage: artwork(tile))
                             .frame(width: tile.size, height: tile.size)

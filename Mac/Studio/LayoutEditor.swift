@@ -21,12 +21,22 @@ struct LayoutEditor: View {
     @State private var scaleBase: Double?
     @State private var tileBase: CGPoint?
     @State private var showingCatalogue = false
+    /// The selected tile is collecting an alternate from the catalogue.
+    @State private var addingAlternate = false
     /// Applied to tiles added later, so turning labels off once does not have
     /// to be repeated for every app placed after it.
     @State private var labelsDefault = true
     @State private var skins: [SkinLibrary.Skin] = []
     @State private var background: CGImage?
     @State private var skinNote: String?
+    @State private var skinSets: [SkinSet] = []
+    /// The set collecting a new entry from the catalogue popover.
+    @State private var addingEntryTo: UUID?
+    /// The variant whose clip is standing in for the primary on the canvas.
+    @State private var previewedVariantID: UUID?
+    @State private var variantPoster: CGImage?
+    /// The asset whose key colour is being picked by clicking it.
+    @State private var pickingKeyFor: UUID?
 
     /// Points per screen pixel, so the canvas is the phone at a readable size.
     static let zoom: CGFloat = 0.62
@@ -42,11 +52,18 @@ struct LayoutEditor: View {
     /// a drag moves the same distance on the phone as under the cursor.
     private var unit: CGFloat { canvas.width / model.screenPixelSize.width }
 
+    /// The clip standing on the canvas: a previewed variant's frame, or the
+    /// primary's. One shared transform positions them all - placement centres
+    /// every source at the same point - so switching only switches the picture.
+    private var activePoster: CGImage? {
+        previewedVariantID == nil ? poster : (variantPoster ?? poster)
+    }
+
     /// The clip's own pixel size, taken from the frame rather than stored: the
     /// poster is a frame of the source, so it is the source's size by
     /// definition and cannot drift from it.
     private var sourceSize: CGSize {
-        guard let poster else { return model.screenPixelSize }
+        guard let poster = activePoster else { return model.screenPixelSize }
         return CGSize(width: poster.width, height: poster.height)
     }
 
@@ -94,6 +111,35 @@ struct LayoutEditor: View {
         .task {
             reloadSkins()
             reloadBackground()
+            reloadSkinSets()
+        }
+        .task(id: previewedVariantID) {
+            guard let previewedVariantID, let store,
+                  let variant = design.variants.first(where: { $0.id == previewedVariantID })
+            else {
+                variantPoster = nil
+                return
+            }
+            variantPoster = try? await MediaFrameExtractor(
+                url: store.variantClipURL(for: design.id, name: variant.sourceVideoName),
+                screenSize: model.screenPixelSize
+            ).posterFrame()
+        }
+    }
+
+    private func reloadSkinSets() {
+        do {
+            skinSets = try SkinSetStore().all()
+        } catch {
+            skinNote = "Could not read the skin sets: \(error)"
+        }
+    }
+
+    private func saveSkinSets() {
+        do {
+            try SkinSetStore().save(skinSets)
+        } catch {
+            skinNote = "Could not save the skin sets: \(error)"
         }
     }
 
@@ -288,7 +334,7 @@ struct LayoutEditor: View {
                     .frame(width: canvas.width, height: canvas.height)
                     .clipped()
             }
-            if let poster {
+            if let poster = activePoster {
                 // The generator fills whatever the clip does not cover with a
                 // dimmed blow-up of the same frame rather than black. Drawing
                 // black here instead - which this did - meant the wallpaper
@@ -307,6 +353,11 @@ struct LayoutEditor: View {
                 clipLayer(poster: poster)
             }
             widgetFrame
+            // Under the tiles, matching what the wallpaper bakes, so the canvas
+            // shows the stacking the phone will actually have.
+            ForEach(design.assets.sorted { $0.zIndex < $1.zIndex }) { asset in
+                assetView(asset)
+            }
             ForEach(design.tiles) { tile in
                 tileView(tile)
             }
@@ -339,6 +390,74 @@ struct LayoutEditor: View {
             .offset(x: tile.rect.minX * unit, y: tile.rect.minY * unit)
             .gesture(tileDrag(tile))
             .onTapGesture { selection = tile.id }
+    }
+
+    private func assetView(_ asset: PlacedAsset) -> some View {
+        let width = asset.size.width * unit
+        let height = asset.size.height * unit
+        return Group {
+            if let image = assetImage(asset) {
+                Image(decorative: image, scale: 1).resizable()
+            } else {
+                // A missing file is shown rather than skipped: an asset that
+                // silently vanishes reads as a bug in placement.
+                ZStack {
+                    Rectangle().fill(.red.opacity(0.15))
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.red)
+                }
+            }
+        }
+        .frame(width: width, height: height)
+        // Before the rotation on purpose: the tap then lands in the picture's
+        // own unrotated space, which maps straight onto its pixels.
+        .overlay {
+            if pickingKeyFor == asset.id {
+                Rectangle()
+                    .fill(.clear)
+                    .contentShape(Rectangle())
+                    .gesture(SpatialTapGesture().onEnded { value in
+                        pickKey(
+                            for: asset,
+                            at: value.location,
+                            in: CGSize(width: width, height: height)
+                        )
+                    })
+            }
+        }
+        .rotationEffect(.degrees(asset.rotation))
+        .opacity(asset.opacity)
+        .overlay {
+            if selection == asset.id {
+                Rectangle().strokeBorder(.white.opacity(0.9), lineWidth: 1)
+                    .rotationEffect(.degrees(asset.rotation))
+            }
+        }
+        .offset(x: asset.rect.minX * unit, y: asset.rect.minY * unit)
+        .gesture(assetDrag(asset))
+        .onTapGesture { selection = asset.id }
+    }
+
+    private func assetImage(_ asset: PlacedAsset) -> CGImage? {
+        guard let store else { return nil }
+        return AssetArtwork.image(for: asset, designID: design.id, store: store)
+    }
+
+    private func assetDrag(_ asset: PlacedAsset) -> some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard let index = design.assets.firstIndex(where: { $0.id == asset.id })
+                else { return }
+                let base = tileBase ?? asset.center
+                if tileBase == nil {
+                    tileBase = base
+                    selection = asset.id
+                }
+                design.assets[index].center = CGPoint(
+                    x: base.x + value.translation.width / unit,
+                    y: base.y + value.translation.height / unit
+                )
+            }
+            .onEnded { _ in tileBase = nil }
     }
 
     // MARK: - Gestures
@@ -420,6 +539,493 @@ struct LayoutEditor: View {
             .onEnded { _ in tileBase = nil }
     }
 
+    // MARK: - Assets
+
+    private var selectedAsset: PlacedAsset? {
+        guard let selection else { return nil }
+        return design.assets.first { $0.id == selection }
+    }
+
+    /// Bindings resolve the asset by id on every access rather than closing over
+    /// an index. An index taken while the inspector renders outlives the array
+    /// it indexed - removing an asset while its slider is live would read off
+    /// the end - and identity is what the inspector is really about anyway.
+    private func assetBinding<Value>(
+        _ id: UUID,
+        _ path: WritableKeyPath<PlacedAsset, Value>,
+        fallback: Value
+    ) -> Binding<Value> {
+        Binding(
+            get: { design.assets.first { $0.id == id }?[keyPath: path] ?? fallback },
+            set: { newValue in
+                guard let index = design.assets.firstIndex(where: { $0.id == id }) else { return }
+                design.assets[index][keyPath: path] = newValue
+            }
+        )
+    }
+
+    private func chromaBinding(
+        _ id: UUID,
+        _ path: WritableKeyPath<ChromaKey.Settings, Double>
+    ) -> Binding<Double> {
+        Binding(
+            get: { (design.assets.first { $0.id == id }?.chroma ?? .default)[keyPath: path] },
+            set: { newValue in
+                guard let index = design.assets.firstIndex(where: { $0.id == id }) else { return }
+                var settings = design.assets[index].chroma ?? ChromaKey.Settings.default
+                settings[keyPath: path] = newValue
+                design.assets[index].chroma = settings
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var assetsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Pictures").font(.caption.weight(.semibold))
+                Spacer()
+                Button("Add...") { importAssets() }.buttonStyle(.link)
+            }
+
+            if design.assets.isEmpty {
+                Text("Any image, placed anywhere and drawn under the app tiles. A coloured backdrop is keyed out, and it can be retuned here at any time.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            } else {
+                ForEach(design.assets.sorted { $0.zIndex < $1.zIndex }) { asset in
+                    HStack(spacing: 6) {
+                        Image(systemName: selection == asset.id ? "largecircle.fill.circle" : "circle")
+                            .foregroundStyle(.secondary)
+                        Text(asset.fileName)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .font(.caption)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { selection = asset.id }
+                    .contextMenu {
+                        Button("Bring to front") { restack(asset, toFront: true) }
+                        Button("Send to back") { restack(asset, toFront: false) }
+                        Button("Remove", role: .destructive) { removeAsset(asset) }
+                    }
+                }
+            }
+
+            if let asset = selectedAsset {
+                assetInspector(asset)
+            }
+        }
+        .disabled(store == nil)
+    }
+
+    @ViewBuilder
+    private func assetInspector(_ asset: PlacedAsset) -> some View {
+        Divider()
+        VStack(alignment: .leading, spacing: 4) {
+            Text(asset.fileName)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            LabeledContent("Width", value: "\(Int(asset.size.width)) px")
+                .font(.caption2)
+            // Height follows width: an asset is scaled, not stretched. The
+            // aspect comes from the size it was imported at.
+            Slider(
+                value: Binding(
+                    get: { asset.size.width },
+                    set: { newWidth in
+                        guard let index = design.assets.firstIndex(where: { $0.id == asset.id })
+                        else { return }
+                        let current = design.assets[index].size
+                        let aspect = current.height / max(current.width, 1)
+                        design.assets[index].size = CGSize(
+                            width: newWidth,
+                            height: newWidth * aspect
+                        )
+                    }
+                ),
+                in: 40 ... model.screenPixelSize.width * 1.5
+            )
+
+            LabeledContent("Rotation", value: "\(Int(asset.rotation))°").font(.caption2)
+            Slider(value: assetBinding(asset.id, \.rotation, fallback: 0), in: -180 ... 180)
+
+            LabeledContent("Opacity", value: String(format: "%.2f", asset.opacity)).font(.caption2)
+            Slider(value: assetBinding(asset.id, \.opacity, fallback: 1), in: 0 ... 1)
+
+            Divider()
+            keyingControls(asset)
+        }
+    }
+
+    @ViewBuilder
+    private func keyingControls(_ asset: PlacedAsset) -> some View {
+        let chroma = asset.chroma ?? ChromaKey.Settings.default
+        Toggle("Remove backdrop", isOn: Binding(
+            get: { design.assets.first { $0.id == asset.id }?.chroma?.enabled ?? false },
+            set: { on in
+                guard let index = design.assets.firstIndex(where: { $0.id == asset.id })
+                else { return }
+                var settings = design.assets[index].chroma ?? ChromaKey.Settings.default
+                settings.enabled = on
+                design.assets[index].chroma = settings
+            }
+        ))
+        .font(.caption)
+
+        if chroma.enabled {
+            LabeledContent("Tolerance", value: String(format: "%.2f", chroma.tolerance))
+                .font(.caption2)
+            Slider(value: chromaBinding(asset.id, \.tolerance), in: 0 ... 2)
+
+            LabeledContent("Edge softness", value: String(format: "%.2f", chroma.softness))
+                .font(.caption2)
+            Slider(value: chromaBinding(asset.id, \.softness), in: 0 ... 2)
+
+            LabeledContent("Spill removal", value: String(format: "%.2f", chroma.spill))
+                .font(.caption2)
+            Slider(value: chromaBinding(asset.id, \.spill), in: 0 ... 1)
+
+            HStack {
+                Text(chroma.keyColor == nil ? "Colour: detected" : "Colour: chosen")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                if chroma.keyColor != nil {
+                    Button("Redetect") {
+                        guard let index = design.assets.firstIndex(where: { $0.id == asset.id })
+                        else { return }
+                        design.assets[index].chroma?.setKeyColor(nil)
+                    }
+                    .buttonStyle(.link).font(.caption2)
+                }
+            }
+
+            Button(pickingKeyFor == asset.id ? "Click the backdrop..." : "Pick colour") {
+                pickingKeyFor = pickingKeyFor == asset.id ? nil : asset.id
+            }
+            .buttonStyle(.link)
+            .font(.caption2)
+            .help("Detection reads the border. Pick instead when the backdrop is not what surrounds the picture.")
+        }
+    }
+
+    private func importAssets() {
+        guard let store else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = true
+        guard panel.runModal() == .OK else { return }
+
+        for url in panel.urls {
+            do {
+                let name = try store.importAsset(url, for: design.id)
+                let placed = store.assetURL(for: design.id, name: name)
+                design.assets.append(newAsset(named: name, at: placed))
+            } catch {
+                skinNote = "Could not add \(url.lastPathComponent): \(error)"
+            }
+        }
+    }
+
+    /// Placed in the middle of the widget frame, at a size that fits it, so a
+    /// picture lands somewhere visible rather than off-screen at full
+    /// resolution.
+    private func newAsset(named name: String, at url: URL) -> PlacedAsset {
+        let rect = design.widgetRect
+        var size = CGSize(width: rect.width * 0.5, height: rect.width * 0.5)
+        if let image = ImageLoader.load(at: url, maxPixelSize: 64) {
+            let aspect = CGFloat(image.height) / CGFloat(max(image.width, 1))
+            size = CGSize(width: rect.width * 0.5, height: rect.width * 0.5 * aspect)
+        }
+        return PlacedAsset(
+            fileName: name,
+            center: CGPoint(x: rect.midX, y: rect.midY),
+            size: size,
+            zIndex: (design.assets.map(\.zIndex).max() ?? 0) + 1
+        )
+    }
+
+    /// Samples the colour under a click and keys on that instead of the
+    /// detected border colour. Detection reads the border, which is wrong
+    /// whenever the backdrop is not what surrounds the picture.
+    private func pickKey(for asset: PlacedAsset, at point: CGPoint, in size: CGSize) {
+        guard let store,
+              let index = design.assets.firstIndex(where: { $0.id == asset.id }),
+              size.width > 0, size.height > 0
+        else { return }
+
+        let unitPoint = CGPoint(x: point.x / size.width, y: point.y / size.height)
+        guard let colour = AssetArtwork.sampleColor(
+            in: asset, designID: design.id, store: store, at: unitPoint
+        ) else {
+            skinNote = "Could not read that pixel - it may be fully transparent."
+            return
+        }
+
+        var settings = design.assets[index].chroma ?? ChromaKey.Settings.default
+        settings.enabled = true
+        settings.setKeyColor(colour)
+        design.assets[index].chroma = settings
+        pickingKeyFor = nil
+    }
+
+    private func restack(_ asset: PlacedAsset, toFront: Bool) {
+        guard let index = design.assets.firstIndex(where: { $0.id == asset.id }) else { return }
+        let levels = design.assets.map(\.zIndex)
+        design.assets[index].zIndex = toFront
+            ? (levels.max() ?? 0) + 1
+            : (levels.min() ?? 0) - 1
+    }
+
+    /// Takes the file with it. An asset lives in the design, so leaving the
+    /// picture behind would grow the folder every time one is swapped out.
+    private func removeAsset(_ asset: PlacedAsset) {
+        design.assets.removeAll { $0.id == asset.id }
+        if selection == asset.id { selection = nil }
+        store?.removeAsset(named: asset.fileName, for: design.id)
+    }
+
+    // MARK: - Skin sets
+
+    /// Themed icon packs: one picture per app, drawn in one style. Applying a
+    /// set fills a tile's artwork and its swap list in one step, so "the neon
+    /// icons" is authored once and reused on every design.
+    @ViewBuilder
+    private var skinSetsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Skin sets").font(.caption.weight(.semibold))
+                Spacer()
+                Button("New set") {
+                    skinSets.append(SkinSet(name: "Set \(skinSets.count + 1)"))
+                    saveSkinSets()
+                }
+                .buttonStyle(.link)
+            }
+
+            if skinSets.isEmpty {
+                Text("A set pairs each app with a picture in one style - like an icon pack. Apply it to a tile and the phone can swap that slot to any other app in the set, artwork and link together.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ForEach($skinSets) { $set in
+                DisclosureGroup {
+                    skinSetBody($set)
+                } label: {
+                    TextField("Name", text: Binding(
+                        get: { set.name },
+                        set: { set.name = $0; saveSkinSets() }
+                    ))
+                    .textFieldStyle(.plain)
+                    .font(.caption.weight(.medium))
+                }
+            }
+        }
+        .disabled(store == nil)
+    }
+
+    @ViewBuilder
+    private func skinSetBody(_ set: Binding<SkinSet>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(set.wrappedValue.entries) { entry in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(AppCatalog.app(id: entry.appID)?.tint ?? .gray)
+                        .frame(width: 8, height: 8)
+                    Text(AppCatalog.app(id: entry.appID)?.name ?? entry.appID)
+                        .font(.caption)
+                    AsyncSkinThumbnail(url: (try? SkinLibrary())?.url(for: entry.skin))
+                        .frame(width: 18, height: 18)
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    Spacer()
+                    Button {
+                        set.wrappedValue.entries.removeAll { $0.appID == entry.appID }
+                        saveSkinSets()
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove \(AppCatalog.app(id: entry.appID)?.name ?? entry.appID) from the set")
+                }
+            }
+
+            HStack {
+                Button("Add app...") { addingEntryTo = set.wrappedValue.id }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                    .popover(isPresented: Binding(
+                        get: { addingEntryTo == set.wrappedValue.id },
+                        set: { if !$0 { addingEntryTo = nil } }
+                    )) {
+                        CataloguePicker { appID in
+                            addingEntryTo = nil
+                            addEntry(appID: appID, to: set)
+                        }
+                    }
+                Spacer()
+                Button("Delete set", role: .destructive) {
+                    skinSets.removeAll { $0.id == set.wrappedValue.id }
+                    saveSkinSets()
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
+
+            if !set.wrappedValue.entries.isEmpty {
+                HStack {
+                    if let selection, design.tiles.contains(where: { $0.id == selection }) {
+                        Button("Apply to selected tile") {
+                            apply(set.wrappedValue, onlyTo: selection)
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    }
+                    Button("Apply to all tiles") {
+                        apply(set.wrappedValue, onlyTo: nil)
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                }
+                Text("Adding an app the set already has replaces its picture. Applying rewrites the tile's swap list to this set.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.leading, 4)
+    }
+
+    /// Picks the picture for a newly added app, imported through the library
+    /// so it is keyed, trimmed and squared like every other skin.
+    private func addEntry(appID: String, to set: Binding<SkinSet>) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .image]
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose the \(AppCatalog.app(id: appID)?.name ?? appID) picture for this set"
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        guard panel.runModal() == .OK, let source = panel.url else { return }
+        do {
+            guard let imported = try SkinLibrary().importing([source]).first else {
+                skinNote = "Could not read \(source.lastPathComponent) as an image."
+                return
+            }
+            set.wrappedValue.setEntry(appID: appID, skin: imported)
+            saveSkinSets()
+            reloadSkins()
+        } catch {
+            skinNote = "Could not import \(source.lastPathComponent): \(error)"
+        }
+    }
+
+    /// `onlyTo: nil` applies to every tile: each keeps its own app as the
+    /// default and gets the rest of the set to swap to - four defaults of one
+    /// set is just four tiles this ran across.
+    private func apply(_ set: SkinSet, onlyTo tileID: UUID?) {
+        var touched = 0
+        for index in design.tiles.indices
+        where tileID == nil || design.tiles[index].id == tileID {
+            design.tiles[index] = set.applied(to: design.tiles[index])
+            touched += 1
+        }
+        skinNote = "Applied \(set.name) to \(touched) tile\(touched == 1 ? "" : "s")."
+    }
+
+    // MARK: - Variants
+
+    /// Alternative clips for the animated area - same layout, same crop, and
+    /// the phone picks which one plays. Authored here because every variant is
+    /// a full lane-font set that has to be compiled into the install.
+    @ViewBuilder
+    private var variantsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Animation variants").font(.caption.weight(.semibold))
+                Spacer()
+                Button("Add...") { importVariants() }.buttonStyle(.link)
+            }
+
+            if design.variants.isEmpty {
+                Text("Other clips for the same design - like five idle animations of one scene. The phone chooses which plays. Each adds about 29MB of fonts to the install.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ForEach(design.variants) { variant in
+                HStack(spacing: 6) {
+                    Image(systemName: previewedVariantID == variant.id ? "eye.fill" : "film")
+                        .font(.caption2)
+                        .foregroundStyle(previewedVariantID == variant.id ? Color.accentColor : .secondary)
+                    Text(variant.name)
+                        .font(.caption)
+                        .foregroundStyle(previewedVariantID == variant.id ? Color.accentColor : .primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    Button {
+                        removeVariant(variant)
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove \(variant.name) and its clip")
+                }
+                .contentShape(Rectangle())
+                // Click to stand this clip on the canvas; click again for the
+                // primary. One shared transform positions every clip at the
+                // same centre, so this only switches which picture shows.
+                .onTapGesture {
+                    previewedVariantID = previewedVariantID == variant.id ? nil : variant.id
+                }
+                .help("Show \(variant.name) on the canvas")
+            }
+
+            if !design.variants.isEmpty {
+                Text("Click a variant to see it on the canvas. Position and crop are shared - every clip centres on the same point - and each variant loops at its own length.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .disabled(store == nil)
+    }
+
+    private func importVariants() {
+        guard let store else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.movie, .gif, .quickTimeMovie, .mpeg4Movie]
+        panel.allowsMultipleSelection = true
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+
+        for url in panel.urls {
+            do {
+                let name = try store.importVariantClip(url, for: design.id)
+                let stem = url.deletingPathExtension().lastPathComponent
+                // A digest filename says nothing on the phone's picker, and
+                // that picker is the whole point of a variant.
+                let title = DesignStore.looksLikeADigest(stem)
+                    ? "Variant \(design.variants.count + 1)"
+                    : stem
+                design.variants.append(ClipVariant(name: title, sourceVideoName: name))
+            } catch {
+                skinNote = "Could not add \(url.lastPathComponent): \(error)"
+            }
+        }
+    }
+
+    /// Takes the clip with it, like removing an asset does: the file lives in
+    /// the design, and a swapped-out variant should not keep growing it.
+    private func removeVariant(_ variant: ClipVariant) {
+        if previewedVariantID == variant.id { previewedVariantID = nil }
+        design.variants.removeAll { $0.id == variant.id }
+        store?.removeVariantClip(named: variant.sourceVideoName, for: design.id)
+    }
+
     // MARK: - Sidebar
 
     private var sidebar: some View {
@@ -437,6 +1043,10 @@ struct LayoutEditor: View {
                     showingCatalogue = false
                 }
             }
+
+            assetsSection
+
+            variantsSection
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
@@ -521,6 +1131,8 @@ struct LayoutEditor: View {
 
             skinPicker
 
+            skinSetsSection
+
             Toggle("Snap to grid", isOn: $design.snapEnabled)
 
             Toggle("Icon labels", isOn: Binding(
@@ -595,6 +1207,8 @@ struct LayoutEditor: View {
                 set: { design.tiles[index].showsLabel = $0 }
             ))
 
+            alternatesSection(index: index)
+
             HStack {
                 Button("Remove", role: .destructive) {
                     design.tiles.removeAll { $0.id == tile.id }
@@ -602,6 +1216,96 @@ struct LayoutEditor: View {
                 }
             }
         }
+    }
+
+    /// The rest of the slot's list: apps the phone may swap in for this one.
+    ///
+    /// The choice itself happens on the phone - tiles are live SwiftUI over
+    /// the frozen animation, so the occupant is the one part of a design that
+    /// can change after install. What is authored here is only what is on
+    /// offer, because an alternate's artwork has to be baked into the bundle.
+    @ViewBuilder
+    private func alternatesSection(index: Int) -> some View {
+        let tile = design.tiles[index]
+        Divider()
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Phone can swap to").font(.caption.weight(.semibold))
+                Spacer()
+                Button("Add...") { addingAlternate = true }
+                    .buttonStyle(.link)
+                    .popover(isPresented: $addingAlternate) {
+                        CataloguePicker { appID in
+                            addAlternate(appID, at: index)
+                            addingAlternate = false
+                        }
+                    }
+            }
+
+            if tile.alternates.isEmpty {
+                Text("On the phone, a slot can be reassigned to any app listed here, or hidden. Without a list it only offers its own app.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ForEach(tile.alternates) { alternate in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(AppCatalog.app(id: alternate.appID)?.tint ?? .gray)
+                        .frame(width: 10, height: 10)
+                    Text(AppCatalog.app(id: alternate.appID)?.name ?? alternate.appID)
+                        .font(.caption)
+                    if let skin = alternate.skin {
+                        Image(systemName: "photo")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .help("Ships with the skin \(skin)")
+                    }
+                    Spacer()
+                    Button {
+                        design.tiles[index].alternates.removeAll { $0.appID == alternate.appID }
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Stop offering \(AppCatalog.app(id: alternate.appID)?.name ?? alternate.appID)")
+                }
+                .contextMenu {
+                    Menu("Skin") {
+                        Button("None - catalogue plate") {
+                            setAlternateSkin(nil, appID: alternate.appID, at: index)
+                        }
+                        ForEach(skins) { skin in
+                            Button(skin.id) {
+                                setAlternateSkin(skin.id, appID: alternate.appID, at: index)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !tile.alternates.isEmpty, !SnapEngine.isFullyInside(tile, frame: design.widgetRect) {
+                Text("This slot crosses the widget edge, so the part outside keeps its built look whatever the phone picks.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func addAlternate(_ appID: String, at index: Int) {
+        let tile = design.tiles[index]
+        // The same app twice in one slot would make the phone's stored choice
+        // ambiguous, so it is refused rather than resolved later.
+        guard appID != tile.appID, !tile.alternates.contains(where: { $0.appID == appID }) else { return }
+        design.tiles[index].alternates.append(TileAlternate(appID: appID))
+    }
+
+    private func setAlternateSkin(_ skin: String?, appID: String, at index: Int) {
+        guard let position = design.tiles[index].alternates.firstIndex(where: { $0.appID == appID })
+        else { return }
+        design.tiles[index].alternates[position].skin = skin
     }
 
     private func add(appID: String) {
@@ -668,7 +1372,7 @@ private struct CataloguePicker: View {
 
 /// A skin thumbnail, decoded once per appearance.
 private struct AsyncSkinThumbnail: View {
-    let url: URL
+    let url: URL?
 
     @State private var image: Image?
 
@@ -681,7 +1385,9 @@ private struct AsyncSkinThumbnail: View {
             }
         }
         .task(id: url) {
-            image = ImageLoader.load(at: url, maxPixelSize: 132).map { Image(decorative: $0, scale: 1) }
+            image = url
+                .flatMap { ImageLoader.load(at: $0, maxPixelSize: 132) }
+                .map { Image(decorative: $0, scale: 1) }
         }
     }
 }

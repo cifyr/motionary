@@ -87,9 +87,18 @@ targets:
       # needing a second test target.
       - path: Mac/Install/BundleWriter.swift
       - path: Mac/Library/SkinLibrary.swift
+      # Applying a set decides what a slot can show on the phone, so the pure
+      # apply rules are covered with the rest of the tile logic.
+      - path: Mac/Library/SkinSets.swift
+      # Undo is snapshots with hand-rolled redo bookkeeping, which is exactly
+      # the kind of state machine that breaks quietly.
+      - path: Mac/Studio/UndoCoordinator.swift
       # Resolving a tile's artwork decides what the wallpaper bakes as well as
       # what the bundle installs, so it belongs to the same coverage.
       - path: Mac/Library/TileArtwork.swift
+      # Sampling a key colour flips between image and context coordinates, and
+      # getting that wrong picks a different pixel without ever looking broken.
+      - path: Mac/Library/AssetArtwork.swift
       # Whether opening the app interrupts the phone's own audio is decided
       # here, it is plain AVFoundation, and it is invisible from any screenshot,
       # so it is covered here rather than needing an App test target.

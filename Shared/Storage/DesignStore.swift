@@ -6,6 +6,7 @@ enum DesignStoreError: Error, CustomStringConvertible {
     case designNotFound(UUID)
     case manifestMissing(designID: UUID, path: String)
     case decodeFailed(path: String, underlying: Error)
+    case assetImportFailed(source: URL, name: String, underlying: Error)
 
     var description: String {
         switch self {
@@ -17,6 +18,8 @@ enum DesignStoreError: Error, CustomStringConvertible {
             "storage: design \(id.uuidString) has no build manifest at \(path); generate it first"
         case .decodeFailed(let path, let underlying):
             "storage: could not decode \(path): \(underlying)"
+        case .assetImportFailed(let source, let name, let underlying):
+            "storage: could not copy \(source.path) in as \(name): \(underlying)"
         }
     }
 }
@@ -130,8 +133,67 @@ struct DesignStore {
         folder(for: id).appendingPathComponent(name)
     }
 
+    /// Placed decoration lives with the design rather than in the shared skin
+    /// library, so exporting or deleting a design takes its pictures with it.
+    /// The library stays the right home for artwork reused across designs.
+    func assetsFolder(for id: UUID) -> URL {
+        folder(for: id).appendingPathComponent("Assets", isDirectory: true)
+    }
+
+    func assetURL(for id: UUID, name: String) -> URL {
+        assetsFolder(for: id).appendingPathComponent(name)
+    }
+
+    /// Copies a picture into the design, returning the filename to store on the
+    /// `PlacedAsset`. Names collide constantly -- every second export is called
+    /// `image.png` -- so a repeat gets a numbered suffix rather than silently
+    /// overwriting the asset already placed.
+    @discardableResult
+    func importAsset(_ source: URL, for id: UUID) throws -> String {
+        let folder = assetsFolder(for: id)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        let base = source.deletingPathExtension().lastPathComponent
+        let ext = source.pathExtension
+        var name = ext.isEmpty ? base : "\(base).\(ext)"
+        var attempt = 2
+        while FileManager.default.fileExists(atPath: folder.appendingPathComponent(name).path) {
+            name = ext.isEmpty ? "\(base)-\(attempt)" : "\(base)-\(attempt).\(ext)"
+            attempt += 1
+        }
+
+        do {
+            try FileManager.default.copyItem(at: source, to: folder.appendingPathComponent(name))
+        } catch {
+            throw DesignStoreError.assetImportFailed(source: source, name: name, underlying: error)
+        }
+        return name
+    }
+
+    /// Removes an asset's file. A missing file is not an error: the document is
+    /// the record of what exists, and a half-deleted design must still open.
+    func removeAsset(named name: String, for id: UUID) {
+        let url = assetURL(for: id, name: name)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            Self.logger.error(
+                "could not remove asset \(name, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
     func wallpaperURL(for id: UUID) -> URL {
         folder(for: id).appendingPathComponent("wallpaper.png")
+    }
+
+    /// The wallpaper before the tiles were baked in - assets and all else
+    /// included. The phone bakes the tiles itself at export time, because a
+    /// slot's occupant is chosen there and the pre-baked one only knows the
+    /// authored apps.
+    func plainWallpaperURL(for id: UUID) -> URL {
+        folder(for: id).appendingPathComponent("wallpaper-plain.png")
     }
 
     /// The wallpaper cropped to the widget's frame, so the extension decodes
@@ -140,12 +202,67 @@ struct DesignStore {
         folder(for: id).appendingPathComponent("widget-backdrop.jpg")
     }
 
+    /// A variant's own backdrop: the clips differ inside the widget frame, and
+    /// that frame is exactly what the backdrop is.
+    func widgetBackdropURL(for id: UUID, variant: UUID) -> URL {
+        folder(for: id).appendingPathComponent("widget-backdrop-\(variant.uuidString.lowercased()).jpg")
+    }
+
     func previewVideoURL(for id: UUID) -> URL {
         folder(for: id).appendingPathComponent("preview.mp4")
     }
 
+    func previewVideoURL(for id: UUID, variant: UUID) -> URL {
+        folder(for: id).appendingPathComponent("preview-\(variant.uuidString.lowercased()).mp4")
+    }
+
     func sourceVideoURL(for design: DesignDocument) -> URL {
         folder(for: design.id).appendingPathComponent(design.sourceVideoName)
+    }
+
+    /// A variant clip lives beside the primary one, addressed by the filename
+    /// stored on the `ClipVariant`.
+    func variantClipURL(for id: UUID, name: String) -> URL {
+        folder(for: id).appendingPathComponent(name)
+    }
+
+    /// Copies a variant clip into the design, returning the filename to store.
+    /// Suffixed on collision like `importAsset`, because the design folder
+    /// already holds the primary clip and every build output.
+    @discardableResult
+    func importVariantClip(_ source: URL, for id: UUID) throws -> String {
+        try createFolder(for: id)
+        let destination = folder(for: id)
+
+        let base = source.deletingPathExtension().lastPathComponent
+        let ext = source.pathExtension
+        var name = ext.isEmpty ? base : "\(base).\(ext)"
+        var attempt = 2
+        while FileManager.default.fileExists(atPath: destination.appendingPathComponent(name).path) {
+            name = ext.isEmpty ? "\(base)-\(attempt)" : "\(base)-\(attempt).\(ext)"
+            attempt += 1
+        }
+
+        do {
+            try FileManager.default.copyItem(at: source, to: destination.appendingPathComponent(name))
+        } catch {
+            throw DesignStoreError.assetImportFailed(source: source, name: name, underlying: error)
+        }
+        return name
+    }
+
+    /// Removes a variant's clip. Missing is fine, like `removeAsset`: the
+    /// document is the record, and a half-deleted design must still open.
+    func removeVariantClip(named name: String, for id: UUID) {
+        let url = variantClipURL(for: id, name: name)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            Self.logger.error(
+                "could not remove variant clip \(name, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     func fontURL(for id: UUID, familyBase: String, lane: Int) -> URL {
@@ -159,10 +276,16 @@ struct DesignStore {
         try FileManager.default.createDirectory(at: fontsFolder(for: id), withIntermediateDirectories: true, attributes: Self.directoryAttributes)
     }
 
-    func save(_ design: DesignDocument) throws {
+    /// `touch: false` writes without restamping `updatedAt`.
+    ///
+    /// Moving a design between stores is not editing it. Migration used to go
+    /// through the touching path, which restamped every design it carried over
+    /// to the same second -- and since the library sorts on `updatedAt`, that
+    /// replaced the real order of work with the order of one batch job.
+    func save(_ design: DesignDocument, touch: Bool = true) throws {
         try createFolder(for: design.id)
         var updated = design
-        updated.updatedAt = Date()
+        if touch { updated.updatedAt = Date() }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(updated)
@@ -191,6 +314,114 @@ struct DesignStore {
             }
         }
         .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// Copies a design under a new id, so a layout can be varied without
+    /// risking the one that already works.
+    ///
+    /// Only the inputs are copied -- the clip, the background and the placed
+    /// pictures. Fonts, the manifest and the wallpaper are build outputs that
+    /// belong to the id that produced them, and carrying them over would leave
+    /// the copy claiming a build it does not have.
+    ///
+    /// The copy is never starred, whatever the original was: duplicating a
+    /// design should not quietly add 29MB to the next install.
+    func duplicate(_ design: DesignDocument, named name: String? = nil) throws -> DesignDocument {
+        var copy = design
+        copy.id = UUID()
+        copy.name = Self.uniqueName(
+            name ?? Self.copyName(for: design.name),
+            among: loadAll().map(\.name)
+        )
+        copy.createdAt = Date()
+        copy.isStarred = false
+
+        try createFolder(for: copy.id)
+
+        let source = folder(for: design.id)
+        let destination = folder(for: copy.id)
+        var carried: [String] = [design.sourceVideoName]
+        if let background = design.backgroundName { carried.append(background) }
+        // Variant clips are inputs like the primary one; without them the copy
+        // would list variants whose files exist only in the original.
+        carried += design.variants.map(\.sourceVideoName)
+
+        for name in carried {
+            let from = source.appendingPathComponent(name)
+            guard FileManager.default.fileExists(atPath: from.path) else { continue }
+            try FileManager.default.copyItem(at: from, to: destination.appendingPathComponent(name))
+        }
+
+        if FileManager.default.fileExists(atPath: assetsFolder(for: design.id).path) {
+            try FileManager.default.copyItem(
+                at: assetsFolder(for: design.id),
+                to: assetsFolder(for: copy.id)
+            )
+        }
+
+        try save(copy)
+        Self.logger.info(
+            "duplicated \(design.id.uuidString, privacy: .public) as \(copy.id.uuidString, privacy: .public)"
+        )
+        return copy
+    }
+
+    /// Whether a filename carries no information about its contents.
+    ///
+    /// A downloaded clip is often named by digest - browsers, Slack and Discord
+    /// all do it - and naming a design after one gives a row that says nothing.
+    /// Dashes are stripped first so a bare UUID counts too.
+    static func looksLikeADigest(_ name: String) -> Bool {
+        let stripped = name.replacingOccurrences(of: "-", with: "")
+        guard stripped.count >= 16 else { return false }
+        return stripped.allSatisfy(\.isHexDigit)
+    }
+
+    /// Fixed rather than localised: a design name is stored, so it should not
+    /// read differently on a machine with different settings.
+    private static let dateNameFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "d MMM HH:mm"
+        return formatter
+    }()
+
+    /// What to call a design made from `fileName`.
+    ///
+    /// The filename when it says something, the date when it does not. "Clip 30
+    /// Jul 12:57" is not a good name either, but it places the design in the
+    /// afternoon it came from, which a digest does not.
+    static func suggestedName(for fileName: String, created: Date = Date()) -> String {
+        let trimmed = fileName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !looksLikeADigest(trimmed) else {
+            return "Clip \(dateNameFormatter.string(from: created))"
+        }
+        return trimmed
+    }
+
+    /// A name not already in the library.
+    ///
+    /// A design is named after the file it was made from, and the same file
+    /// gets dropped over and over while a layout is worked out. Without this
+    /// the library fills with rows that are identical in every visible
+    /// respect, which is exactly what happened: nineteen designs all called
+    /// after one downloaded GIF.
+    static func uniqueName(_ base: String, among existing: [String]) -> String {
+        guard existing.contains(base) else { return base }
+        var attempt = 2
+        while existing.contains("\(base) \(attempt)") { attempt += 1 }
+        return "\(base) \(attempt)"
+    }
+
+    /// "Board" -> "Board copy" -> "Board copy 2", so duplicating twice does not
+    /// produce two designs with the same name.
+    static func copyName(for name: String) -> String {
+        guard name.hasSuffix(" copy") || name.contains(" copy ") else { return "\(name) copy" }
+        let parts = name.split(separator: " ")
+        if let last = parts.last, let number = Int(last) {
+            return parts.dropLast().joined(separator: " ") + " \(number + 1)"
+        }
+        return "\(name) 2"
     }
 
     /// Designs are whole directories of generated artefacts, so removal moves

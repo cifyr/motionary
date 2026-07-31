@@ -220,7 +220,7 @@ enum SVGPathParser {
 
         // CGPath has no elliptical arc, so draw on a unit circle and let the
         // transform apply the radii and rotation.
-        var transform = CGAffineTransform(translationX: center.x, y: center.y)
+        let transform = CGAffineTransform(translationX: center.x, y: center.y)
             .rotated(by: phi)
             .scaledBy(x: rx, y: ry)
         path.addArc(

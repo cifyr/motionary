@@ -43,7 +43,27 @@ enum PrebuiltDesign {
         var manifestName: String { resource("manifest") }
         var backdropURL: URL? { PrebuiltDesign.resource(named: resource("backdrop"), extension: "jpg") }
         var wallpaperURL: URL? { PrebuiltDesign.resource(named: resource("wallpaper"), extension: "png") }
+        /// The wallpaper without the tiles, when this build shipped one. The
+        /// phone bakes its own occupants onto it at export time; nil means the
+        /// design was built before the plain variant existed and only the
+        /// pre-baked wallpaper can be offered.
+        var plainWallpaperURL: URL? { PrebuiltDesign.resource(named: resource("wallpaper-plain"), extension: "png") }
         var previewURL: URL? { PrebuiltDesign.resource(named: resource("preview"), extension: "mp4") }
+
+        /// A clip variant's own backdrop and preview, addressed by variant id.
+        func backdropURL(variant: UUID) -> URL? {
+            PrebuiltDesign.resource(
+                named: resource("backdrop-\(variant.uuidString.lowercased())"),
+                extension: "jpg"
+            )
+        }
+
+        func previewURL(variant: UUID) -> URL? {
+            PrebuiltDesign.resource(
+                named: resource("preview-\(variant.uuidString.lowercased())"),
+                extension: "mp4"
+            )
+        }
 
         var manifest: BuildManifest? {
             guard let url = PrebuiltDesign.resource(named: manifestName, extension: "json"),
@@ -188,6 +208,27 @@ enum PrebuiltDesign {
 
     static func iconResource(tileID: UUID) -> String {
         "prebuilt-icon-\(tileID.uuidString.lowercased())"
+    }
+
+    /// The baked icon for whatever app occupies a slot right now.
+    ///
+    /// The authored occupant keeps the un-suffixed name older builds wrote, so
+    /// designs baked before slots could be reassigned still find their artwork.
+    /// An alternate's file only exists when it shipped with a skin; there is
+    /// deliberately no fallback to the authored file, because showing one app's
+    /// icon on a tile that launches another is worse than the catalogue's
+    /// SF Symbol plate.
+    static func iconResource(tileID: UUID, appID: String, authoredAppID: String) -> String {
+        appID == authoredAppID
+            ? iconResource(tileID: tileID)
+            : "\(iconResource(tileID: tileID))-\(appID.lowercased())"
+    }
+
+    static func iconURL(tileID: UUID, appID: String, authoredAppID: String) -> URL? {
+        PrebuiltDesign.resource(
+            named: iconResource(tileID: tileID, appID: appID, authoredAppID: authoredAppID),
+            extension: "png"
+        )
     }
 
     /// Whether every lane font declared in `UIAppFonts` actually resolved.

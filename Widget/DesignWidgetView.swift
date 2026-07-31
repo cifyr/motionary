@@ -49,9 +49,16 @@ struct DesignWidgetView: View {
             lab
         } else if let source = bundled() {
             let _ = record(source: source)
+            // The phone's slot choices, applied at render time: the occupant is
+            // live SwiftUI over the frozen animation, so it is the one part of
+            // a design that can change without a rebuild.
+            let authored = Dictionary(
+                source.manifest.placedTiles.map { ($0.id, $0.appID) },
+                uniquingKeysWith: { first, _ in first }
+            )
             CompositionView(
                 manifest: source.manifest,
-                tiles: source.manifest.placedTiles,
+                tiles: SlotChoices.apply(to: source.manifest.placedTiles, designID: source.manifest.designID),
                 // The rendered rect, not the cut frame: only the viewport's
                 // origin positions content, and the system's origin is 2px left
                 // of the frame a design is cut to.
@@ -67,7 +74,11 @@ struct DesignWidgetView: View {
                     TileView(
                         tile: tile,
                         side: side,
-                        iconImage: PrebuiltDesign.iconURL(tileID: tile.id)
+                        iconImage: PrebuiltDesign.iconURL(
+                            tileID: tile.id,
+                            appID: tile.appID,
+                            authoredAppID: authored[tile.id] ?? tile.appID
+                        )
                             .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(side * 3)) }
                             .map { Image(decorative: $0, scale: 1) }
                     )
@@ -122,9 +133,25 @@ struct DesignWidgetView: View {
     /// returned the same stale design.
     private func bundled() -> Source? {
         // Whichever the app last chose, so the Home Screen follows a swipe.
-        guard let entry = PrebuiltDesign.selected(), let manifest = entry.manifest else { return nil }
+        guard let entry = PrebuiltDesign.selected(), var manifest = entry.manifest else { return nil }
+        var backdropURL = entry.backdropURL
+        var name = entry.name
+        // The phone's chosen clip variant, applied by swapping which font
+        // family and backdrop the same composition draws. Guarded on the
+        // fonts actually being bundled: a stale choice must degrade to the
+        // primary clip, not to a widget whose lanes resolve and draw nothing.
+        if let variant = VariantChoice.resolved(in: manifest),
+           PrebuiltDesign.fontsAreBundled(familyBase: variant.fontFamilyBase) {
+            manifest.fontFamilyBase = variant.fontFamilyBase
+            manifest.totalFontBytes = variant.totalFontBytes
+            // Variants keep their own lengths; a manifest from before that
+            // carries nil and the design's loop stands in.
+            manifest.loopFrameCount = variant.loopFrameCount ?? manifest.loopFrameCount
+            backdropURL = entry.backdropURL(variant: variant.id) ?? backdropURL
+            name = "\(entry.name) (\(variant.name))"
+        }
         let fonts = PrebuiltDesign.fontReport(for: manifest)
-        guard let url = entry.backdropURL ?? entry.wallpaperURL else { return nil }
+        guard let url = backdropURL ?? entry.wallpaperURL else { return nil }
         let longest = manifest.backdropRect.map { Int(max($0.width, $0.height)) }
             ?? Int(max(manifest.screenSize.width, manifest.screenSize.height))
         return Source(
@@ -133,7 +160,7 @@ struct DesignWidgetView: View {
             fontsUsable: fonts.resolvable == fonts.requested,
             origin: "bundled",
             scope: "UIAppFonts",
-            name: entry.name
+            name: name
         )
     }
 
