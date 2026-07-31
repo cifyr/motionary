@@ -133,9 +133,22 @@ struct DesignWidgetView: View {
     /// returned the same stale design.
     private func bundled() -> Source? {
         // Whichever the app last chose, so the Home Screen follows a swipe.
-        guard let entry = PrebuiltDesign.selected(), let manifest = entry.manifest else { return nil }
+        guard let entry = PrebuiltDesign.selected(), var manifest = entry.manifest else { return nil }
+        var backdropURL = entry.backdropURL
+        var name = entry.name
+        // The phone's chosen clip variant, applied by swapping which font
+        // family and backdrop the same composition draws. Guarded on the
+        // fonts actually being bundled: a stale choice must degrade to the
+        // primary clip, not to a widget whose lanes resolve and draw nothing.
+        if let variant = VariantChoice.resolved(in: manifest),
+           PrebuiltDesign.fontsAreBundled(familyBase: variant.fontFamilyBase) {
+            manifest.fontFamilyBase = variant.fontFamilyBase
+            manifest.totalFontBytes = variant.totalFontBytes
+            backdropURL = entry.backdropURL(variant: variant.id) ?? backdropURL
+            name = "\(entry.name) (\(variant.name))"
+        }
         let fonts = PrebuiltDesign.fontReport(for: manifest)
-        guard let url = entry.backdropURL ?? entry.wallpaperURL else { return nil }
+        guard let url = backdropURL ?? entry.wallpaperURL else { return nil }
         let longest = manifest.backdropRect.map { Int(max($0.width, $0.height)) }
             ?? Int(max(manifest.screenSize.width, manifest.screenSize.height))
         return Source(
@@ -144,7 +157,7 @@ struct DesignWidgetView: View {
             fontsUsable: fonts.resolvable == fonts.requested,
             origin: "bundled",
             scope: "UIAppFonts",
-            name: entry.name
+            name: name
         )
     }
 

@@ -745,6 +745,88 @@ struct LayoutEditor: View {
         store?.removeAsset(named: asset.fileName, for: design.id)
     }
 
+    // MARK: - Variants
+
+    /// Alternative clips for the animated area - same layout, same crop, and
+    /// the phone picks which one plays. Authored here because every variant is
+    /// a full lane-font set that has to be compiled into the install.
+    @ViewBuilder
+    private var variantsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Animation variants").font(.caption.weight(.semibold))
+                Spacer()
+                Button("Add...") { importVariants() }.buttonStyle(.link)
+            }
+
+            if design.variants.isEmpty {
+                Text("Other clips for the same design - like five idle animations of one scene. The phone chooses which plays. Each adds about 29MB of fonts to the install.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ForEach(design.variants) { variant in
+                HStack(spacing: 6) {
+                    Image(systemName: "film")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(variant.name)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    Button {
+                        removeVariant(variant)
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove \(variant.name) and its clip")
+                }
+            }
+
+            if !design.variants.isEmpty {
+                Text("Variants should match the primary clip's length and framing: the loop, the crop and the layout are shared.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .disabled(store == nil)
+    }
+
+    private func importVariants() {
+        guard let store else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.movie, .gif, .quickTimeMovie, .mpeg4Movie]
+        panel.allowsMultipleSelection = true
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+
+        for url in panel.urls {
+            do {
+                let name = try store.importVariantClip(url, for: design.id)
+                let stem = url.deletingPathExtension().lastPathComponent
+                // A digest filename says nothing on the phone's picker, and
+                // that picker is the whole point of a variant.
+                let title = DesignStore.looksLikeADigest(stem)
+                    ? "Variant \(design.variants.count + 1)"
+                    : stem
+                design.variants.append(ClipVariant(name: title, sourceVideoName: name))
+            } catch {
+                skinNote = "Could not add \(url.lastPathComponent): \(error)"
+            }
+        }
+    }
+
+    /// Takes the clip with it, like removing an asset does: the file lives in
+    /// the design, and a swapped-out variant should not keep growing it.
+    private func removeVariant(_ variant: ClipVariant) {
+        design.variants.removeAll { $0.id == variant.id }
+        store?.removeVariantClip(named: variant.sourceVideoName, for: design.id)
+    }
+
     // MARK: - Sidebar
 
     private var sidebar: some View {
@@ -764,6 +846,8 @@ struct LayoutEditor: View {
             }
 
             assetsSection
+
+            variantsSection
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {

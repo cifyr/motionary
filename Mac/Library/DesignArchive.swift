@@ -78,6 +78,13 @@ struct DesignArchive {
         if manager.fileExists(atPath: source.path) {
             try manager.copyItem(at: source, to: stage.appendingPathComponent(design.sourceVideoName))
         }
+        // Variant clips are inputs like the primary one: without them the
+        // import would list variants whose files stayed behind.
+        for variant in design.variants {
+            let clip = store.variantClipURL(for: design.id, name: variant.sourceVideoName)
+            guard manager.fileExists(atPath: clip.path) else { continue }
+            try manager.copyItem(at: clip, to: stage.appendingPathComponent(variant.sourceVideoName))
+        }
         if let name = design.backgroundName {
             let background = store.backgroundURL(for: design.id, name: name)
             if manager.fileExists(atPath: background.path) {
@@ -89,7 +96,11 @@ struct DesignArchive {
         if let library = try? SkinLibrary() {
             let skinsFolder = stage.appendingPathComponent("Skins", isDirectory: true)
             try manager.createDirectory(at: skinsFolder, withIntermediateDirectories: true)
-            for name in Set(design.tiles.compactMap(\.skin)) {
+            // Alternates' skins as well as the authored tiles': a slot's
+            // swapped-in occupant is drawn from the same library.
+            let used = design.tiles.compactMap(\.skin)
+                + design.tiles.flatMap { $0.alternates.compactMap(\.skin) }
+            for name in Set(used) {
                 let skin = library.url(for: name)
                 guard manager.fileExists(atPath: skin.path) else { continue }
                 try manager.copyItem(at: skin, to: skinsFolder.appendingPathComponent(name))
@@ -148,6 +159,15 @@ struct DesignArchive {
             let destination = store.sourceVideoURL(for: design)
             if manager.fileExists(atPath: destination.path) { try manager.removeItem(at: destination) }
             try manager.copyItem(at: source, to: destination)
+        }
+        // Variants whose clip did not travel are dropped rather than kept as
+        // rows that cannot build, the same way a missing background falls back.
+        design.variants = design.variants.filter { variant in
+            let packaged = folder.appendingPathComponent(variant.sourceVideoName)
+            guard manager.fileExists(atPath: packaged.path) else { return false }
+            let destination = store.variantClipURL(for: design.id, name: variant.sourceVideoName)
+            if manager.fileExists(atPath: destination.path) { try? manager.removeItem(at: destination) }
+            return (try? manager.copyItem(at: packaged, to: destination)) != nil
         }
         if let name = design.backgroundName {
             let background = folder.appendingPathComponent(name)

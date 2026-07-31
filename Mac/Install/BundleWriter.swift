@@ -133,6 +133,19 @@ struct BundleWriter {
             // The app plays this rather than drawing the lane fonts: only the
             // widget renderer advances timer text.
             try copy(design.folder.appendingPathComponent("preview.mp4"), to: "prebuilt-\(key)-preview.mp4")
+            // Each variant's backdrop and preview; its fonts are already in
+            // the lane glob above, since every clip writes into one folder.
+            for variant in design.manifest.builtVariants {
+                let vid = variant.id.uuidString.lowercased()
+                try copy(
+                    design.folder.appendingPathComponent("widget-backdrop-\(vid).jpg"),
+                    to: "prebuilt-\(key)-backdrop-\(vid).jpg"
+                )
+                try copy(
+                    design.folder.appendingPathComponent("preview-\(vid).mp4"),
+                    to: "prebuilt-\(key)-preview-\(vid).mp4"
+                )
+            }
             try installIcons(manifest: design.manifest, from: iconsFolder)
         }
 

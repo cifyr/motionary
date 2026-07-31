@@ -30,8 +30,10 @@ struct HomeView: View {
             Color.black.ignoresSafeArea()
 
             if let entry, let manifest = entry.manifest {
+                // Identity includes the chosen variant so picking another one
+                // rebuilds the player rather than looping the old clip.
                 composition(entry: entry, manifest: manifest)
-                    .id(entry.id)
+                    .id("\(entry.id.uuidString)-\(VariantChoice.resolved(in: manifest)?.id.uuidString ?? "primary")")
             } else {
                 EmptyDesignView()
             }
@@ -39,7 +41,9 @@ struct HomeView: View {
             if entries.count > 1 { PageDots(count: entries.count, index: index) }
 
             SaveButton(saving: saving) { save() }
-            if entry?.manifest?.placedTiles.isEmpty == false {
+            // Anything to choose at all: slot occupants, or a clip variant.
+            if let manifest = entry?.manifest,
+               !manifest.placedTiles.isEmpty || !manifest.builtVariants.isEmpty {
                 SlotsButton { choosingSlots = true }
             }
             // A tap that opens nothing has to say why. Rewriting this view
@@ -101,11 +105,14 @@ struct HomeView: View {
             manifest.placedTiles.map { ($0.id, $0.appID) },
             uniquingKeysWith: { first, _ in first }
         )
+        // The chosen clip variant's preview; the wallpaper stays the design's,
+        // because variants only differ inside the widget frame.
+        let variant = VariantChoice.resolved(in: manifest)
         return LoopingCompositionView(
             screenSize: manifest.screenSize,
             viewport: CGRect(origin: .zero, size: manifest.screenSize),
             tiles: SlotChoices.apply(to: manifest.placedTiles, designID: manifest.designID),
-            videoURL: entry.previewURL,
+            videoURL: variant.flatMap { entry.previewURL(variant: $0.id) } ?? entry.previewURL,
             // The tile-free variant when the build has one: the live tiles
             // drawn over it are the occupants the phone chose, and a swapped
             // one over its baked authored self would ghost through the plate.
@@ -281,7 +288,7 @@ private struct SlotsButton: View {
                         .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
                         .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
                 }
-                .accessibilityLabel("Choose which apps fill the slots")
+                .accessibilityLabel("Design options: choose the animation and which apps fill the slots")
                 Spacer()
             }
         }
