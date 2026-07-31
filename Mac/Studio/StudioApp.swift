@@ -250,6 +250,8 @@ struct StudioView: View {
     @State private var targeting = false
 
     @State private var projectRoot: URL? = ProjectLocator.find()
+    /// The run in flight, kept so Escape can stop it.
+    @State private var buildTask: Task<Void, Never>?
 
     private var isBusy: Bool { stage != nil }
 
@@ -293,6 +295,8 @@ struct StudioView: View {
             }
         }
         .frame(minWidth: 880, minHeight: 700)
+        // Escape stops a run wherever the focus happens to be.
+        .onExitCommand { stopBuild() }
         .task {
             refreshDevices()
             StudioPipeline.migrateLegacyDesigns()
@@ -696,7 +700,12 @@ struct StudioView: View {
     private func progress(_ stage: StudioPipeline.Stage) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             ProgressView(value: stage.fraction)
-            Text(stage.caption).font(.callout).foregroundStyle(.secondary)
+            HStack {
+                Text(stage.caption).font(.callout).foregroundStyle(.secondary)
+                Spacer()
+                Button("Stop") { stopBuild() }
+                    .help("Stop the build (esc)")
+            }
         }
     }
 
@@ -804,7 +813,7 @@ struct StudioView: View {
         let pipeline = StudioPipeline(projectRoot: projectRoot, model: model)
         let loop = loopSeconds
         let device = deviceID
-        Task {
+        buildTask = Task {
             do {
                 let built = try await pipeline.install(
                     edited,
@@ -830,13 +839,31 @@ struct StudioView: View {
                             : "Installed. \(built.summary). Add the Motionary widget if it is not already on the Home Screen."
                     }
                 }
+            } catch is CancellationError {
+                // Asked for, so it is not a failure. Says so, because a run
+                // that simply stopped looks exactly like one that crashed.
+                await MainActor.run {
+                    self.stage = nil
+                    self.done = "Build stopped. Nothing was installed."
+                }
             } catch {
                 await MainActor.run {
                     self.stage = nil
                     self.failure = String(describing: error)
                 }
             }
+            await MainActor.run { self.buildTask = nil }
         }
+    }
+
+    /// Escape stops a build. A render is long enough that starting one by
+    /// mistake needs a way out that is not force-quitting the studio.
+    private func stopBuild() {
+        guard let buildTask else { return }
+        buildTask.cancel()
+        self.buildTask = nil
+        stage = nil
+        done = "Build stopped. Nothing was installed."
     }
 }
 

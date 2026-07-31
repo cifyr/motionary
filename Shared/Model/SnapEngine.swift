@@ -24,9 +24,13 @@ struct SnapEngine {
     var threshold: CGFloat = 14
     var screenSize: CGSize = DeviceGeometry.screenPixelSize
     var widgetRect: CGRect
-    /// Icon grid columns and rows used for alignment candidates.
-    var gridColumns: Int = 4
-    var gridRows: Int = 6
+    /// The tile grid whose column and row centres are snap candidates.
+    ///
+    /// This used to be a bare column count divided into the frame, which drew
+    /// one set of cells on the canvas and snapped to another: the lines a tile
+    /// locked onto were not the ones under it. Taking the design's own grid
+    /// means the candidates are exactly the cells being shown.
+    var grid = WidgetGrid()
 
     struct Result {
         let center: CGPoint
@@ -76,10 +80,13 @@ struct SnapEngine {
             // Tile edges flush to the widget frame, not just centred in it.
             add(widgetRect.minX + tileSize / 2, .widgetFrame)
             add(widgetRect.maxX - tileSize / 2, .widgetFrame)
-            for column in 0 ..< gridColumns {
-                let pitch = widgetRect.width / CGFloat(gridColumns)
-                add(widgetRect.minX + pitch * (CGFloat(column) + 0.5), .iconGrid)
+            // One candidate per column, at the column's centre: the same line
+            // the dashed cell on the canvas is drawn around.
+            for column in 0 ..< max(grid.columns, 1) {
+                let cell = GridCell(row: 0, column: column)
+                add(grid.cellRect(cell, in: widgetRect).midX, .iconGrid)
             }
+            // Centre to centre with whatever is already placed.
             for sibling in siblings {
                 add(sibling.center.x, .sibling)
             }
@@ -88,9 +95,9 @@ struct SnapEngine {
             add(widgetRect.midY, .widgetFrame)
             add(widgetRect.minY + tileSize / 2, .widgetFrame)
             add(widgetRect.maxY - tileSize / 2, .widgetFrame)
-            for row in 0 ..< gridRows {
-                let pitch = widgetRect.height / CGFloat(gridRows)
-                add(widgetRect.minY + pitch * (CGFloat(row) + 0.5), .iconGrid)
+            for row in 0 ..< max(grid.rows, 1) {
+                let cell = GridCell(row: row, column: 0)
+                add(grid.cellRect(cell, in: widgetRect).midY, .iconGrid)
             }
             for sibling in siblings {
                 add(sibling.center.y, .sibling)
