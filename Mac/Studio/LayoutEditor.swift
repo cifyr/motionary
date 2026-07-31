@@ -53,6 +53,12 @@ struct LayoutEditor: View {
     /// Set while an option-drag is making a copy, so the drag moves the copy
     /// rather than making a new one on every tick.
     @State private var duplicatedDuringDrag: UUID?
+    /// Canvas points per phone point. Everything on the canvas is measured
+    /// through it, so the composition scales as one picture.
+    @State var zoom: CGFloat = LayoutEditor.defaultZoom
+    /// The space the canvas has to sit in, measured rather than assumed, so
+    /// "Fit" can work out a zoom that actually fits.
+    @State private var canvasViewport: CGSize = .zero
 
     /// The one thing selected, when exactly one is. Most of the inspector only
     /// makes sense for a single item; alignment is what the rest is for.
@@ -64,13 +70,44 @@ struct LayoutEditor: View {
         design.tiles.filter { selection.contains($0.id) }
     }
 
-    /// Points per screen pixel, so the canvas is the phone at a readable size.
-    static let zoom: CGFloat = 0.62
+    // MARK: - Zoom
+
+    /// Steps rather than a free slider: the canvas is a phone, and the sizes
+    /// worth working at are a short list.
+    private static let zoomStops: [CGFloat] = [0.25, 0.35, 0.5, 0.62, 0.75, 1, 1.25, 1.5, 2, 2.5]
+
+    func zoomIn() {
+        zoom = Self.zoomStops.first { $0 > zoom + 0.001 } ?? Self.zoomRange.upperBound
+    }
+
+    func zoomOut() {
+        zoom = Self.zoomStops.last { $0 < zoom - 0.001 } ?? Self.zoomRange.lowerBound
+    }
+
+    /// The largest zoom that still shows the whole phone, with the canvas
+    /// padding left over. Falls back to the default before the viewport has
+    /// been measured, which is the state on the very first frame.
+    func zoomToFit() {
+        guard canvasViewport.width > 1, canvasViewport.height > 1 else {
+            zoom = Self.defaultZoom
+            return
+        }
+        let padding: CGFloat = 56
+        let fit = min(
+            (canvasViewport.width - padding) / model.screenPointSize.width,
+            (canvasViewport.height - padding) / model.screenPointSize.height
+        )
+        zoom = min(max(fit, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
+    }
+
+    /// Where the canvas starts, and what the window is sized against.
+    static let defaultZoom: CGFloat = 0.62
+    static let zoomRange: ClosedRange<CGFloat> = 0.25 ... 2.5
 
     private var canvas: CGSize {
         CGSize(
-            width: model.screenPointSize.width * Self.zoom,
-            height: model.screenPointSize.height * Self.zoom
+            width: model.screenPointSize.width * zoom,
+            height: model.screenPointSize.height * zoom
         )
     }
 
@@ -112,11 +149,11 @@ struct LayoutEditor: View {
     /// Without it the sheet inherited the studio window's 520pt width and cut
     /// the sidebar and the Build button off the right edge.
     static func width(for model: DeviceModel) -> CGFloat {
-        model.screenPointSize.width * zoom + sidebarWidth + layersWidth + 90
+        model.screenPointSize.width * defaultZoom + sidebarWidth + layersWidth + 90
     }
 
     static func height(for model: DeviceModel) -> CGFloat {
-        model.screenPointSize.height * zoom + 140
+        model.screenPointSize.height * defaultZoom + 140
     }
 
     static let sidebarWidth: CGFloat = 250
@@ -133,10 +170,17 @@ struct LayoutEditor: View {
             editorToolbar
             HStack(alignment: .top, spacing: 0) {
                 layersPanel
-                ScrollView([.horizontal, .vertical]) {
-                    screen
-                        .padding(28)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                GeometryReader { geometry in
+                    ScrollView([.horizontal, .vertical]) {
+                        screen
+                            .padding(28)
+                            .frame(
+                                minWidth: geometry.size.width,
+                                minHeight: geometry.size.height
+                            )
+                    }
+                    .onAppear { canvasViewport = geometry.size }
+                    .onChange(of: geometry.size) { _, size in canvasViewport = size }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(StudioTheme.canvasBackground)
@@ -336,9 +380,9 @@ struct LayoutEditor: View {
         Color.black
             .frame(width: canvas.width, height: canvas.height)
             .overlay(alignment: .topLeading) { layers }
-            .clipShape(RoundedRectangle(cornerRadius: 34 * Self.zoom, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 34 * zoom, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 34 * Self.zoom, style: .continuous)
+                RoundedRectangle(cornerRadius: 34 * zoom, style: .continuous)
                     .strokeBorder(.white.opacity(0.15), lineWidth: 1)
             )
             .gesture(clipDrag)
@@ -347,6 +391,17 @@ struct LayoutEditor: View {
             .focusable()
             .focusEffectDisabled()
             .focused($canvasFocused)
+            // Zoom from the keyboard the way every canvas app does it. On the
+            // canvas rather than the window so it cannot fight a text field.
+            .onKeyPress(keys: ["=", "+", "-", "0"], phases: .down) { press in
+                guard press.modifiers.contains(.command) else { return .ignored }
+                switch press.key.character {
+                case "=", "+": zoomIn()
+                case "-": zoomOut()
+                default: zoomToFit()
+                }
+                return .handled
+            }
             .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow], phases: [.down, .repeat]) { press in
                 let step: CGFloat = press.modifiers.contains(.shift) ? 10 : 1
                 let moved = switch press.key {
