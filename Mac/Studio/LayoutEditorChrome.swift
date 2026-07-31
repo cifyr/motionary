@@ -242,8 +242,26 @@ extension LayoutEditor {
             Text("\(model.name) · \(Int(model.screenPointSize.width)) × \(Int(model.screenPointSize.height)) pt")
                 .font(StudioTheme.mono)
                 .tracking(0.3)
-            Text("zoom locked")
-                .foregroundStyle(StudioTheme.textDim)
+
+            // The mockup locks the zoom; a real canvas has to move, because
+            // placing a tile against a corner is guesswork at 62%.
+            HStack(spacing: 3) {
+                Button { zoomOut() } label: { Image(systemName: "minus") }
+                    .buttonStyle(.studioCompact)
+                    .disabled(zoom <= Self.zoomRange.lowerBound + 0.001)
+                    .help("Zoom out (⌘-)")
+                Text("\(Int((zoom * 100).rounded()))%")
+                    .font(StudioTheme.mono)
+                    .foregroundStyle(StudioTheme.text)
+                    .frame(width: 38)
+                Button { zoomIn() } label: { Image(systemName: "plus") }
+                    .buttonStyle(.studioCompact)
+                    .disabled(zoom >= Self.zoomRange.upperBound - 0.001)
+                    .help("Zoom in (⌘+)")
+                Button("Fit") { zoomToFit() }
+                    .buttonStyle(.studioCompact)
+                    .help("Fit the phone to the canvas (⌘0)")
+            }
 
             Rectangle().fill(StudioTheme.divider).frame(width: 1, height: 16)
 
@@ -253,7 +271,7 @@ extension LayoutEditor {
 
             Spacer()
 
-            Text("Arrows nudge 1 px · ⇧ arrows 10 px · ⌥ drag duplicates · ⌘ click adds")
+            Text("Arrows nudge 1 px · ⇧ 10 px · ⌥ drag duplicates · ⌘ click adds · ⌘± zooms")
                 .foregroundStyle(StudioTheme.textDim)
                 .lineLimit(1)
                 .truncationMode(.tail)
