@@ -113,7 +113,8 @@ enum HeadlessBuild {
             let writer = try BundleWriter(projectRoot: root)
             let result = try writer.install(
                 bundled,
-                iconsFolder: StudioPipeline.iconsFolder(for: store)
+                iconsFolder: StudioPipeline.iconsFolder(for: store),
+                store: store
             )
             print("bundled \(bundled.count) designs, \(result.fontCount) fonts, \(result.totalBytes / 1_048_576)MB")
             for design in bundled { print("  - \(design.name)") }

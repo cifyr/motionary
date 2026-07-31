@@ -113,6 +113,53 @@ final class ManifestTileTests: XCTestCase {
         let url = LaunchLink.url(for: "spotify")
         XCTAssertEqual(LaunchLink.appID(from: url), "spotify")
     }
+
+    /// Placed pictures travel like the tiles do: baked into the wallpaper
+    /// alone they never reach the widget's own frame, which is how a placed
+    /// picture shipped invisibly the first time.
+    func testPlacedPicturesSurviveTheManifest() throws {
+        let asset = PlacedAsset(
+            fileName: "sticker.png",
+            center: CGPoint(x: 300, y: 900),
+            size: CGSize(width: 200, height: 120),
+            rotation: 12,
+            opacity: 0.9,
+            zIndex: 3
+        )
+        var built = manifest(tiles: nil)
+        built.assets = [asset]
+        let decoded = try roundTrip(built)
+
+        XCTAssertEqual(decoded.placedAssets.count, 1)
+        XCTAssertEqual(decoded.placedAssets.first, asset)
+        XCTAssertEqual(
+            decoded.placedAssets.first?.id, asset.id,
+            "a placement's identity is what finds its baked picture"
+        )
+    }
+
+    /// A manifest written before pictures travelled has no such key.
+    func testAManifestWithoutPicturesStillDecodes() throws {
+        var json = try JSONSerialization.jsonObject(
+            with: try JSONEncoder().encode(manifest(tiles: nil))
+        ) as! [String: Any]
+        json.removeValue(forKey: "assets")
+        let decoded = try JSONDecoder().decode(
+            BuildManifest.self,
+            from: try JSONSerialization.data(withJSONObject: json)
+        )
+        XCTAssertTrue(decoded.placedAssets.isEmpty)
+    }
+
+    /// The widget looks a baked picture up by its placement id, so the bundle
+    /// writer and the widget have to agree on the name.
+    func testPictureResourceNameFollowsThePlacement() {
+        let id = UUID()
+        XCTAssertEqual(
+            PrebuiltDesign.pictureResource(assetID: id),
+            "prebuilt-picture-\(id.uuidString.lowercased())"
+        )
+    }
 }
 
 /// A chosen background replaces the derived fill, and the wallpaper and the
