@@ -21,6 +21,8 @@ struct LayoutEditor: View {
     @State private var scaleBase: Double?
     @State private var tileBase: CGPoint?
     @State private var showingCatalogue = false
+    /// The selected tile is collecting an alternate from the catalogue.
+    @State private var addingAlternate = false
     /// Applied to tiles added later, so turning labels off once does not have
     /// to be repeated for every app placed after it.
     @State private var labelsDefault = true
@@ -920,6 +922,8 @@ struct LayoutEditor: View {
                 set: { design.tiles[index].showsLabel = $0 }
             ))
 
+            alternatesSection(index: index)
+
             HStack {
                 Button("Remove", role: .destructive) {
                     design.tiles.removeAll { $0.id == tile.id }
@@ -927,6 +931,96 @@ struct LayoutEditor: View {
                 }
             }
         }
+    }
+
+    /// The rest of the slot's list: apps the phone may swap in for this one.
+    ///
+    /// The choice itself happens on the phone - tiles are live SwiftUI over
+    /// the frozen animation, so the occupant is the one part of a design that
+    /// can change after install. What is authored here is only what is on
+    /// offer, because an alternate's artwork has to be baked into the bundle.
+    @ViewBuilder
+    private func alternatesSection(index: Int) -> some View {
+        let tile = design.tiles[index]
+        Divider()
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Phone can swap to").font(.caption.weight(.semibold))
+                Spacer()
+                Button("Add...") { addingAlternate = true }
+                    .buttonStyle(.link)
+                    .popover(isPresented: $addingAlternate) {
+                        CataloguePicker { appID in
+                            addAlternate(appID, at: index)
+                            addingAlternate = false
+                        }
+                    }
+            }
+
+            if tile.alternates.isEmpty {
+                Text("On the phone, a slot can be reassigned to any app listed here, or hidden. Without a list it only offers its own app.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ForEach(tile.alternates) { alternate in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(AppCatalog.app(id: alternate.appID)?.tint ?? .gray)
+                        .frame(width: 10, height: 10)
+                    Text(AppCatalog.app(id: alternate.appID)?.name ?? alternate.appID)
+                        .font(.caption)
+                    if let skin = alternate.skin {
+                        Image(systemName: "photo")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .help("Ships with the skin \(skin)")
+                    }
+                    Spacer()
+                    Button {
+                        design.tiles[index].alternates.removeAll { $0.appID == alternate.appID }
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Stop offering \(AppCatalog.app(id: alternate.appID)?.name ?? alternate.appID)")
+                }
+                .contextMenu {
+                    Menu("Skin") {
+                        Button("None - catalogue plate") {
+                            setAlternateSkin(nil, appID: alternate.appID, at: index)
+                        }
+                        ForEach(skins) { skin in
+                            Button(skin.id) {
+                                setAlternateSkin(skin.id, appID: alternate.appID, at: index)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !tile.alternates.isEmpty, !SnapEngine.isFullyInside(tile, frame: design.widgetRect) {
+                Text("This slot crosses the widget edge, so the part outside keeps its built look whatever the phone picks.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func addAlternate(_ appID: String, at index: Int) {
+        let tile = design.tiles[index]
+        // The same app twice in one slot would make the phone's stored choice
+        // ambiguous, so it is refused rather than resolved later.
+        guard appID != tile.appID, !tile.alternates.contains(where: { $0.appID == appID }) else { return }
+        design.tiles[index].alternates.append(TileAlternate(appID: appID))
+    }
+
+    private func setAlternateSkin(_ skin: String?, appID: String, at index: Int) {
+        guard let position = design.tiles[index].alternates.firstIndex(where: { $0.appID == appID })
+        else { return }
+        design.tiles[index].alternates[position].skin = skin
     }
 
     private func add(appID: String) {

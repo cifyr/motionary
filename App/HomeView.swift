@@ -14,6 +14,10 @@ struct HomeView: View {
     @StateObject private var icons = IconImageLoader(store: try? DesignStore())
 
     @State private var selection: UUID? = ActiveDesign.identifier
+    @State private var choosingSlots = false
+    /// Bumped by the slots sheet so the composition re-reads the choices; the
+    /// store itself is UserDefaults, which SwiftUI does not observe.
+    @State private var slotsEdition = 0
 
     /// Whatever there is to say right now, from either source.
     private var message: String? { note ?? router.lastFailure }
@@ -35,6 +39,9 @@ struct HomeView: View {
             if entries.count > 1 { PageDots(count: entries.count, index: index) }
 
             SaveButton(saving: saving) { save() }
+            if entry?.manifest?.placedTiles.isEmpty == false {
+                SlotsButton { choosingSlots = true }
+            }
             // A tap that opens nothing has to say why. Rewriting this view
             // dropped the alert that used to report it, so a tile with no
             // launch route failed in complete silence.
@@ -51,6 +58,11 @@ struct HomeView: View {
         .ignoresSafeArea()
         .statusBarHidden(entry != nil)
         .persistentSystemOverlays(.hidden)
+        .sheet(isPresented: $choosingSlots) {
+            if let entry, let manifest = entry.manifest {
+                SlotSettingsView(manifest: manifest) { slotsEdition += 1 }
+            }
+        }
         // A swipe rather than any chrome: the whole point of this screen is to
         // be the Home Screen, and a switcher on top of it would spoil that.
         .gesture(
@@ -81,10 +93,18 @@ struct HomeView: View {
     private func composition(entry: PrebuiltDesign.Entry, manifest: BuildManifest) -> some View {
         let spec = TimerFontSpec(laneCount: manifest.laneCount, framesPerSecond: manifest.framesPerSecond)
         let loop = manifest.loopFrameCount
+        // The same slot choices the widget applies, so the app never shows a
+        // different set of apps than the Home Screen it imitates. slotsEdition
+        // is what makes this line re-run after the sheet writes a choice.
+        let _ = slotsEdition
+        let authored = Dictionary(
+            manifest.placedTiles.map { ($0.id, $0.appID) },
+            uniquingKeysWith: { first, _ in first }
+        )
         return LoopingCompositionView(
             screenSize: manifest.screenSize,
             viewport: CGRect(origin: .zero, size: manifest.screenSize),
-            tiles: manifest.placedTiles,
+            tiles: SlotChoices.apply(to: manifest.placedTiles, designID: manifest.designID),
             videoURL: entry.previewURL,
             wallpaper: entry.wallpaperURL
                 .flatMap { UIImage(contentsOfFile: $0.path) }
@@ -101,7 +121,11 @@ struct HomeView: View {
                 TileView(
                     tile: tile,
                     side: side,
-                    iconImage: PrebuiltDesign.iconURL(tileID: tile.id)
+                    iconImage: PrebuiltDesign.iconURL(
+                        tileID: tile.id,
+                        appID: tile.appID,
+                        authoredAppID: authored[tile.id] ?? tile.appID
+                    )
                         .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(side * 3)) }
                         .map { Image(decorative: $0, scale: 1) }
                         ?? icons.image(for: tile)
@@ -192,6 +216,32 @@ private struct SaveButton: View {
             }
         }
         .padding(.trailing, 20)
+        .padding(.bottom, 34)
+    }
+}
+
+/// Opens the slot settings, mirroring the save button on the other corner.
+private struct SlotsButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Button(action: action) {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 46, height: 46)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
+                        .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
+                }
+                .accessibilityLabel("Choose which apps fill the slots")
+                Spacer()
+            }
+        }
+        .padding(.leading, 20)
         .padding(.bottom, 34)
     }
 }

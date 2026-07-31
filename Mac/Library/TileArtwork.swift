@@ -36,4 +36,13 @@ struct TileArtwork {
     func image(for tile: PlacedTile, maxPixelSize: Int = SkinLibrary.renderedSide) -> CGImage? {
         url(for: tile).flatMap { ImageLoader.load(at: $0, maxPixelSize: maxPixelSize) }
     }
+
+    /// A skin by name alone, for slot alternates: candidates that are not the
+    /// tile's authored app but ship their own artwork.
+    func url(forSkin name: String) -> URL? {
+        guard let candidate = skins?.url(for: name),
+              FileManager.default.fileExists(atPath: candidate.path)
+        else { return nil }
+        return candidate
+    }
 }
