@@ -851,35 +851,29 @@ private struct EditorWindow: View {
     @State private var undo = UndoCoordinator()
     /// What the autosave last wrote, so opening a design does not restamp it.
     @State private var lastSaved: DesignDocument?
+    /// What the toolbar says under the name. Set by the autosave rather than
+    /// timed, so it reports a write that happened instead of guessing.
+    @State private var savedNote = ""
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Scrolled rather than sized to fit. As a sheet this could demand
-            // its own dimensions; as a pane it has to survive whatever width
-            // the split view is dragged to, and the canvas is a fixed size.
-            ScrollView([.horizontal, .vertical]) {
-                LayoutEditor(
-                    design: $prepared.design,
-                    model: model,
-                    poster: prepared.poster,
-                    store: prepared.store
-                )
-                .frame(
-                    minWidth: LayoutEditor.width(for: model),
-                    minHeight: LayoutEditor.height(for: model)
-                )
-            }
-            Divider()
-            HStack {
-                // "Done", not "Close": it saves either way, and in a pane there
-                // is no sheet for "close" to refer to.
-                Button("Done") { onCancel(prepared) }
-                Spacer()
-                Button("Build and install") { onBuild(prepared) }
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(16)
-        }
+        // The editor carries its own toolbar and status bar now, and scrolls
+        // the canvas itself, so the window is just a host for it.
+        LayoutEditor(
+            design: $prepared.design,
+            model: model,
+            poster: prepared.poster,
+            store: prepared.store,
+            documentName: prepared.design.name,
+            savedNote: savedNote,
+            // "Preview" leaves the editor the way Done did: it saves, and the
+            // library pane behind is where a design is looked at.
+            onPreview: { onCancel(prepared) },
+            onBuild: { onBuild(prepared) }
+        )
+        .frame(
+            minWidth: LayoutEditor.width(for: model),
+            minHeight: LayoutEditor.height(for: model)
+        )
         .onAppear {
             lastSaved = prepared.design
             undo.apply = { prepared.design = $0 }
@@ -893,9 +887,17 @@ private struct EditorWindow: View {
         // on remembering to press Done.
         .task(id: prepared.design) {
             guard prepared.design != lastSaved else { return }
+            savedNote = "unsaved changes"
             guard (try? await Task.sleep(for: .milliseconds(800))) != nil else { return }
-            try? prepared.store.save(prepared.design)
-            lastSaved = prepared.design
+            do {
+                try prepared.store.save(prepared.design)
+                lastSaved = prepared.design
+                savedNote = "saved just now"
+            } catch {
+                // Named rather than silent: an autosave that stops working
+                // looks exactly like one that is working.
+                savedNote = "could not save: \(error.localizedDescription)"
+            }
         }
     }
 }

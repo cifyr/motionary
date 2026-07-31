@@ -1,6 +1,84 @@
 import CoreGraphics
 import Foundation
 
+/// One slot of the widget's tile grid, numbered from the top left.
+struct GridCell: Codable, Equatable, Hashable, Sendable {
+    var row: Int
+    var column: Int
+
+    /// How the editor names a cell: R1C1 is the top left.
+    var label: String { "R\(row + 1)C\(column + 1)" }
+}
+
+/// The grid tiles land on inside the widget frame.
+///
+/// An aid, not a constraint: a tile may sit off grid, because the wallpaper
+/// carries a baked picture of anything crossing the frame's edge. What the
+/// grid buys is that adding apps never stacks them and a row can be made
+/// without measuring.
+struct WidgetGrid: Codable, Equatable, Sendable {
+    var columns: Int = 4
+    var rows: Int = 2
+    /// Inset from the widget frame's edges, in screen pixels.
+    var margin: CGFloat = 56
+    /// Gutter between cells, in screen pixels.
+    var gap: CGFloat = 40
+
+    var cellCount: Int { max(columns, 1) * max(rows, 1) }
+
+    var allCells: [GridCell] {
+        (0 ..< max(rows, 1)).flatMap { row in
+            (0 ..< max(columns, 1)).map { GridCell(row: row, column: $0) }
+        }
+    }
+
+    func cellRect(_ cell: GridCell, in frame: CGRect) -> CGRect {
+        let columns = max(self.columns, 1)
+        let rows = max(self.rows, 1)
+        // Clamped so a wide gutter on a narrow frame cannot invert the cell.
+        let width = max(1, (frame.width - margin * 2 - gap * CGFloat(columns - 1)) / CGFloat(columns))
+        let height = max(1, (frame.height - margin * 2 - gap * CGFloat(rows - 1)) / CGFloat(rows))
+        return CGRect(
+            x: frame.minX + margin + (width + gap) * CGFloat(cell.column),
+            y: frame.minY + margin + (height + gap) * CGFloat(cell.row),
+            width: width,
+            height: height
+        )
+    }
+
+    func cellCenter(_ cell: GridCell, in frame: CGRect) -> CGPoint {
+        let rect = cellRect(cell, in: frame)
+        return CGPoint(x: rect.midX, y: rect.midY)
+    }
+
+    /// A square that fits any cell, which is what a tile is sized to by
+    /// default - tiles are square and cells need not be.
+    func tileSide(in frame: CGRect) -> CGFloat {
+        let rect = cellRect(GridCell(row: 0, column: 0), in: frame)
+        return max(40, min(rect.width, rect.height))
+    }
+
+    func nearestCell(to point: CGPoint, in frame: CGRect) -> GridCell? {
+        allCells.min {
+            cellCenter($0, in: frame).distance(to: point) < cellCenter($1, in: frame).distance(to: point)
+        }
+    }
+
+    /// The first cell nothing occupies, in reading order. Nil when the grid is
+    /// full, which the editor reports rather than silently stacking.
+    func firstFreeCell(occupied: Set<GridCell>) -> GridCell? {
+        allCells.first { !occupied.contains($0) }
+    }
+}
+
+private extension CGPoint {
+    func distance(to other: CGPoint) -> CGFloat {
+        let dx = x - other.x
+        let dy = y - other.y
+        return (dx * dx + dy * dy).squareRoot()
+    }
+}
+
 /// An app the phone may put in a tile's slot instead of the authored one.
 ///
 /// The authored `appID` on the tile is the default occupant - the first of the
@@ -52,6 +130,10 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
     /// list. Which one occupies the slot is the phone's choice, stored in the
     /// app group - the one part of a design that is not frozen at install time.
     var alternates: [TileAlternate] = []
+    /// The grid cell this tile sits in, or nil for a tile placed off grid.
+    /// Dragging with snapping off is what puts a tile off grid; the editor
+    /// says which it is rather than leaving it to be guessed from position.
+    var cell: GridCell?
 
     var rect: CGRect {
         CGRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size)
@@ -77,7 +159,8 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         skin: String? = nil,
         tintHex: String? = nil,
         rotation: Double = 0,
-        alternates: [TileAlternate] = []
+        alternates: [TileAlternate] = [],
+        cell: GridCell? = nil
     ) {
         self.id = id
         self.appID = appID
@@ -91,6 +174,7 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         self.tintHex = tintHex
         self.rotation = rotation
         self.alternates = alternates
+        self.cell = cell
     }
 
     /// Decoded field by field rather than by the synthesised initialiser.
@@ -113,6 +197,7 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         tintHex = try container.decodeIfPresent(String.self, forKey: .tintHex)
         rotation = try container.decodeIfPresent(Double.self, forKey: .rotation) ?? 0
         alternates = try container.decodeIfPresent([TileAlternate].self, forKey: .alternates) ?? []
+        cell = try container.decodeIfPresent(GridCell.self, forKey: .cell)
     }
 }
 
@@ -255,6 +340,8 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     /// Alternative clips for the animated part. The design's own clip is the
     /// default; the phone chooses among all of them after install.
     var variants: [ClipVariant] = []
+    /// The grid tiles land on inside the widget frame.
+    var grid: WidgetGrid = WidgetGrid()
     var snapEnabled: Bool = true
 
     /// A chosen background image, by filename inside the design's folder.
@@ -381,6 +468,7 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         tiles = try container.decodeIfPresent([PlacedTile].self, forKey: .tiles) ?? []
         assets = try container.decodeIfPresent([PlacedAsset].self, forKey: .assets) ?? []
         variants = try container.decodeIfPresent([ClipVariant].self, forKey: .variants) ?? []
+        grid = try container.decodeIfPresent(WidgetGrid.self, forKey: .grid) ?? WidgetGrid()
         snapEnabled = try container.decodeIfPresent(Bool.self, forKey: .snapEnabled) ?? true
         backgroundName = try container.decodeIfPresent(String.self, forKey: .backgroundName)
         widgetCornerRadius = try container.decodeIfPresent(CGFloat.self, forKey: .widgetCornerRadius)

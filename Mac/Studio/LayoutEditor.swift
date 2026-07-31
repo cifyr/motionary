@@ -15,8 +15,19 @@ struct LayoutEditor: View {
     /// Where a chosen background is stored, so the editor can both read one
     /// back and write a newly picked one alongside the design.
     let store: DesignStore?
+    /// What the toolbar's title says, and what its two buttons do. Supplied by
+    /// the window, which owns saving and building.
+    var documentName: String = "Design"
+    var savedNote: String = ""
+    var onPreview: () -> Void = {}
+    var onBuild: () -> Void = {}
 
-    @State private var selection: UUID?
+    /// What is being edited. A set because aligning needs more than one thing
+    /// at a time; command-click adds to it.
+    ///
+    /// Internal rather than private so the toolbar, layer list and status bar
+    /// in LayoutEditorChrome.swift can read it - they are this same view.
+    @State var selection: Set<UUID> = []
     @State private var placementBase: MediaTransform?
     @State private var scaleBase: Double?
     @State private var tileBase: CGPoint?
@@ -35,10 +46,23 @@ struct LayoutEditor: View {
     /// The set collecting a new entry from the catalogue popover.
     @State private var addingEntryTo: UUID?
     /// The variant whose clip is standing in for the primary on the canvas.
-    @State private var previewedVariantID: UUID?
+    @State var previewedVariantID: UUID?
     @State private var variantPoster: CGImage?
     /// The asset whose key colour is being picked by clicking it.
     @State private var pickingKeyFor: UUID?
+    /// Set while an option-drag is making a copy, so the drag moves the copy
+    /// rather than making a new one on every tick.
+    @State private var duplicatedDuringDrag: UUID?
+
+    /// The one thing selected, when exactly one is. Most of the inspector only
+    /// makes sense for a single item; alignment is what the rest is for.
+    private var singleSelection: UUID? {
+        selection.count == 1 ? selection.first : nil
+    }
+
+    private var selectedTiles: [PlacedTile] {
+        design.tiles.filter { selection.contains($0.id) }
+    }
 
     /// Points per screen pixel, so the canvas is the phone at a readable size.
     static let zoom: CGFloat = 0.62
@@ -83,33 +107,57 @@ struct LayoutEditor: View {
         )
     }
 
-    /// Wide enough for the canvas and the sidebar together.
+    /// Wide enough for the canvas with a panel on either side.
     ///
     /// Without it the sheet inherited the studio window's 520pt width and cut
     /// the sidebar and the Build button off the right edge.
     static func width(for model: DeviceModel) -> CGFloat {
-        model.screenPointSize.width * zoom + sidebarWidth + 60
+        model.screenPointSize.width * zoom + sidebarWidth + layersWidth + 90
     }
 
     static func height(for model: DeviceModel) -> CGFloat {
-        model.screenPointSize.height * zoom + 40
+        model.screenPointSize.height * zoom + 140
     }
 
-    private static let sidebarWidth: CGFloat = 240
+    static let sidebarWidth: CGFloat = 250
+    static let layersWidth: CGFloat = 170
 
+    /// Layers on the left, canvas in the middle, inspector and libraries on
+    /// the right, with a toolbar over all three and a status bar under them.
+    ///
+    /// The shape is the point: what is being edited is named in one place, the
+    /// libraries never move, and lining things up is a button rather than a
+    /// steady hand. See docs/studio-design-brief.md.
     var body: some View {
-        HStack(alignment: .top, spacing: 20) {
-            screen
-            // Scrolled, because the sidebar holds more than the sheet is tall.
-            // Overflowing it squeezed the flexible child - the skin grid - down
-            // to nothing, so an imported skin was in the view tree and zero
-            // pixels high, which reads exactly like an import that failed.
-            ScrollView {
-                sidebar.frame(width: Self.sidebarWidth, alignment: .leading)
+        VStack(spacing: 0) {
+            editorToolbar
+            Divider()
+            HStack(alignment: .top, spacing: 0) {
+                ScrollView { layersPanel.padding(12) }
+                    .frame(width: Self.layersWidth)
+                    .background(.quaternary.opacity(0.25))
+                Divider()
+                ScrollView([.horizontal, .vertical]) {
+                    screen.padding(20)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Divider()
+                // Scrolled, because the sidebar holds more than the window is
+                // tall. Overflowing it squeezed the flexible child - the skin
+                // grid - down to nothing, so an imported skin was in the view
+                // tree and zero pixels high, which reads exactly like an
+                // import that failed.
+                ScrollView {
+                    sidebar
+                        .frame(width: Self.sidebarWidth, alignment: .leading)
+                        .padding(12)
+                }
+                .frame(width: Self.sidebarWidth + 24)
+                .background(.quaternary.opacity(0.25))
             }
-            .frame(width: Self.sidebarWidth)
+            Divider()
+            statusBar
         }
-        .padding(20)
         .task {
             reloadSkins()
             reloadBackground()
@@ -212,7 +260,7 @@ struct LayoutEditor: View {
     /// nowhere to import a skin until a tile happened to be selected - and no
     /// way to tell that was why nothing appeared to happen.
     private var skinPicker: some View {
-        let index = selection.flatMap { id in design.tiles.firstIndex { $0.id == id } }
+        let index = singleSelection.flatMap { id in design.tiles.firstIndex { $0.id == id } }
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("Skins").font(.caption.weight(.semibold))
@@ -288,7 +336,7 @@ struct LayoutEditor: View {
             )
             .gesture(clipDrag)
             .simultaneousGesture(clipZoom)
-            .onTapGesture { selection = nil }
+            .onTapGesture { selection = [] }
             .focusable()
             .focusEffectDisabled()
             .focused($canvasFocused)
@@ -306,8 +354,46 @@ struct LayoutEditor: View {
             // Selecting something on the canvas is the intent to work on it,
             // arrow keys included.
             .onChange(of: selection) { _, value in
-                if value != nil { canvasFocused = true }
+                if !value.isEmpty { canvasFocused = true }
             }
+    }
+
+    /// The cells, drawn only while snapping is on: they are a placement aid,
+    /// and a grid over a design nobody is snapping is just noise.
+    @ViewBuilder
+    private var gridOverlay: some View {
+        if design.snapEnabled {
+            let frame = design.widgetRect
+            ForEach(design.grid.allCells, id: \.self) { cell in
+                let rect = design.grid.cellRect(cell, in: frame)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(
+                        .white.opacity(occupiedCells.contains(cell) ? 0.08 : 0.22),
+                        style: StrokeStyle(lineWidth: 1, dash: [3, 3])
+                    )
+                    .frame(width: rect.width * unit, height: rect.height * unit)
+                    .offset(x: rect.minX * unit, y: rect.minY * unit)
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    private var occupiedCells: Set<GridCell> {
+        Set(design.tiles.compactMap(\.cell))
+    }
+
+    /// Click selects; command-click adds to the selection, so several tiles
+    /// can be aligned together.
+    func select(_ id: UUID) {
+        if NSEvent.modifierFlags.contains(.command) {
+            if selection.contains(id) {
+                selection.remove(id)
+            } else {
+                selection.insert(id)
+            }
+        } else {
+            selection = [id]
+        }
     }
 
     /// The clip, in canvas coordinates.
@@ -374,6 +460,7 @@ struct LayoutEditor: View {
                 clipLayer(poster: poster)
             }
             widgetFrame
+            gridOverlay
             // Under the tiles, matching what the wallpaper bakes, so the canvas
             // shows the stacking the phone will actually have.
             ForEach(design.assets.sorted { $0.zIndex < $1.zIndex }) { asset in
@@ -401,7 +488,7 @@ struct LayoutEditor: View {
         return TileView(
             tile: tile,
             side: side,
-            isSelected: selection == tile.id,
+            isSelected: selection.contains(tile.id),
             iconImage: tile.skin
                 .flatMap { try? SkinLibrary().url(for: $0) }
                 .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(side * 3)) }
@@ -410,7 +497,7 @@ struct LayoutEditor: View {
             .frame(width: side, height: side)
             .offset(x: tile.rect.minX * unit, y: tile.rect.minY * unit)
             .gesture(tileDrag(tile))
-            .onTapGesture { selection = tile.id }
+            .onTapGesture { select(tile.id) }
     }
 
     private func assetView(_ asset: PlacedAsset) -> some View {
@@ -448,14 +535,14 @@ struct LayoutEditor: View {
         .rotationEffect(.degrees(asset.rotation))
         .opacity(asset.opacity)
         .overlay {
-            if selection == asset.id {
+            if selection.contains(asset.id) {
                 Rectangle().strokeBorder(.white.opacity(0.9), lineWidth: 1)
                     .rotationEffect(.degrees(asset.rotation))
             }
         }
         .offset(x: asset.rect.minX * unit, y: asset.rect.minY * unit)
         .gesture(assetDrag(asset))
-        .onTapGesture { selection = asset.id }
+        .onTapGesture { select(asset.id) }
     }
 
     private func assetImage(_ asset: PlacedAsset) -> CGImage? {
@@ -471,7 +558,7 @@ struct LayoutEditor: View {
                 let base = tileBase ?? asset.center
                 if tileBase == nil {
                     tileBase = base
-                    selection = asset.id
+                    selection = [asset.id]
                 }
                 design.assets[index].center = CGPoint(
                     x: base.x + value.translation.width / unit,
@@ -528,12 +615,25 @@ struct LayoutEditor: View {
     private func tileDrag(_ tile: PlacedTile) -> some Gesture {
         DragGesture()
             .onChanged { value in
-                guard let index = design.tiles.firstIndex(where: { $0.id == tile.id }) else { return }
-                let base = tileBase ?? design.tiles[index].center
+                // Option-drag leaves the original where it is and moves a copy,
+                // made once at the start of the gesture rather than per tick.
+                var draggedID = duplicatedDuringDrag ?? tile.id
                 if tileBase == nil {
-                    tileBase = base
-                    selection = tile.id
+                    if NSEvent.modifierFlags.contains(.option) {
+                        var copy = tile
+                        copy.id = UUID()
+                        copy.cell = nil
+                        design.tiles.append(copy)
+                        duplicatedDuringDrag = copy.id
+                        draggedID = copy.id
+                    }
+                    tileBase = tile.center
+                    selection = [draggedID]
                 }
+                guard let index = design.tiles.firstIndex(where: { $0.id == draggedID }),
+                      let base = tileBase
+                else { return }
+
                 let moved = CGPoint(
                     x: base.x + value.translation.width / unit,
                     y: base.y + value.translation.height / unit
@@ -548,23 +648,46 @@ struct LayoutEditor: View {
                 // of the part the widget cannot draw.
                 guard design.snapEnabled else {
                     design.tiles[index].center = engine.clamp(center: moved, tileSize: extent)
+                    // Dragged by hand with snapping off, so it holds no cell -
+                    // the layer list says "off grid" rather than naming one it
+                    // has left.
+                    design.tiles[index].cell = nil
                     return
+                }
+
+                // The grid first, then the sibling guides: a cell is a
+                // deliberate slot, and a tile a few pixels from one means that
+                // one. Guides still catch anything placed between cells.
+                let frame = design.widgetRect
+                if let cell = design.grid.nearestCell(to: moved, in: frame) {
+                    let centre = design.grid.cellCenter(cell, in: frame)
+                    let reach = design.grid.tileSide(in: frame) * 0.45
+                    let taken = design.tiles.contains { $0.id != draggedID && $0.cell == cell }
+                    if !taken, abs(centre.x - moved.x) < reach, abs(centre.y - moved.y) < reach {
+                        design.tiles[index].center = centre
+                        design.tiles[index].cell = cell
+                        return
+                    }
                 }
                 let snapped = engine.snap(
                     center: moved,
                     tileSize: extent,
-                    siblings: design.tiles.filter { $0.id != tile.id }
+                    siblings: design.tiles.filter { $0.id != draggedID }
                 )
                 design.tiles[index].center = engine.clamp(center: snapped.center, tileSize: extent)
+                design.tiles[index].cell = nil
             }
-            .onEnded { _ in tileBase = nil }
+            .onEnded { _ in
+                tileBase = nil
+                duplicatedDuringDrag = nil
+            }
     }
 
     // MARK: - Assets
 
     private var selectedAsset: PlacedAsset? {
-        guard let selection else { return nil }
-        return design.assets.first { $0.id == selection }
+        guard let singleSelection else { return nil }
+        return design.assets.first { $0.id == singleSelection }
     }
 
     /// Bindings resolve the asset by id on every access rather than closing over
@@ -615,7 +738,7 @@ struct LayoutEditor: View {
             } else {
                 ForEach(design.assets.sorted { $0.zIndex < $1.zIndex }) { asset in
                     HStack(spacing: 6) {
-                        Image(systemName: selection == asset.id ? "largecircle.fill.circle" : "circle")
+                        Image(systemName: selection.contains(asset.id) ? "largecircle.fill.circle" : "circle")
                             .foregroundStyle(.secondary)
                         Text(asset.fileName)
                             .lineLimit(1)
@@ -624,7 +747,7 @@ struct LayoutEditor: View {
                         Spacer()
                     }
                     .contentShape(Rectangle())
-                    .onTapGesture { selection = asset.id }
+                    .onTapGesture { select(asset.id) }
                     .contextMenu {
                         Button("Bring to front") { restack(asset, toFront: true) }
                         Button("Send to back") { restack(asset, toFront: false) }
@@ -801,7 +924,7 @@ struct LayoutEditor: View {
     /// picture behind would grow the folder every time one is swapped out.
     private func removeAsset(_ asset: PlacedAsset) {
         design.assets.removeAll { $0.id == asset.id }
-        if selection == asset.id { selection = nil }
+        selection.remove(asset.id)
         store?.removeAsset(named: asset.fileName, for: design.id)
     }
 
@@ -895,9 +1018,9 @@ struct LayoutEditor: View {
 
             if !set.wrappedValue.entries.isEmpty {
                 HStack {
-                    if let selection, design.tiles.contains(where: { $0.id == selection }) {
+                    if let singleSelection, design.tiles.contains(where: { $0.id == singleSelection }) {
                         Button("Apply to selected tile") {
-                            apply(set.wrappedValue, onlyTo: selection)
+                            apply(set.wrappedValue, onlyTo: singleSelection)
                         }
                         .buttonStyle(.link)
                         .font(.caption)
@@ -1092,32 +1215,114 @@ struct LayoutEditor: View {
 
     @ViewBuilder
     private var inspector: some View {
-        if let selection, let index = design.tiles.firstIndex(where: { $0.id == selection }) {
+        if selection.count > 1 {
+            VStack(alignment: .leading, spacing: 8) {
+                inspectorHeading("\(selection.count) tiles", detail: "aligning together")
+                Text("Use the align buttons in the toolbar, or Make a row. Command-click a tile to add or remove it.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else if let singleSelection, let index = design.tiles.firstIndex(where: { $0.id == singleSelection }) {
             selected(index: index)
         } else if let asset = selectedAsset {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Picture").font(.subheadline.weight(.semibold))
+                inspectorHeading("Picture", detail: asset.fileName)
+                positionFields(
+                    center: asset.center,
+                    setCenter: { center in
+                        guard let index = design.assets.firstIndex(where: { $0.id == asset.id })
+                        else { return }
+                        design.assets[index].center = center
+                    }
+                )
                 assetInspector(asset)
-                alignRow(
-                    extent: CGSize(width: asset.size.width, height: asset.size.height)
-                ) { center in
-                    guard let index = design.assets.firstIndex(where: { $0.id == asset.id })
-                    else { return }
-                    design.assets[index].center = center
-                } current: {
-                    design.assets.first { $0.id == asset.id }?.center ?? .zero
-                }
-                positionReadout(center: asset.center)
             }
         } else {
             sceneInspector
         }
     }
 
-    /// Nothing selected means the scene itself is selected.
+    /// "Editing / Tile — opens Music": what is selected, and the one fact
+    /// about it worth reading before anything else.
+    func inspectorHeading(_ title: String, detail: String?) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text("EDITING")
+                .font(.system(size: 9, weight: .semibold).monospaced())
+                .foregroundStyle(.tertiary)
+            HStack(spacing: 6) {
+                Text(title).font(.subheadline.weight(.semibold))
+                if let detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+        }
+    }
+
+    /// Typed position, because a drag cannot hit an exact pixel and reading
+    /// one back is half of lining things up.
+    private func positionFields(
+        center: CGPoint,
+        setCenter: @escaping (CGPoint) -> Void
+    ) -> some View {
+        HStack(spacing: 6) {
+            Text("X · Y").font(.caption).foregroundStyle(.secondary)
+            TextField("x", value: Binding(
+                get: { Int(center.x.rounded()) },
+                set: { setCenter(CGPoint(x: CGFloat($0), y: center.y)) }
+            ), format: .number)
+                .frame(width: 54)
+            TextField("y", value: Binding(
+                get: { Int(center.y.rounded()) },
+                set: { setCenter(CGPoint(x: center.x, y: CGFloat($0))) }
+            ), format: .number)
+                .frame(width: 54)
+            Text("px").font(.caption2).foregroundStyle(.secondary)
+            Spacer()
+        }
+        .textFieldStyle(.roundedBorder)
+        .font(.caption.monospacedDigit())
+    }
+
+    /// Nothing selected means the scene itself is selected. It is never blank.
     private var sceneInspector: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Scene").font(.subheadline.weight(.semibold))
+            inspectorHeading("Scene", detail: "wallpaper, frame, clip")
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Tile grid").font(.caption.weight(.semibold))
+                HStack(spacing: 6) {
+                    Stepper(
+                        "\(design.grid.columns) across",
+                        value: Binding(
+                            get: { design.grid.columns },
+                            set: { design.grid.columns = max(1, min(8, $0)) }
+                        ),
+                        in: 1 ... 8
+                    )
+                    .controlSize(.small)
+                }
+                HStack(spacing: 6) {
+                    Stepper(
+                        "\(design.grid.rows) down",
+                        value: Binding(
+                            get: { design.grid.rows },
+                            set: { design.grid.rows = max(1, min(8, $0)) }
+                        ),
+                        in: 1 ... 8
+                    )
+                    .controlSize(.small)
+                }
+                Text("\(design.tiles.compactMap(\.cell).count) of \(design.grid.cellCount) cells used. New tiles fill the next free one.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.caption)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
@@ -1215,6 +1420,13 @@ struct LayoutEditor: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if let skinNote {
+                Text(skinNote)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -1241,7 +1453,7 @@ struct LayoutEditor: View {
                             .frame(width: 10, height: 10)
                         Text(AppCatalog.app(id: tile.appID)?.name ?? tile.appID)
                             .font(.caption)
-                            .foregroundStyle(selection == tile.id ? Color.accentColor : .primary)
+                            .foregroundStyle(selection.contains(tile.id) ? Color.accentColor : .primary)
                         if !tile.alternates.isEmpty {
                             Text("+\(tile.alternates.count)")
                                 .font(.caption2)
@@ -1250,7 +1462,7 @@ struct LayoutEditor: View {
                         Spacer()
                     }
                     .contentShape(Rectangle())
-                    .onTapGesture { selection = tile.id }
+                    .onTapGesture { select(tile.id) }
                 }
             }
         }
@@ -1316,7 +1528,7 @@ struct LayoutEditor: View {
     /// Moves whatever is selected by whole pixels, clamped like a drag is.
     private func nudgeSelection(dx: CGFloat, dy: CGFloat) -> Bool {
         let engine = SnapEngine(screenSize: model.screenPixelSize, widgetRect: design.widgetRect)
-        if let selection, let index = design.tiles.firstIndex(where: { $0.id == selection }) {
+        if let singleSelection, let index = design.tiles.firstIndex(where: { $0.id == singleSelection }) {
             let moved = CGPoint(
                 x: design.tiles[index].center.x + dx,
                 y: design.tiles[index].center.y + dy
@@ -1327,7 +1539,7 @@ struct LayoutEditor: View {
             )
             return true
         }
-        if let selection, let index = design.assets.firstIndex(where: { $0.id == selection }) {
+        if let singleSelection, let index = design.assets.firstIndex(where: { $0.id == singleSelection }) {
             let asset = design.assets[index]
             let moved = CGPoint(x: asset.center.x + dx, y: asset.center.y + dy)
             design.assets[index].center = engine.clamp(
@@ -1341,36 +1553,79 @@ struct LayoutEditor: View {
 
     private func selected(index: Int) -> some View {
         let tile = design.tiles[index]
+        let app = AppCatalog.app(id: tile.appID)
         return VStack(alignment: .leading, spacing: 10) {
-            Text(AppCatalog.app(id: tile.appID)?.name ?? tile.appID)
-                .font(.subheadline.weight(.semibold))
-            if AppCatalog.app(id: tile.appID)?.canLaunch == false {
-                Text("Cannot be opened from a widget - no URL scheme exists for it. It still draws.")
+            inspectorHeading("Tile", detail: "opens \(app?.name ?? tile.appID)")
+
+            // Which app the tile opens is a property of the tile, changed in
+            // place - it used to mean removing the tile and placing another.
+            Picker("Opens", selection: Binding(
+                get: { design.tiles[index].appID },
+                set: { design.tiles[index].appID = $0 }
+            )) {
+                ForEach(AppCatalog.all) { entry in
+                    Text(entry.name).tag(entry.id)
+                }
+            }
+            .controlSize(.small)
+
+            if app?.canLaunch == false {
+                Text("\(app?.name ?? tile.appID) publishes no URL scheme, so a tap cannot open it. The tile still draws.")
                     .font(.caption2)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            LabeledContent("Size") {
-                Slider(
-                    value: Binding(
-                        get: { design.tiles[index].size },
-                        set: { size in
-                            design.tiles[index].size = max(40, size)
-                            // Growing a tile can push it off the screen just as
-                            // dragging can.
-                            design.tiles[index].center = SnapEngine(
-                                screenSize: model.screenPixelSize,
-                                widgetRect: design.widgetRect
-                            ).clamp(
-                                center: design.tiles[index].center,
-                                tileSize: design.tiles[index].boundingExtent
-                            )
-                        }
-                    ),
-                    in: 40 ... 400
-                )
+            Toggle("Caption", isOn: Binding(
+                get: { design.tiles[index].showsLabel },
+                set: { design.tiles[index].showsLabel = $0 }
+            ))
+            .controlSize(.small)
+
+            Divider()
+
+            Text("Position").font(.caption.weight(.semibold))
+            positionFields(center: tile.center) { center in
+                guard design.tiles.indices.contains(index) else { return }
+                design.tiles[index].center = center
+                design.tiles[index].cell = nil
             }
+
+            HStack(spacing: 6) {
+                Text("Size").font(.caption).foregroundStyle(.secondary)
+                TextField("size", value: Binding(
+                    get: { Int(design.tiles[index].size.rounded()) },
+                    set: { newSize in
+                        design.tiles[index].size = max(40, CGFloat(newSize))
+                        // Growing a tile can push it off the screen just as
+                        // dragging can.
+                        design.tiles[index].center = SnapEngine(
+                            screenSize: model.screenPixelSize,
+                            widgetRect: design.widgetRect
+                        ).clamp(
+                            center: design.tiles[index].center,
+                            tileSize: design.tiles[index].boundingExtent
+                        )
+                    }
+                ), format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 54)
+                Text("px square").font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+            }
+            .font(.caption.monospacedDigit())
+
+            HStack(spacing: 6) {
+                Text("Cell").font(.caption).foregroundStyle(.secondary)
+                Text(tile.cell?.label ?? "off grid")
+                    .font(.caption.monospaced())
+                Spacer()
+                Button("Snap to cell") { snapToCell(index: index) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(design.grid.firstFreeCell(occupied: occupiedCells) == nil && tile.cell == nil)
+            }
+
             LabeledContent("Angle") {
                 Slider(
                     value: Binding(
@@ -1380,30 +1635,59 @@ struct LayoutEditor: View {
                     in: -45 ... 45
                 )
             }
-            Toggle("Label", isOn: Binding(
-                get: { design.tiles[index].showsLabel },
-                set: { design.tiles[index].showsLabel = $0 }
-            ))
-
-            alignRow(
-                extent: CGSize(width: tile.size, height: tile.size)
-            ) { center in
-                guard design.tiles.indices.contains(index) else { return }
-                design.tiles[index].center = center
-            } current: {
-                design.tiles.indices.contains(index) ? design.tiles[index].center : .zero
-            }
-            positionReadout(center: tile.center)
+            .controlSize(.small)
 
             alternatesSection(index: index)
 
             HStack {
-                Button("Remove", role: .destructive) {
+                Button("Duplicate") { duplicate(index: index) }
+                    .controlSize(.small)
+                Button("Remove tile", role: .destructive) {
                     design.tiles.removeAll { $0.id == tile.id }
-                    selection = nil
+                    selection = []
                 }
+                .controlSize(.small)
             }
         }
+    }
+
+    /// Puts a tile on the nearest free cell, or on the first free one when it
+    /// is nowhere near a cell at all.
+    private func snapToCell(index: Int) {
+        guard design.tiles.indices.contains(index) else { return }
+        let frame = design.widgetRect
+        let tile = design.tiles[index]
+        let taken = Set(design.tiles.filter { $0.id != tile.id }.compactMap(\.cell))
+
+        let nearest = design.grid.nearestCell(to: tile.center, in: frame)
+        let target = (nearest.map { !taken.contains($0) } ?? false)
+            ? nearest
+            : design.grid.firstFreeCell(occupied: taken)
+        guard let target else {
+            skinNote = "All \(design.grid.cellCount) cells are taken. Make the grid bigger in Scene, or remove a tile."
+            return
+        }
+        design.tiles[index].center = design.grid.cellCenter(target, in: frame)
+        design.tiles[index].cell = target
+    }
+
+    private func duplicate(index: Int) {
+        guard design.tiles.indices.contains(index) else { return }
+        var copy = design.tiles[index]
+        copy.id = UUID()
+        copy.cell = nil
+        // Offset by a quarter tile so the copy is visibly its own thing rather
+        // than hidden exactly behind the original.
+        let step = copy.size * 0.25
+        copy.center = SnapEngine(
+            screenSize: model.screenPixelSize,
+            widgetRect: design.widgetRect
+        ).clamp(
+            center: CGPoint(x: copy.center.x + step, y: copy.center.y + step),
+            tileSize: copy.boundingExtent
+        )
+        design.tiles.append(copy)
+        selection = [copy.id]
     }
 
     /// The rest of the slot's list: apps the phone may swap in for this one.
@@ -1508,7 +1792,7 @@ struct LayoutEditor: View {
         var tile = PlacedTile(appID: appID, center: center, size: size)
         tile.showsLabel = labelsDefault
         design.tiles.append(tile)
-        selection = tile.id
+        selection = [tile.id]
     }
 }
 
