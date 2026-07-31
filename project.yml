@@ -90,6 +90,9 @@ targets:
       # Applying a set decides what a slot can show on the phone, so the pure
       # apply rules are covered with the rest of the tile logic.
       - path: Mac/Library/SkinSets.swift
+      # A names table that parses to the wrong shape pairs every icon in a
+      # sheet with the wrong label, and nothing about that looks wrong.
+      - path: Mac/Library/SpriteSheet.swift
       # Undo is snapshots with hand-rolled redo bookkeeping, which is exactly
       # the kind of state machine that breaks quietly.
       - path: Mac/Studio/UndoCoordinator.swift
