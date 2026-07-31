@@ -1684,21 +1684,36 @@ struct LayoutEditor: View {
         let tile = design.tiles[index]
         let app = AppCatalog.app(id: tile.appID)
         return VStack(alignment: .leading, spacing: 10) {
-            inspectorHeading("Tile", detail: "opens \(app?.name ?? tile.appID)")
+            inspectorHeading("Tile", detail: "opens \(tile.displayName)")
 
-            // Which app the tile opens is a property of the tile, changed in
-            // place - it used to mean removing the tile and placing another.
+            // What the tile opens and what it looks like are separate choices:
+            // the artwork comes from the Looks tab, and this is only the app a
+            // tap reaches. A sheet's names are a starting point, not a binding.
             Picker("Opens", selection: Binding(
-                get: { design.tiles[index].appID },
-                set: { design.tiles[index].appID = $0 }
+                get: { design.tiles[index].custom == nil ? design.tiles[index].appID : Self.customTag },
+                set: { chosen in
+                    guard chosen != Self.customTag else {
+                        design.tiles[index].custom = CustomTarget(
+                            name: design.tiles[index].displayName,
+                            scheme: ""
+                        )
+                        return
+                    }
+                    design.tiles[index].custom = nil
+                    design.tiles[index].appID = chosen
+                }
             )) {
                 ForEach(AppCatalog.all) { entry in
                     Text(entry.name).tag(entry.id)
                 }
+                Divider()
+                Text("Another app...").tag(Self.customTag)
             }
             .controlSize(.small)
 
-            if app?.canLaunch == false {
+            if design.tiles[index].custom != nil {
+                customTargetFields(index: index)
+            } else if app?.canLaunch == false {
                 Text("\(app?.name ?? tile.appID) publishes no URL scheme, so a tap cannot open it. The tile still draws.")
                     .font(.caption2)
                     .foregroundStyle(.orange)
@@ -1772,6 +1787,45 @@ struct LayoutEditor: View {
                     selection = []
                 }
                 .controlSize(.small)
+            }
+        }
+    }
+
+    /// Sentinel for the "another app" row, which is not an app id.
+    static let customTag = "\u{0000}custom"
+
+    /// Name and URL for an app the catalogue does not carry.
+    ///
+    /// Anything on the phone can be opened this way: the widget hands the tap
+    /// to the app and the app opens the URL, so the catalogue is a shortcut
+    /// rather than the limit.
+    @ViewBuilder
+    private func customTargetFields(index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Name", text: Binding(
+                get: { design.tiles[index].custom?.name ?? "" },
+                set: { design.tiles[index].custom?.name = $0 }
+            ))
+            .textFieldStyle(StudioFieldStyle())
+
+            TextField("scheme:// or https://", text: Binding(
+                get: { design.tiles[index].custom?.scheme ?? "" },
+                set: { design.tiles[index].custom?.scheme = $0 }
+            ))
+            .textFieldStyle(StudioFieldStyle())
+            .font(.system(size: 11, design: .monospaced))
+
+            if design.tiles[index].canLaunch {
+                Text("Opens \(design.tiles[index].custom?.launchCandidates.first?.absoluteString ?? "")")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(StudioTheme.textDim)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } else {
+                Text("Type the app's URL scheme - spotify, things, bear. Most apps have one; a web address works too.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(StudioTheme.textDim)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

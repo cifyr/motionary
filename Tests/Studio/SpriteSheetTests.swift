@@ -75,10 +75,55 @@ final class SpriteSheetTests: XCTestCase {
 
     /// A label the catalogue has no app for still imports as artwork; it just
     /// cannot be offered as a swap, and the importer says so.
+    ///
+    /// Categories, not apps: a sheet's bottom row is usually a set of generic
+    /// tiles meant to point at whatever the person wants.
     func testACategoryLabelMatchesNoApp() {
         XCTAssertNil(SpriteSheet.app(named: "Banking"))
-        XCTAssertNil(SpriteSheet.app(named: "Microsoft Teams"))
+        XCTAssertNil(SpriteSheet.app(named: "Shopping"))
         XCTAssertNil(SpriteSheet.app(named: ""))
+    }
+
+    /// The apps an icon pack draws that the catalogue used to miss, so a tile
+    /// wearing one can actually open it.
+    func testTheAddedHomeScreenAppsResolve() {
+        for name in ["Weather", "Calculator", "Messenger", "Telegram",
+                     "Outlook", "Microsoft Teams", "Zoom", "Amazon"] {
+            XCTAssertNotNil(SpriteSheet.app(named: name), "\(name) is not in the catalogue")
+        }
+        // Apple publishes no scheme for these two, so they draw but cannot be
+        // opened - claimed otherwise, a tap would report a phantom failure.
+        XCTAssertEqual(SpriteSheet.app(named: "Weather")?.canLaunch, false)
+        XCTAssertEqual(SpriteSheet.app(named: "Calculator")?.canLaunch, false)
+        XCTAssertEqual(SpriteSheet.app(named: "Zoom")?.canLaunch, true)
+    }
+
+    /// The sheet this was built for, so the catalogue keeps covering it.
+    ///
+    /// Every one of the 49 cells imports as artwork; what this counts is how
+    /// many name an app that can actually be opened, which is the difference
+    /// between a tile that launches and a tile that only draws.
+    func testTheHomeScreenSheetIsFullyCovered() throws {
+        let sheet = """
+        | Messages  | Mail        | Phone        | FaceTime        | Camera    | Photos       | Safari      |
+        | --------- | ----------- | ------------ | --------------- | --------- | ------------ | ----------- |
+        | Maps      | Weather     | Clock        | Calendar        | Notes     | Reminders    | Calculator  |
+        | Settings  | App Store   | Apple Music  | Wallet          | YouTube   | WhatsApp     | Instagram   |
+        | Facebook  | TikTok      | Snapchat     | Spotify         | Gmail     | Outlook      | Google Maps |
+        | Chrome    | Netflix     | Amazon       | Uber            | Messenger | ChatGPT      | X           |
+        | Reddit    | Telegram    | Discord      | Microsoft Teams | Zoom      | Clash Royale | Roblox      |
+        | **Games** | **Banking** | **Shopping** | **School**      | **Work**  | **Fitness**  | **Food**    |
+        """
+        let layout = try XCTUnwrap(SpriteSheet.parseNames(sheet))
+        XCTAssertEqual(layout.cellCount, 49)
+
+        let unmatched = layout.flattened.filter { !$0.isEmpty && SpriteSheet.app(named: $0) == nil }
+        // Only the last row, which names categories rather than apps.
+        XCTAssertEqual(
+            Set(unmatched),
+            ["Games", "Banking", "Shopping", "School", "Work", "Fitness", "Food"],
+            "an app in the sheet lost its catalogue entry"
+        )
     }
 
     /// Two sheets carrying the same labels must not overwrite each other's
