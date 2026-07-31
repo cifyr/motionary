@@ -247,7 +247,135 @@ final class SpriteSheetTests: XCTestCase {
         )
     }
 
+    // MARK: - Taking the backdrop out of the edge
+
+    /// The fill answers yes or no, and an antialiased edge is neither. Left
+    /// whole, those half-and-half pixels keep the backdrop's colour, which is
+    /// the green line that showed around every plate on the phone.
+    func testAHalfAndHalfPixelIsHalfBackdrop() {
+        let fraction = SpriteSheet.backdropFraction(
+            red: 30, green: 130, blue: 30, keyRed: 60, keyGreen: 240, keyBlue: 50
+        )
+        XCTAssertGreaterThan(fraction, 0.5)
+        XCTAssertLessThan(fraction, 1.01)
+    }
+
+    func testTheKeyItselfIsAllBackdrop() {
+        XCTAssertEqual(
+            SpriteSheet.backdropFraction(
+                red: 60, green: 240, blue: 50, keyRed: 60, keyGreen: 240, keyBlue: 50
+            ),
+            1, accuracy: 0.001
+        )
+    }
+
+    /// The shadow an icon casts onto the green is still the green, at a third
+    /// of the brightness. Measuring on raw values would call it artwork.
+    func testShadedKeyIsStillAllBackdrop() {
+        XCTAssertEqual(
+            SpriteSheet.backdropFraction(
+                red: 20, green: 80, blue: 17, keyRed: 60, keyGreen: 240, keyBlue: 50
+            ),
+            1, accuracy: 0.05
+        )
+    }
+
+    func testArtworkCarriesNoneOfTheBackdrop() {
+        // A blue plate and a red mark: neither leads with the key's channel.
+        XCTAssertEqual(
+            SpriteSheet.backdropFraction(red: 20, green: 30, blue: 200, keyRed: 60, keyGreen: 240, keyBlue: 50),
+            0, accuracy: 0.001
+        )
+        XCTAssertEqual(
+            SpriteSheet.backdropFraction(red: 200, green: 40, blue: 40, keyRed: 60, keyGreen: 240, keyBlue: 50),
+            0, accuracy: 0.001
+        )
+    }
+
+    /// A grey backdrop leads by nothing, and dividing by that would call every
+    /// pixel in the picture backdrop.
+    func testAColourlessKeyMatchesNothing() {
+        XCTAssertEqual(
+            SpriteSheet.backdropFraction(red: 0, green: 200, blue: 0, keyRed: 128, keyGreen: 130, keyBlue: 127),
+            0
+        )
+    }
+
+    /// The last of a rim is very dark - a (0,24,0) is unmistakably the key, and
+    /// a line of them is what stayed visible after the flood fill.
+    func testAVeryDarkRimPixelIsStillTheKey() {
+        XCTAssertGreaterThan(
+            SpriteSheet.backdropFraction(red: 0, green: 24, blue: 0, keyRed: 60, keyGreen: 240, keyBlue: 50),
+            0.9
+        )
+    }
+
+    /// Black is black at any brightness: its channels are noise apart and any
+    /// of the three can come out on top, so nothing may be read into it.
+    func testBlackCarriesNoBackdrop() {
+        XCTAssertEqual(
+            SpriteSheet.backdropFraction(red: 2, green: 3, blue: 2, keyRed: 60, keyGreen: 240, keyBlue: 50),
+            0
+        )
+    }
+
+    /// The whole point, end to end: an icon whose edge was drawn against the
+    /// green must come out with no green on it.
+    func testNoGreenSurvivesOnAKeyedEdge() throws {
+        let cleared = try XCTUnwrap(SpriteSheet.removingSurround(Self.antialiasedPlate()))
+        let pixels = try Pixels(cleared)
+
+        for x in 0 ..< 100 {
+            for y in 0 ..< 100 where pixels.alpha(x: x, y: y) > 0 {
+                XCTAssertFalse(
+                    pixels.isGreenish(x: x, y: y),
+                    "the backdrop is still mixed into the pixel at \(x),\(y)"
+                )
+            }
+        }
+        XCTAssertEqual(pixels.alpha(x: 50, y: 50), 255, "the plate itself was removed")
+    }
+
+    /// And it must not cost the artwork: a slot's own green is what the
+    /// enclosure rule protects, and softening the edge must not reach it.
+    func testTheEdgePassLeavesAnIconsOwnGreenAlone() throws {
+        let cleared = try XCTUnwrap(SpriteSheet.removingSurround(try Self.greenIconOnGreen()))
+        let pixels = try Pixels(cleared)
+        XCTAssertEqual(pixels.alpha(x: 50, y: 50), 255)
+        XCTAssertTrue(pixels.isGreenish(x: 50, y: 50))
+    }
+
     // MARK: - Helpers
+
+    /// A dark plate drawn onto green with a soft edge, which is what every
+    /// generated sheet hands over: the boundary pixels are a mixture of the two
+    /// rather than one or the other.
+    private static func antialiasedPlate() -> CGImage {
+        let side = 100
+        var pixels = [UInt8](repeating: 0, count: side * side * 4)
+        let key = (r: 61.0, g: 240.0, b: 51.0)
+        let plate = (r: 13.0, g: 13.0, b: 18.0)
+        for y in 0 ..< side {
+            for x in 0 ..< side {
+                // Distance from the plate's edge, in pixels, so a two-pixel
+                // band around it comes out as a mixture.
+                let inset = min(min(x, side - 1 - x), min(y, side - 1 - y)) - 24
+                let share = min(max(Double(inset) / 2, 0), 1)
+                let index = (y * side + x) * 4
+                pixels[index] = UInt8(key.r + (plate.r - key.r) * share)
+                pixels[index + 1] = UInt8(key.g + (plate.g - key.g) * share)
+                pixels[index + 2] = UInt8(key.b + (plate.b - key.b) * share)
+                pixels[index + 3] = 255
+            }
+        }
+        return pixels.withUnsafeMutableBytes { raw in
+            CGContext(
+                data: raw.baseAddress, width: side, height: side, bitsPerComponent: 8,
+                bytesPerRow: side * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )!.makeImage()!
+        }
+    }
 
     private static func solid(width: Int, height: Int) throws -> CGImage {
         let context = try XCTUnwrap(CGContext(
