@@ -14,6 +14,9 @@ import UniformTypeIdentifiers
 /// editor never reaches here - which is how this first shipped as white text
 /// on a white panel.
 struct SpriteSheetImporter: View {
+    /// Where the icons are written: this design's own skin folder, not a
+    /// library shared by every design.
+    let library: SkinLibrary?
     /// Called with the finished set so the editor can add it to its library.
     let onImport: (SkinSet) -> Void
 
@@ -30,7 +33,7 @@ struct SpriteSheetImporter: View {
     private var layout: SpriteSheet.Layout? { SpriteSheet.parseNames(namesText) }
 
     private var canImport: Bool {
-        sheet != nil && (layout?.cellCount ?? 0) > 0 && !busy
+        sheet != nil && library != nil && (layout?.cellCount ?? 0) > 0 && !busy
     }
 
     var body: some View {
@@ -206,12 +209,17 @@ struct SpriteSheetImporter: View {
         // sheet with the same labels does not overwrite the first one's icons.
         let prefix = SpriteSheet.skinName(for: setName.isEmpty ? "sheet" : setName, prefix: "sheet")
             .replacingOccurrences(of: ".png", with: "")
+        guard let library else {
+            busy = false
+            failure = "This design has nowhere to keep skins yet. Save it and try again."
+            return
+        }
         do {
             let report = try SpriteSheet.importSheet(
                 sheet,
                 layout: layout,
                 prefix: prefix,
-                into: try SkinLibrary()
+                into: library
             )
             var set = SkinSet(name: setName.isEmpty ? "Sheet" : setName)
             set.entries = report.entries

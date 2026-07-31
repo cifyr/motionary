@@ -146,7 +146,11 @@ struct BundleWriter {
                     to: "prebuilt-\(key)-preview-\(vid).mp4"
                 )
             }
-            try installIcons(manifest: design.manifest, from: iconsFolder)
+            try installIcons(
+                manifest: design.manifest,
+                from: iconsFolder,
+                skinsFolder: store?.skinsFolder(for: design.manifest.designID)
+            )
             try installPictures(manifest: design.manifest, store: store)
         }
 
@@ -182,9 +186,9 @@ struct BundleWriter {
     /// only the manifest to go on and no icon cache to consult. Two tiles
     /// sharing an icon costs one extra copy of a 256px PNG, which is cheaper
     /// than teaching the extension about cache keys.
-    private func installIcons(manifest: BuildManifest, from iconsFolder: URL?) throws {
+    private func installIcons(manifest: BuildManifest, from iconsFolder: URL?, skinsFolder: URL?) throws {
         let manager = FileManager.default
-        let artwork = TileArtwork(iconsFolder: iconsFolder)
+        let artwork = TileArtwork(iconsFolder: iconsFolder, skinsFolder: skinsFolder)
         for tile in manifest.placedTiles {
             // Alternates first: they cannot stop the authored icon shipping.
             // Only skinned ones have a file at all - the rest draw their

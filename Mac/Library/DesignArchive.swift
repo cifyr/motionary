@@ -93,7 +93,7 @@ struct DesignArchive {
         }
 
         var packaged: [String] = []
-        if let library = try? SkinLibrary() {
+        if let library = try? SkinLibrary(root: store.skinsFolder(for: design.id)) {
             let skinsFolder = stage.appendingPathComponent("Skins", isDirectory: true)
             try manager.createDirectory(at: skinsFolder, withIntermediateDirectories: true)
             // Alternates' skins as well as the authored tiles': a slot's
@@ -182,7 +182,7 @@ struct DesignArchive {
             }
         }
 
-        if let library = try? SkinLibrary() {
+        if let library = try? SkinLibrary(root: store.skinsFolder(for: design.id)) {
             let skinsFolder = folder.appendingPathComponent("Skins", isDirectory: true)
             let skins = (try? manager.contentsOfDirectory(at: skinsFolder, includingPropertiesForKeys: nil)) ?? []
             for skin in skins where skin.pathExtension == "png" {

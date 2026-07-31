@@ -87,3 +87,70 @@ final class SkinSetTests: XCTestCase {
         XCTAssertThrowsError(try SkinSetStore(fileURL: file).all())
     }
 }
+
+/// A set's default decides what a tile takes when its own app is not in the
+/// set - which is the case for most tiles most of the time.
+final class SkinSetDefaultTests: XCTestCase {
+    private let neon = SkinSet(name: "Neon", entries: [
+        .init(appID: "mail", skin: "neon-mail.png"),
+        .init(appID: "spotify", skin: "neon-spotify.png"),
+    ])
+
+    private func tile(appID: String) -> PlacedTile {
+        PlacedTile(appID: appID, center: CGPoint(x: 300, y: 900), size: 180)
+    }
+
+    func testWithoutAChoiceTheFirstEntryIsTheDefault() {
+        XCTAssertEqual(neon.defaultEntry?.appID, "mail")
+    }
+
+    func testTheChosenDefaultWins() {
+        var set = neon
+        set.defaultAppID = "spotify"
+        XCTAssertEqual(set.defaultEntry?.appID, "spotify")
+    }
+
+    /// A default naming an entry the set no longer has falls back rather than
+    /// leaving a tile with no artwork at all.
+    func testAStaleDefaultFallsBackToTheFirst() {
+        var set = neon
+        set.defaultAppID = "gone"
+        XCTAssertEqual(set.defaultEntry?.appID, "mail")
+    }
+
+    /// Applying a set must not overwrite artwork it has no entry for: doing
+    /// that to every tile at once would replace pictures somebody chose.
+    func testApplyingASetLeavesArtworkItDoesNotCoverAlone() {
+        var set = neon
+        set.defaultAppID = "spotify"
+        var outside = tile(appID: "calendar")
+        outside.skin = "own-calendar.png"
+        XCTAssertEqual(set.applied(to: outside).skin, "own-calendar.png")
+        // It still gets the whole set to swap to.
+        XCTAssertEqual(set.applied(to: outside).alternates.count, 2)
+    }
+
+    func testTheDefaultSurvivesTheStore() throws {
+        var set = neon
+        set.defaultAppID = "spotify"
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("motionary-default-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let store = SkinSetStore(fileURL: file)
+        try store.save([set])
+        XCTAssertEqual(try store.all().first?.defaultAppID, "spotify")
+    }
+
+    /// A set written before defaults existed has no such key.
+    func testASetWithoutADefaultStillDecodes() throws {
+        var json = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: try JSONEncoder().encode(neon)) as? [String: Any]
+        )
+        json.removeValue(forKey: "defaultAppID")
+        let decoded = try JSONDecoder().decode(
+            SkinSet.self, from: try JSONSerialization.data(withJSONObject: json)
+        )
+        XCTAssertNil(decoded.defaultAppID)
+        XCTAssertEqual(decoded.defaultEntry?.appID, "mail")
+    }
+}
