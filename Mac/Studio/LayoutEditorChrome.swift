@@ -62,9 +62,11 @@ extension LayoutEditor {
 
             Button("Preview", action: onPreview)
                 .buttonStyle(.studio)
+            // Deliberately not the default action: Return lands in this
+            // window constantly while typing a position or a name, and a
+            // build is minutes of work plus a device install.
             Button("Build to Home Screen", action: onBuild)
                 .buttonStyle(.studioProminent)
-                .keyboardShortcut(.defaultAction)
         }
         .padding(.horizontal, 14)
         .frame(height: 46)
@@ -249,6 +251,7 @@ extension LayoutEditor {
                 Button { zoomOut() } label: { Image(systemName: "minus") }
                     .buttonStyle(.studioCompact)
                     .disabled(zoom <= Self.zoomRange.lowerBound + 0.001)
+                    .keyboardShortcut("-", modifiers: .command)
                     .help("Zoom out (⌘-)")
                 Text("\(Int((zoom * 100).rounded()))%")
                     .font(StudioTheme.mono)
@@ -257,10 +260,21 @@ extension LayoutEditor {
                 Button { zoomIn() } label: { Image(systemName: "plus") }
                     .buttonStyle(.studioCompact)
                     .disabled(zoom >= Self.zoomRange.upperBound - 0.001)
+                    .keyboardShortcut("=", modifiers: .command)
                     .help("Zoom in (⌘+)")
                 Button("Fit") { zoomToFit() }
                     .buttonStyle(.studioCompact)
+                    .keyboardShortcut("0", modifiers: .command)
                     .help("Fit the phone to the canvas (⌘0)")
+
+                // The shifted key as well: ⌘+ and ⌘= are the same press to a
+                // hand and different keys to the system, and binding only one
+                // is why zooming in did nothing.
+                Button("") { zoomIn() }
+                    .keyboardShortcut("+", modifiers: [.command, .shift])
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
+                    .accessibilityHidden(true)
             }
 
             Rectangle().fill(StudioTheme.divider).frame(width: 1, height: 16)

@@ -358,6 +358,7 @@ struct MediaFrameExtractor {
                 Self.logger.error("frame \(index) at \(time.seconds)s failed: \(String(describing: error), privacy: .public)")
                 break
             }
+            try Task.checkCancellation()
             progress?(Double(index + 1) / Double(count))
         }
         return frames

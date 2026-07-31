@@ -59,6 +59,8 @@ struct LayoutEditor: View {
     /// The space the canvas has to sit in, measured rather than assumed, so
     /// "Fit" can work out a zoom that actually fits.
     @State private var canvasViewport: CGSize = .zero
+    /// The lines the current drag is locked to, drawn while it lasts.
+    @State private var activeGuides: [SnapGuide] = []
 
     /// The one thing selected, when exactly one is. Most of the inspector only
     /// makes sense for a single item; alignment is what the rest is for.
@@ -68,6 +70,20 @@ struct LayoutEditor: View {
 
     private var selectedTiles: [PlacedTile] {
         design.tiles.filter { selection.contains($0.id) }
+    }
+
+    /// One snap engine for the whole editor, carrying the design's real grid.
+    ///
+    /// The threshold is divided by the zoom so it stays the same distance
+    /// under the cursor: at 25% a 14px reach is barely three points on screen,
+    /// and snapping feels broken rather than subtle.
+    var snapEngine: SnapEngine {
+        SnapEngine(
+            threshold: 14 / max(zoom, 0.05),
+            screenSize: model.screenPixelSize,
+            widgetRect: design.widgetRect,
+            grid: design.grid
+        )
     }
 
     // MARK: - Zoom
@@ -391,17 +407,6 @@ struct LayoutEditor: View {
             .focusable()
             .focusEffectDisabled()
             .focused($canvasFocused)
-            // Zoom from the keyboard the way every canvas app does it. On the
-            // canvas rather than the window so it cannot fight a text field.
-            .onKeyPress(keys: ["=", "+", "-", "0"], phases: .down) { press in
-                guard press.modifiers.contains(.command) else { return .ignored }
-                switch press.key.character {
-                case "=", "+": zoomIn()
-                case "-": zoomOut()
-                default: zoomToFit()
-                }
-                return .handled
-            }
             .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow], phases: [.down, .repeat]) { press in
                 let step: CGFloat = press.modifiers.contains(.shift) ? 10 : 1
                 let moved = switch press.key {
@@ -438,6 +443,27 @@ struct LayoutEditor: View {
             }
             .allowsHitTesting(false)
         }
+    }
+
+    /// The lines a drag is locked to. They appear only while it lasts, which
+    /// is what makes them read as feedback rather than as part of the design.
+    @ViewBuilder
+    private var guideOverlay: some View {
+        ForEach(activeGuides) { guide in
+            switch guide.axis {
+            case .vertical:
+                Rectangle()
+                    .fill(StudioTheme.accent.opacity(0.9))
+                    .frame(width: 1, height: canvas.height)
+                    .offset(x: guide.position * unit)
+            case .horizontal:
+                Rectangle()
+                    .fill(StudioTheme.accent.opacity(0.9))
+                    .frame(width: canvas.width, height: 1)
+                    .offset(y: guide.position * unit)
+            }
+        }
+        .allowsHitTesting(false)
     }
 
     private var occupiedCells: Set<GridCell> {
@@ -523,6 +549,7 @@ struct LayoutEditor: View {
             }
             widgetFrame
             gridOverlay
+            guideOverlay
             // Under the tiles, matching what the wallpaper bakes, so the canvas
             // shows the stacking the phone will actually have.
             ForEach(design.assets.sorted { $0.zIndex < $1.zIndex }) { asset in
@@ -701,10 +728,7 @@ struct LayoutEditor: View {
                     y: base.y + value.translation.height / unit
                 )
                 let extent = design.tiles[index].boundingExtent
-                let engine = SnapEngine(
-                    screenSize: model.screenPixelSize,
-                    widgetRect: design.widgetRect
-                )
+                let engine = snapEngine
                 // Bounded by the screen, not by the widget frame: a tile may
                 // hang over the edge, because the wallpaper carries a picture
                 // of the part the widget cannot draw.
@@ -728,6 +752,10 @@ struct LayoutEditor: View {
                     if !taken, abs(centre.x - moved.x) < reach, abs(centre.y - moved.y) < reach {
                         design.tiles[index].center = centre
                         design.tiles[index].cell = cell
+                        activeGuides = [
+                            SnapGuide(axis: .vertical, position: centre.x, kind: .iconGrid),
+                            SnapGuide(axis: .horizontal, position: centre.y, kind: .iconGrid),
+                        ]
                         return
                     }
                 }
@@ -738,10 +766,12 @@ struct LayoutEditor: View {
                 )
                 design.tiles[index].center = engine.clamp(center: snapped.center, tileSize: extent)
                 design.tiles[index].cell = nil
+                activeGuides = snapped.guides
             }
             .onEnded { _ in
                 tileBase = nil
                 duplicatedDuringDrag = nil
+                activeGuides = []
             }
     }
 
@@ -1613,7 +1643,7 @@ struct LayoutEditor: View {
 
     /// Moves whatever is selected by whole pixels, clamped like a drag is.
     private func nudgeSelection(dx: CGFloat, dy: CGFloat) -> Bool {
-        let engine = SnapEngine(screenSize: model.screenPixelSize, widgetRect: design.widgetRect)
+        let engine = snapEngine
         if let singleSelection, let index = design.tiles.firstIndex(where: { $0.id == singleSelection }) {
             let moved = CGPoint(
                 x: design.tiles[index].center.x + dx,
@@ -1685,10 +1715,7 @@ struct LayoutEditor: View {
                         design.tiles[index].size = max(40, CGFloat(newSize))
                         // Growing a tile can push it off the screen just as
                         // dragging can.
-                        design.tiles[index].center = SnapEngine(
-                            screenSize: model.screenPixelSize,
-                            widgetRect: design.widgetRect
-                        ).clamp(
+                        design.tiles[index].center = snapEngine.clamp(
                             center: design.tiles[index].center,
                             tileSize: design.tiles[index].boundingExtent
                         )
@@ -1764,10 +1791,7 @@ struct LayoutEditor: View {
         // Offset by a quarter tile so the copy is visibly its own thing rather
         // than hidden exactly behind the original.
         let step = copy.size * 0.25
-        copy.center = SnapEngine(
-            screenSize: model.screenPixelSize,
-            widgetRect: design.widgetRect
-        ).clamp(
+        copy.center = snapEngine.clamp(
             center: CGPoint(x: copy.center.x + step, y: copy.center.y + step),
             tileSize: copy.boundingExtent
         )

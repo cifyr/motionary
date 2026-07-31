@@ -145,6 +145,7 @@ struct FontSetGenerator {
 
         var builtVariants: [BuildManifest.VariantBuild] = []
         for variant in design.variants {
+            try Task.checkCancellation()
             onStage(.buildingVariant(name: variant.name))
             do {
                 let result = try await buildClip(
@@ -164,6 +165,10 @@ struct FontSetGenerator {
                     totalFontBytes: result.totalBytes,
                     loopFrameCount: result.loopFrameCount
                 ))
+            } catch is CancellationError {
+                // Rethrown bare: wrapped in `variantFailed` a stopped build
+                // would be reported as a crash in whichever clip it reached.
+                throw CancellationError()
             } catch {
                 // Named, because five clips build in one run and "payload too
                 // large" without a name points at the wrong one four times
@@ -310,7 +315,10 @@ struct FontSetGenerator {
             } catch {
                 throw GeneratorError.laneWriteFailed(lane: lane, path: url.path, underlying: error)
             }
-            // 64 multi-megabyte writes would otherwise starve the UI entirely.
+            // 64 multi-megabyte writes would otherwise starve the UI entirely,
+            // and it is where a stopped build actually stops: without the
+            // check, Escape would hide a run that kept writing fonts.
+            try Task.checkCancellation()
             await Task.yield()
         }
         onStage(.writingFonts(completed: spec.laneCount, total: spec.laneCount))
