@@ -29,6 +29,10 @@ struct LoopingCompositionView<Tile: View>: View {
     var scaleMode: ScaleMode = .fitWidth
     /// Resumes the loop at the widget's current phase when supplied.
     var startTime: (() -> TimeInterval)?
+    /// Placed pictures, over the video and under the tiles - the preview
+    /// video does not carry them, exactly as the widget's animation does not.
+    var assets: [PlacedAsset] = []
+    var assetImage: (PlacedAsset) -> Image? = { _ in nil }
     @ViewBuilder let tileContent: (PlacedTile, CGFloat) -> Tile
 
     var body: some View {
@@ -61,6 +65,21 @@ struct LoopingCompositionView<Tile: View>: View {
                         .frame(width: screen.width, height: screen.height)
                         .offset(x: originX, y: originY)
                         .allowsHitTesting(false)
+                }
+
+                ForEach(assets.sorted { $0.zIndex < $1.zIndex }) { asset in
+                    if let image = assetImage(asset) {
+                        image
+                            .resizable()
+                            .interpolation(.high)
+                            .frame(width: asset.size.width * scale, height: asset.size.height * scale)
+                            .rotationEffect(.degrees(asset.rotation))
+                            .opacity(asset.opacity)
+                            .offset(
+                                x: originX + asset.rect.minX * scale,
+                                y: originY + asset.rect.minY * scale
+                            )
+                    }
                 }
 
                 ForEach(tiles) { tile in

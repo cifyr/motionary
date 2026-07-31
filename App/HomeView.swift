@@ -124,7 +124,18 @@ struct HomeView: View {
             // Both this and the widget's glyph choice are pure functions of
             // wall clock time, so opening the app continues the loop rather
             // than restarting it.
-            startTime: { spec.videoTime(loopFrameCount: loop) }
+            startTime: { spec.videoTime(loopFrameCount: loop) },
+            assets: manifest.placedAssets,
+            assetImage: { asset in
+                PrebuiltDesign.pictureURL(assetID: asset.id)
+                    .flatMap {
+                        ImageLoader.load(
+                            at: $0,
+                            maxPixelSize: Int(max(asset.size.width, asset.size.height))
+                        )
+                    }
+                    .map { Image(decorative: $0, scale: 1) }
+            }
         ) { tile, side in
             Button {
                 router.launch(appID: tile.appID)

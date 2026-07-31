@@ -93,7 +93,7 @@ struct BundleWriter {
     /// without colliding - but every lane of every design has to be declared in
     /// `UIAppFonts`, and each design costs about 29MB of the install.
     @discardableResult
-    func install(_ designs: [Bundled], iconsFolder: URL? = nil) throws -> Result {
+    func install(_ designs: [Bundled], iconsFolder: URL? = nil, store: DesignStore? = nil) throws -> Result {
         let manager = FileManager.default
         try manager.createDirectory(at: resources, withIntermediateDirectories: true)
 
@@ -147,6 +147,7 @@ struct BundleWriter {
                 )
             }
             try installIcons(manifest: design.manifest, from: iconsFolder)
+            try installPictures(manifest: design.manifest, store: store)
         }
 
         try writeIndex(designs)
@@ -206,6 +207,31 @@ struct BundleWriter {
             try manager.copyItem(
                 at: rendered,
                 to: resources.appendingPathComponent("\(PrebuiltDesign.iconResource(tileID: tile.id)).png")
+            )
+        }
+    }
+
+    /// Placed pictures ship as keyed PNGs, one per placement, because the
+    /// widget draws them live over the animation. Baked into the wallpaper
+    /// alone - which is all they used to get - they never reached the widget's
+    /// own frame, and the app's preview video covered them too.
+    private func installPictures(manifest: BuildManifest, store: DesignStore?) throws {
+        guard !manifest.placedAssets.isEmpty else { return }
+        guard let store else {
+            FileHandle.standardError.write(Data("""
+            bundle: no store to read placed pictures from; \
+            \(manifest.placedAssets.count) picture(s) will not draw on the phone\n
+            """.utf8))
+            return
+        }
+        for asset in manifest.placedAssets {
+            guard let keyed = AssetArtwork.image(for: asset, designID: manifest.designID, store: store) else {
+                // Logged by AssetArtwork; the design still ships, minus this one.
+                continue
+            }
+            try FrameEncoder.pngData(keyed).write(
+                to: resources.appendingPathComponent("\(PrebuiltDesign.pictureResource(assetID: asset.id)).png"),
+                options: .atomic
             )
         }
     }

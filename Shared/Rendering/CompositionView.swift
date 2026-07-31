@@ -21,6 +21,11 @@ struct CompositionView<Tile: View>: View {
     /// widget black.
     var wallpaperRect: CGRect?
     let isAnimated: Bool
+    /// Placed pictures, drawn over the animation and under the tiles - the
+    /// same stacking the editor and the wallpaper bake use. Defaulted so the
+    /// font lab, which draws no decoration, does not have to say so.
+    var assets: [PlacedAsset] = []
+    var assetImage: (PlacedAsset) -> Image? = { _ in nil }
     @ViewBuilder let tileContent: (PlacedTile, CGFloat) -> Tile
 
     var body: some View {
@@ -71,6 +76,21 @@ struct CompositionView<Tile: View>: View {
                     )
                     .frame(width: screen.width, height: screen.height)
                     .offset(x: originX, y: originY)
+                }
+
+                ForEach(assets.sorted { $0.zIndex < $1.zIndex }) { asset in
+                    if let image = assetImage(asset) {
+                        image
+                            .resizable()
+                            .interpolation(.high)
+                            .frame(width: asset.size.width * scale, height: asset.size.height * scale)
+                            .rotationEffect(.degrees(asset.rotation))
+                            .opacity(asset.opacity)
+                            .offset(
+                                x: originX + asset.rect.minX * scale,
+                                y: originY + asset.rect.minY * scale
+                            )
+                    }
                 }
 
                 ForEach(tiles) { tile in

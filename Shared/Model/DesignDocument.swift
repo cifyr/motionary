@@ -440,6 +440,16 @@ struct BuildManifest: Codable, Equatable, Sendable {
 
     var placedTiles: [PlacedTile] { tiles ?? [] }
 
+    /// Placed pictures, drawn live between the animation and the tiles.
+    ///
+    /// They travel like the tiles do, because baked into the wallpaper alone
+    /// they never reach the widget's own frame - the backdrop is the raw
+    /// clip, and the app's preview video plays over the wallpaper. Optional
+    /// for the same decoding reason `tiles` is.
+    var assets: [PlacedAsset]?
+
+    var placedAssets: [PlacedAsset] { assets ?? [] }
+
     /// What one built variant amounts to at render time. Everything else -
     /// crop, lanes, frame rate, tiles - is the design's, shared.
     struct VariantBuild: Codable, Equatable, Identifiable, Sendable {

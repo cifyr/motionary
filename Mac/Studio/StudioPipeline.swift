@@ -354,7 +354,8 @@ struct StudioPipeline: Sendable {
         guard let projectRoot else { throw StudioPipelineError.noProjectFolder }
         try BundleWriter(projectRoot: projectRoot).install(
             bundled,
-            iconsFolder: Self.iconsFolder(for: prepared.store)
+            iconsFolder: Self.iconsFolder(for: prepared.store),
+            store: prepared.store
         )
         let installer = DeviceInstaller(projectRoot: projectRoot)
         try installer.regenerateProject { onStage(.installing($0)) }

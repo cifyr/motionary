@@ -231,6 +231,16 @@ enum PrebuiltDesign {
         )
     }
 
+    /// A placed picture, keyed at build time and drawn live between the
+    /// animation and the tiles - the widget cannot key or fetch one itself.
+    static func pictureURL(assetID: UUID) -> URL? {
+        PrebuiltDesign.resource(named: pictureResource(assetID: assetID), extension: "png")
+    }
+
+    static func pictureResource(assetID: UUID) -> String {
+        "prebuilt-picture-\(assetID.uuidString.lowercased())"
+    }
+
     /// Whether every lane font declared in `UIAppFonts` actually resolved.
     ///
     /// Bundled fonts are registered by the system before any code runs, so this

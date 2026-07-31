@@ -65,7 +65,18 @@ struct DesignWidgetView: View {
                 viewport: DeviceGeometry.renderedWidgetRect,
                 wallpaper: source.backdrop,
                 wallpaperRect: source.manifest.backdropRect,
-                isAnimated: source.fontsUsable
+                isAnimated: source.fontsUsable,
+                assets: source.manifest.placedAssets,
+                assetImage: { asset in
+                    PrebuiltDesign.pictureURL(assetID: asset.id)
+                        .flatMap {
+                            ImageLoader.load(
+                                at: $0,
+                                maxPixelSize: Int(max(asset.size.width, asset.size.height))
+                            )
+                        }
+                        .map { Image(decorative: $0, scale: 1) }
+                }
             ) { tile, side in
                 // Through the app rather than straight to the destination: a
                 // Link from an extension to a third-party scheme is
