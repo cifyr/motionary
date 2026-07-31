@@ -126,6 +126,10 @@ struct BundleWriter {
             try copy(design.folder.appendingPathComponent("manifest.json"), to: "prebuilt-\(key)-manifest.json")
             try copy(design.folder.appendingPathComponent("widget-backdrop.jpg"), to: "prebuilt-\(key)-backdrop.jpg")
             try copy(design.folder.appendingPathComponent("wallpaper.png"), to: "prebuilt-\(key)-wallpaper.png")
+            // Tile-free, so the phone can bake whichever occupants its slots
+            // hold at export time. `copy` skips it for designs built before it
+            // existed, and the phone falls back to the pre-baked wallpaper.
+            try copy(design.folder.appendingPathComponent("wallpaper-plain.png"), to: "prebuilt-\(key)-wallpaper-plain.png")
             // The app plays this rather than drawing the lane fonts: only the
             // widget renderer advances timer text.
             try copy(design.folder.appendingPathComponent("preview.mp4"), to: "prebuilt-\(key)-preview.mp4")

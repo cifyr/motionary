@@ -27,14 +27,7 @@ enum WallpaperExporter {
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw ExportError.wallpaperMissing(path: url.path)
         }
-
-        // Add-only access is all this needs, and it is the least the user has
-        // to grant.
-        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
-        guard status == .authorized || status == .limited else {
-            throw ExportError.photosDenied(status: status)
-        }
-
+        try await authorize()
         do {
             try await PHPhotoLibrary.shared().performChanges {
                 PHAssetCreationRequest.forAsset().addResource(with: .photo, fileURL: url, options: nil)
@@ -42,6 +35,30 @@ enum WallpaperExporter {
             logger.info("saved wallpaper \(url.lastPathComponent, privacy: .public) to Photos")
         } catch {
             throw ExportError.saveFailed(underlying: error)
+        }
+    }
+
+    /// For a wallpaper composed on the phone rather than shipped as a file -
+    /// the export with the current slot occupants baked in.
+    static func saveToPhotos(image: CGImage) async throws {
+        try await authorize()
+        let data = try FrameEncoder.pngData(image)
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetCreationRequest.forAsset().addResource(with: .photo, data: data, options: nil)
+            }
+            logger.info("saved a composed \(image.width)x\(image.height) wallpaper to Photos")
+        } catch {
+            throw ExportError.saveFailed(underlying: error)
+        }
+    }
+
+    private static func authorize() async throws {
+        // Add-only access is all this needs, and it is the least the user has
+        // to grant.
+        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        guard status == .authorized || status == .limited else {
+            throw ExportError.photosDenied(status: status)
         }
     }
 }

@@ -188,6 +188,14 @@ struct DesignStore {
         folder(for: id).appendingPathComponent("wallpaper.png")
     }
 
+    /// The wallpaper before the tiles were baked in - assets and all else
+    /// included. The phone bakes the tiles itself at export time, because a
+    /// slot's occupant is chosen there and the pre-baked one only knows the
+    /// authored apps.
+    func plainWallpaperURL(for id: UUID) -> URL {
+        folder(for: id).appendingPathComponent("wallpaper-plain.png")
+    }
+
     /// The wallpaper cropped to the widget's frame, so the extension decodes
     /// only the pixels it draws.
     func widgetBackdropURL(for id: UUID) -> URL {

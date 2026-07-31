@@ -200,6 +200,21 @@ struct FontSetGenerator {
         let wallpaper = try FrameEncoder.pngData(poster)
         try wallpaper.write(to: store.wallpaperURL(for: design.id), options: DesignStore.writingOptions)
 
+        // The same picture without the tiles, for the phone to bake its own
+        // onto: which app occupies a slot is chosen there, and a wallpaper
+        // baked with the authored occupants would continue the wrong icon past
+        // the widget's edge after a swap. Assets stay baked - they are not
+        // slot-dependent, and their source files never ship.
+        let plain = await WallpaperComposer.compose(
+            frame: frames[0],
+            tiles: [],
+            assets: design.assets,
+            screenSize: DeviceGeometry.screenPixelSize,
+            assetArtwork: assetArtwork
+        )
+        try FrameEncoder.pngData(plain)
+            .write(to: store.plainWallpaperURL(for: design.id), options: DesignStore.writingOptions)
+
         // The full screen costs about 12.6MB decompressed and the widget only
         // ever shows its own frame. On this phone the extension peaked at
         // 46.7MB against a working reference of 43.3MB and its render was
