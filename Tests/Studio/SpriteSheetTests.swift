@@ -130,6 +130,41 @@ final class SpriteSheetTests: XCTestCase {
         XCTAssertFalse(pixels.isGreenish(x: icon.width - 1, y: icon.height - 1))
     }
 
+    /// An icon casts a shadow onto the green it sits on. Those pixels are far
+    /// too dark to match the bright corner the key is read from, so matching
+    /// on plain colour alone left a dark green rim around every plate.
+    func testShadedBackdropIsStillBackdrop() {
+        // A bright key, and the same green at a third of the brightness.
+        let shaded = SpriteSheet.isBackdrop(
+            red: 6, green: 82, blue: 8,
+            keyRed: 13, keyGreen: 246, keyBlue: 19, tolerance: 0.30
+        )
+        XCTAssertTrue(shaded, "a shaded backdrop was treated as artwork")
+    }
+
+    /// Being generous about hue must not swallow the icon's own colours.
+    func testTheIconsOwnGreenIsNotBackdrop() {
+        // Messages' bubble and Spotify's disc, against the same key.
+        for colour in [(54, 220, 48), (30, 215, 96)] {
+            XCTAssertFalse(
+                SpriteSheet.isBackdrop(
+                    red: colour.0, green: colour.1, blue: colour.2,
+                    keyRed: 13, keyGreen: 246, keyBlue: 19, tolerance: 0.30
+                ),
+                "\(colour) was mistaken for backdrop"
+            )
+        }
+    }
+
+    /// Near-black is the icon's shadow, not a shaded backdrop: at that
+    /// brightness hue means nothing.
+    func testNearBlackIsNotBackdrop() {
+        XCTAssertFalse(SpriteSheet.isBackdrop(
+            red: 4, green: 9, blue: 5,
+            keyRed: 13, keyGreen: 246, keyBlue: 19, tolerance: 0.30
+        ))
+    }
+
     func testASheetWithNoRowsSlicesToNothing() throws {
         let sheet = try Self.solid(width: 100, height: 100)
         XCTAssertTrue(SpriteSheet.slice(sheet, rows: 0, columns: 4).isEmpty)

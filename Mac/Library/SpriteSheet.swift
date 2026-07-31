@@ -131,13 +131,12 @@ enum SpriteSheet {
         guard drew else { return [] }
 
         let keyR = Int(pixels[0]), keyG = Int(pixels[1]), keyB = Int(pixels[2])
-        let reach = 0.30 * 255 * 1.75
         func isBackdrop(_ point: Int) -> Bool {
             let index = point * 4
-            let dr = Double(Int(pixels[index]) - keyR)
-            let dg = Double(Int(pixels[index + 1]) - keyG)
-            let db = Double(Int(pixels[index + 2]) - keyB)
-            return (dr * dr + dg * dg + db * db).squareRoot() <= reach
+            return Self.isBackdrop(
+                red: Int(pixels[index]), green: Int(pixels[index + 1]), blue: Int(pixels[index + 2]),
+                keyRed: keyR, keyGreen: keyG, keyBlue: keyB, tolerance: 0.30
+            )
         }
 
         // Every run of touching non-backdrop pixels is one icon: the sheet
@@ -191,6 +190,35 @@ enum SpriteSheet {
         return result
     }
 
+    /// Whether a pixel is the sheet's backdrop.
+    ///
+    /// Two ways of being it. Close in plain colour catches the flat field, and
+    /// close in *hue* catches the same colour in shadow: an icon casts one
+    /// onto the green it sits on, and those pixels are far too dark to match
+    /// the bright corner the key was read from. Left unmatched they survived
+    /// the fill as a dark rim around every plate.
+    ///
+    /// Being generous about hue is safe because the fill still has to reach a
+    /// pixel from the border, so green enclosed by an icon is never a
+    /// candidate however green it is.
+    static func isBackdrop(
+        red: Int, green: Int, blue: Int,
+        keyRed: Int, keyGreen: Int, keyBlue: Int,
+        tolerance: Double
+    ) -> Bool {
+        let dr = Double(red - keyRed), dg = Double(green - keyGreen), db = Double(blue - keyBlue)
+        if (dr * dr + dg * dg + db * db).squareRoot() <= tolerance * 255 * 1.75 { return true }
+
+        // Near-black is the icon's own shadow rather than a shaded backdrop,
+        // and its hue means nothing at that brightness.
+        let sum = red + green + blue
+        let keySum = keyRed + keyGreen + keyBlue
+        guard sum > 30, keySum > 30 else { return false }
+        let hueReach = tolerance * 0.55
+        return abs(Double(red) / Double(sum) - Double(keyRed) / Double(keySum)) < hueReach
+            && abs(Double(green) / Double(sum) - Double(keyGreen) / Double(keySum)) < hueReach
+    }
+
     /// Clears the backdrop from around a cell without touching the artwork.
     ///
     /// Keying by colour alone removes every matching pixel wherever it is,
@@ -236,14 +264,11 @@ enum SpriteSheet {
         keyG /= corners.count
         keyB /= corners.count
 
-        // Scaled to the same 0-255 space the samples are in.
-        let reach = tolerance * 255 * 1.75
-
         func matches(_ index: Int) -> Bool {
-            let dr = Double(Int(pixels[index]) - keyR)
-            let dg = Double(Int(pixels[index + 1]) - keyG)
-            let db = Double(Int(pixels[index + 2]) - keyB)
-            return (dr * dr + dg * dg + db * db).squareRoot() <= reach
+            isBackdrop(
+                red: Int(pixels[index]), green: Int(pixels[index + 1]), blue: Int(pixels[index + 2]),
+                keyRed: keyR, keyGreen: keyG, keyBlue: keyB, tolerance: tolerance
+            )
         }
 
         // Flood fill inwards from every border pixel that is backdrop.
