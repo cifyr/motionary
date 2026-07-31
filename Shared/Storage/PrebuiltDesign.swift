@@ -43,6 +43,11 @@ enum PrebuiltDesign {
         var manifestName: String { resource("manifest") }
         var backdropURL: URL? { PrebuiltDesign.resource(named: resource("backdrop"), extension: "jpg") }
         var wallpaperURL: URL? { PrebuiltDesign.resource(named: resource("wallpaper"), extension: "png") }
+        /// The wallpaper without the tiles, when this build shipped one. The
+        /// phone bakes its own occupants onto it at export time; nil means the
+        /// design was built before the plain variant existed and only the
+        /// pre-baked wallpaper can be offered.
+        var plainWallpaperURL: URL? { PrebuiltDesign.resource(named: resource("wallpaper-plain"), extension: "png") }
         var previewURL: URL? { PrebuiltDesign.resource(named: resource("preview"), extension: "mp4") }
 
         var manifest: BuildManifest? {

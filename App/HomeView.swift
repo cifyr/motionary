@@ -106,7 +106,10 @@ struct HomeView: View {
             viewport: CGRect(origin: .zero, size: manifest.screenSize),
             tiles: SlotChoices.apply(to: manifest.placedTiles, designID: manifest.designID),
             videoURL: entry.previewURL,
-            wallpaper: entry.wallpaperURL
+            // The tile-free variant when the build has one: the live tiles
+            // drawn over it are the occupants the phone chose, and a swapped
+            // one over its baked authored self would ghost through the plate.
+            wallpaper: (entry.plainWallpaperURL ?? entry.wallpaperURL)
                 .flatMap { UIImage(contentsOfFile: $0.path) }
                 .map { Image(uiImage: $0) },
             scaleMode: .device,
@@ -138,14 +141,14 @@ struct HomeView: View {
     }
 
     private func save() {
-        guard let url = entry?.wallpaperURL else {
+        guard let entry, let manifest = entry.manifest else {
             note = "This build has no wallpaper in it."
             return
         }
         saving = true
         Task {
             do {
-                try await WallpaperExporter.saveToPhotos(url: url)
+                try await export(entry: entry, manifest: manifest)
                 await MainActor.run {
                     saving = false
                     note = "Saved to Photos. Set it as your wallpaper, then place the widget over it."
@@ -160,6 +163,47 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    /// The wallpaper with the slots as they are right now.
+    ///
+    /// The shipped wallpaper was baked with the authored occupants, so after a
+    /// swap it would continue the wrong icon past the widget's edge - which is
+    /// the whole reason tiles are baked into it. So the phone bakes the
+    /// effective tiles onto the tile-free variant itself. Designs built before
+    /// that variant shipped fall back to the pre-baked file.
+    private func export(entry: PrebuiltDesign.Entry, manifest: BuildManifest) async throws {
+        let longest = Int(max(manifest.screenSize.width, manifest.screenSize.height))
+        guard let plainURL = entry.plainWallpaperURL,
+              let base = ImageLoader.load(at: plainURL, maxPixelSize: longest)
+        else {
+            guard let url = entry.wallpaperURL else {
+                throw ExportError.wallpaperMissing(path: "prebuilt wallpaper for \(entry.name)")
+            }
+            try await WallpaperExporter.saveToPhotos(url: url)
+            return
+        }
+
+        let authored = Dictionary(
+            manifest.placedTiles.map { ($0.id, $0.appID) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let composed = await WallpaperComposer.compose(
+            frame: base,
+            tiles: SlotChoices.apply(to: manifest.placedTiles, designID: manifest.designID),
+            // Already baked into the plain wallpaper; they are not slot-dependent.
+            assets: [],
+            screenSize: manifest.screenSize,
+            artwork: { tile in
+                PrebuiltDesign.iconURL(
+                    tileID: tile.id,
+                    appID: tile.appID,
+                    authoredAppID: authored[tile.id] ?? tile.appID
+                )
+                .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(tile.size)) }
+            }
+        )
+        try await WallpaperExporter.saveToPhotos(image: composed)
     }
 }
 

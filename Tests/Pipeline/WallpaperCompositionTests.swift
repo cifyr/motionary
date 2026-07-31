@@ -102,6 +102,61 @@ final class WallpaperCompositionTests: XCTestCase {
         )
     }
 
+    /// The phone's export path: effective tiles composed onto the tile-free
+    /// wallpaper, so the background continues whatever occupant each slot
+    /// holds - not the authored one the shipped wallpaper was baked with.
+    func testTheExportBakesTheChosenOccupantNotTheAuthoredOne() throws {
+        let base = try Self.solid(red: 0, green: 0, blue: 1, size: screen)
+        let tile = skinnedTile(at: CGPoint(x: frame.minX, y: frame.midY), size: 120)
+        var swappable = tile
+        swappable.alternates = [TileAlternate(appID: "apple-music", skin: "alt-skin.png")]
+
+        let composed = WallpaperComposer.compose(
+            frame: base,
+            tiles: SlotChoices.apply(
+                to: [swappable],
+                choices: [swappable.id.uuidString: "apple-music"]
+            ),
+            screenSize: screen,
+            // Red for the authored app's artwork, green for the alternate's -
+            // whichever colour lands is whichever occupant was baked.
+            artwork: { tile in
+                try? tile.appID == "apple-music"
+                    ? Self.solid(red: 0, green: 1, blue: 0, size: CGSize(width: 64, height: 64))
+                    : Self.solid(red: 1, green: 0, blue: 0, size: CGSize(width: 64, height: 64))
+            }
+        )
+
+        let pixels = try Pixels(composed)
+        XCTAssertTrue(
+            pixels.isGreen(x: Int(frame.minX) - 40, y: Int(frame.midY)),
+            "the half outside the widget frame does not show the chosen occupant"
+        )
+        XCTAssertTrue(pixels.isGreen(x: Int(frame.minX) + 40, y: Int(frame.midY)))
+    }
+
+    /// A hidden slot exports as background, not as a picture of a tile that no
+    /// longer exists on the widget.
+    func testAHiddenSlotIsNotBakedIntoTheExport() throws {
+        let base = try Self.solid(red: 0, green: 0, blue: 1, size: screen)
+        let tile = skinnedTile(at: CGPoint(x: frame.minX, y: frame.midY), size: 120)
+
+        let composed = WallpaperComposer.compose(
+            frame: base,
+            tiles: SlotChoices.apply(
+                to: [tile],
+                choices: [tile.id.uuidString: SlotChoices.hiddenValue]
+            ),
+            screenSize: screen,
+            artwork: { _ in try? Self.solid(red: 1, green: 0, blue: 0, size: CGSize(width: 64, height: 64)) }
+        )
+
+        XCTAssertTrue(
+            try Pixels(composed).isBlue(x: Int(frame.minX), y: Int(frame.midY)),
+            "a hidden slot still left a tile in the exported wallpaper"
+        )
+    }
+
     // MARK: - Helpers
 
     private nonisolated static func solid(red: CGFloat, green: CGFloat, blue: CGFloat, size: CGSize) throws -> CGImage {
