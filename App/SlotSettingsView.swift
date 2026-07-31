@@ -17,6 +17,8 @@ struct SlotSettingsView: View {
     @State private var variantID: UUID?
 
     private var tiles: [PlacedTile] { manifest.placedTiles }
+    /// Every icon that shipped with this design, for the picker.
+    private var skinNames: [String] { PrebuiltDesign.skinNames(designID: manifest.designID) }
 
     var body: some View {
         NavigationStack {
@@ -40,12 +42,17 @@ struct SlotSettingsView: View {
 
                 Section {
                     ForEach(tiles) { tile in
-                        slotRow(tile)
+                        DisclosureGroup {
+                            slotDetail(tile)
+                        } label: {
+                            slotRow(tile)
+                        }
                     }
                 } footer: {
                     Text("""
                     Each slot offers the apps chosen for it in the studio. \
-                    A hidden slot draws nothing and answers no taps.
+                    Open one to point it at any other app on this phone, or to \
+                    change its icon. A hidden slot draws nothing and answers no taps.
                     """)
                 }
 
@@ -86,6 +93,105 @@ struct SlotSettingsView: View {
                 onChange()
             }
         )
+    }
+
+    /// Everything a slot can be changed to on the phone: the app it opens,
+    /// including one the design never named, and the icon it wears.
+    private func slotDetail(_ tile: PlacedTile) -> some View {
+        let target = SlotChoices.link(designID: manifest.designID, tileID: tile.id)
+        return VStack(alignment: .leading, spacing: 10) {
+            Toggle("Open a different app", isOn: Binding(
+                get: { target != nil },
+                set: { on in
+                    SlotChoices.setLink(
+                        on ? CustomTarget(name: name(for: tile.appID), scheme: "") : nil,
+                        designID: manifest.designID,
+                        tileID: tile.id
+                    )
+                    push()
+                }
+            ))
+
+            if let target {
+                TextField("Name", text: Binding(
+                    get: { target.name },
+                    set: { newName in
+                        var updated = target
+                        updated.name = newName
+                        SlotChoices.setLink(updated, designID: manifest.designID, tileID: tile.id)
+                        push()
+                    }
+                ))
+                .textFieldStyle(.roundedBorder)
+
+                TextField("scheme:// or https://", text: Binding(
+                    get: { target.scheme },
+                    set: { newScheme in
+                        var updated = target
+                        updated.scheme = newScheme
+                        SlotChoices.setLink(updated, designID: manifest.designID, tileID: tile.id)
+                        push()
+                    }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+
+                Text(target.launchCandidates.first.map { "Opens \($0.absoluteString)" }
+                    ?? "Type the app's URL scheme - spotify, things, bear. A web address works too.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !skinNames.isEmpty {
+                Text("Icon").font(.caption.weight(.semibold))
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        iconChoice(nil, for: tile)
+                        ForEach(skinNames, id: \.self) { skin in
+                            iconChoice(skin, for: tile)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+    }
+
+    private func iconChoice(_ skin: String?, for tile: PlacedTile) -> some View {
+        let chosen = SlotChoices.icon(designID: manifest.designID, tileID: tile.id)
+        let isSelected = chosen == skin || (skin == nil && chosen == nil)
+        return Button {
+            SlotChoices.setIcon(skin, designID: manifest.designID, tileID: tile.id)
+            push()
+        } label: {
+            Group {
+                if let skin,
+                   let image = PrebuiltDesign.skinURL(designID: manifest.designID, skin: skin)
+                       .flatMap({ ImageLoader.load(at: $0, maxPixelSize: 120) }) {
+                    Image(decorative: image, scale: 1).resizable().scaledToFit()
+                } else {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 44, height: 44)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(skin ?? "The design's own icon")
+    }
+
+    /// Writes through and pushes, so the Home Screen follows immediately.
+    private func push() {
+        choices = SlotChoices.stored(designID: manifest.designID)
+        WidgetCenterBridge.reloadAll()
+        onChange()
     }
 
     private func slotRow(_ tile: PlacedTile) -> some View {

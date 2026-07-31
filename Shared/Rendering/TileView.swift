@@ -93,6 +93,26 @@ struct TileView: View {
     }
 }
 
+/// The artwork a slot draws: whatever the phone put on it, else the icon baked
+/// for its occupant at build time.
+///
+/// The chosen one is a skin that shipped with the design, loaded from the
+/// bundle and decoded here rather than handed over as a path - a widget's
+/// renderer cannot reach a file itself.
+enum SlotArtwork {
+    static func image(for tile: PlacedTile, designID: UUID, authoredAppID: String, side: CGFloat) -> Image? {
+        let url = tile.skin.flatMap { PrebuiltDesign.skinURL(designID: designID, skin: $0) }
+            ?? PrebuiltDesign.iconURL(
+                tileID: tile.id,
+                appID: tile.appID,
+                authoredAppID: authoredAppID
+            )
+        return url
+            .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(side * 3)) }
+            .map { Image(decorative: $0, scale: 1) }
+    }
+}
+
 /// Deep link the widget uses to hand a launch back to the containing app.
 ///
 /// Everything goes through the app because a `Link` from an extension straight

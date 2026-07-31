@@ -44,6 +44,38 @@ enum SlotChoices {
         defaults?.dictionary(forKey: key(for: designID)) as? [String: String] ?? [:]
     }
 
+    // MARK: - Artwork and links chosen on the phone
+
+    /// The icon the phone put on a slot, overriding whatever was authored.
+    static func icon(designID: UUID, tileID: UUID) -> String? {
+        defaults?.dictionary(forKey: "slotIcons-\(designID.uuidString)")
+            .flatMap { $0[tileID.uuidString] as? String }
+    }
+
+    static func setIcon(_ skin: String?, designID: UUID, tileID: UUID) {
+        let key = "slotIcons-\(designID.uuidString)"
+        var values = defaults?.dictionary(forKey: key) as? [String: String] ?? [:]
+        values[tileID.uuidString] = skin
+        defaults?.set(values, forKey: key)
+    }
+
+    /// An app the phone pointed a slot at that the design never named - which
+    /// is how a tile reaches something only this phone has.
+    static func link(designID: UUID, tileID: UUID) -> CustomTarget? {
+        guard let raw = defaults?.dictionary(forKey: "slotLinks-\(designID.uuidString)")
+            .flatMap({ $0[tileID.uuidString] as? Data })
+        else { return nil }
+        return try? JSONDecoder().decode(CustomTarget.self, from: raw)
+    }
+
+    static func setLink(_ target: CustomTarget?, designID: UUID, tileID: UUID) {
+        let key = "slotLinks-\(designID.uuidString)"
+        var values = defaults?.dictionary(forKey: key) as? [String: Data] ?? [:]
+        values[tileID.uuidString] = target.flatMap { try? JSONEncoder().encode($0) }
+        defaults?.set(values, forKey: key)
+        logger.info("slot link set on \(tileID.uuidString, privacy: .public)")
+    }
+
     static func choice(designID: UUID, tileID: UUID) -> Choice {
         switch stored(designID: designID)[tileID.uuidString] {
         case nil: .standard
@@ -65,7 +97,20 @@ enum SlotChoices {
     /// The tiles as the phone wants them: swapped occupants applied and hidden
     /// slots dropped.
     static func apply(to tiles: [PlacedTile], designID: UUID) -> [PlacedTile] {
-        apply(to: tiles, choices: stored(designID: designID))
+        apply(to: tiles, choices: stored(designID: designID)).map { tile in
+            var updated = tile
+            // The phone's own artwork and link, over whatever the occupant
+            // swap produced: a slot can be pointed at an app the design never
+            // named and dressed in any icon that shipped with it.
+            if let skin = icon(designID: designID, tileID: tile.id) {
+                updated.skin = skin.isEmpty ? nil : skin
+                updated.icon = nil
+            }
+            if let target = link(designID: designID, tileID: tile.id) {
+                updated.custom = target
+            }
+            return updated
+        }
     }
 
     /// The choices are a parameter rather than read inside, so the resolution

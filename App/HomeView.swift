@@ -143,14 +143,12 @@ struct HomeView: View {
                 TileView(
                     tile: tile,
                     side: side,
-                    iconImage: PrebuiltDesign.iconURL(
-                        tileID: tile.id,
-                        appID: tile.appID,
-                        authoredAppID: authored[tile.id] ?? tile.appID
-                    )
-                        .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(side * 3)) }
-                        .map { Image(decorative: $0, scale: 1) }
-                        ?? icons.image(for: tile)
+                    iconImage: SlotArtwork.image(
+                        for: tile,
+                        designID: manifest.designID,
+                        authoredAppID: authored[tile.id] ?? tile.appID,
+                        side: side
+                    ) ?? icons.image(for: tile)
                 )
             }
             .buttonStyle(.plain)
