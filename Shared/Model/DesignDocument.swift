@@ -1,6 +1,27 @@
 import CoreGraphics
 import Foundation
 
+/// An app the phone may put in a tile's slot instead of the authored one.
+///
+/// The authored `appID` on the tile is the default occupant - the first of the
+/// slot's list - and these are the rest of it. An alternate's artwork is a skin
+/// or nothing: the catalogue's SF Symbol plate covers a candidate with no
+/// artwork of its own, the same way a tile drew before icons existed.
+struct TileAlternate: Codable, Equatable, Identifiable, Sendable {
+    var appID: String
+    /// Artwork by filename in the skin library, like `PlacedTile.skin`.
+    var skin: String?
+
+    /// The appID: one slot offering the same app twice would make the phone's
+    /// stored choice ambiguous, so the editor refuses duplicates instead.
+    var id: String { appID }
+
+    init(appID: String, skin: String? = nil) {
+        self.appID = appID
+        self.skin = skin
+    }
+}
+
 /// One app tile placed on the composition.
 ///
 /// Positions are stored in screen pixel space so the editor, the exported
@@ -27,6 +48,10 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
     /// Clockwise rotation in degrees, so tiles can follow an angled element in
     /// the footage instead of always sitting square to the screen.
     var rotation: Double = 0
+    /// Apps the phone may swap into this slot, after `appID` in the slot's
+    /// list. Which one occupies the slot is the phone's choice, stored in the
+    /// app group - the one part of a design that is not frozen at install time.
+    var alternates: [TileAlternate] = []
 
     var rect: CGRect {
         CGRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size)
@@ -51,7 +76,8 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         icon: IconAsset? = nil,
         skin: String? = nil,
         tintHex: String? = nil,
-        rotation: Double = 0
+        rotation: Double = 0,
+        alternates: [TileAlternate] = []
     ) {
         self.id = id
         self.appID = appID
@@ -64,6 +90,7 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         self.skin = skin
         self.tintHex = tintHex
         self.rotation = rotation
+        self.alternates = alternates
     }
 
     /// Decoded field by field rather than by the synthesised initialiser.
@@ -85,6 +112,7 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         skin = try container.decodeIfPresent(String.self, forKey: .skin)
         tintHex = try container.decodeIfPresent(String.self, forKey: .tintHex)
         rotation = try container.decodeIfPresent(Double.self, forKey: .rotation) ?? 0
+        alternates = try container.decodeIfPresent([TileAlternate].self, forKey: .alternates) ?? []
     }
 }
 

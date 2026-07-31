@@ -168,6 +168,19 @@ struct BundleWriter {
         let manager = FileManager.default
         let artwork = TileArtwork(iconsFolder: iconsFolder)
         for tile in manifest.placedTiles {
+            // Alternates first: they cannot stop the authored icon shipping.
+            // Only skinned ones have a file at all - the rest draw their
+            // catalogue SF Symbol on the phone, exactly like a missing icon.
+            for alternate in tile.alternates {
+                guard let skin = alternate.skin, let rendered = artwork.url(forSkin: skin) else { continue }
+                let name = PrebuiltDesign.iconResource(
+                    tileID: tile.id,
+                    appID: alternate.appID,
+                    authoredAppID: tile.appID
+                )
+                try manager.copyItem(at: rendered, to: resources.appendingPathComponent("\(name).png"))
+            }
+
             guard let rendered = artwork.url(for: tile) else {
                 // Not fatal: the tile falls back to its catalogue SF Symbol,
                 // which is a worse icon rather than a missing one.

@@ -190,6 +190,27 @@ enum PrebuiltDesign {
         "prebuilt-icon-\(tileID.uuidString.lowercased())"
     }
 
+    /// The baked icon for whatever app occupies a slot right now.
+    ///
+    /// The authored occupant keeps the un-suffixed name older builds wrote, so
+    /// designs baked before slots could be reassigned still find their artwork.
+    /// An alternate's file only exists when it shipped with a skin; there is
+    /// deliberately no fallback to the authored file, because showing one app's
+    /// icon on a tile that launches another is worse than the catalogue's
+    /// SF Symbol plate.
+    static func iconResource(tileID: UUID, appID: String, authoredAppID: String) -> String {
+        appID == authoredAppID
+            ? iconResource(tileID: tileID)
+            : "\(iconResource(tileID: tileID))-\(appID.lowercased())"
+    }
+
+    static func iconURL(tileID: UUID, appID: String, authoredAppID: String) -> URL? {
+        PrebuiltDesign.resource(
+            named: iconResource(tileID: tileID, appID: appID, authoredAppID: authoredAppID),
+            extension: "png"
+        )
+    }
+
     /// Whether every lane font declared in `UIAppFonts` actually resolved.
     ///
     /// Bundled fonts are registered by the system before any code runs, so this

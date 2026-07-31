@@ -49,9 +49,16 @@ struct DesignWidgetView: View {
             lab
         } else if let source = bundled() {
             let _ = record(source: source)
+            // The phone's slot choices, applied at render time: the occupant is
+            // live SwiftUI over the frozen animation, so it is the one part of
+            // a design that can change without a rebuild.
+            let authored = Dictionary(
+                source.manifest.placedTiles.map { ($0.id, $0.appID) },
+                uniquingKeysWith: { first, _ in first }
+            )
             CompositionView(
                 manifest: source.manifest,
-                tiles: source.manifest.placedTiles,
+                tiles: SlotChoices.apply(to: source.manifest.placedTiles, designID: source.manifest.designID),
                 // The rendered rect, not the cut frame: only the viewport's
                 // origin positions content, and the system's origin is 2px left
                 // of the frame a design is cut to.
@@ -67,7 +74,11 @@ struct DesignWidgetView: View {
                     TileView(
                         tile: tile,
                         side: side,
-                        iconImage: PrebuiltDesign.iconURL(tileID: tile.id)
+                        iconImage: PrebuiltDesign.iconURL(
+                            tileID: tile.id,
+                            appID: tile.appID,
+                            authoredAppID: authored[tile.id] ?? tile.appID
+                        )
                             .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(side * 3)) }
                             .map { Image(decorative: $0, scale: 1) }
                     )
