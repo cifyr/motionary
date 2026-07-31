@@ -142,10 +142,15 @@ final class SpriteSheetTests: XCTestCase {
         XCTAssertTrue(shaded, "a shaded backdrop was treated as artwork")
     }
 
-    /// Being generous about hue must not swallow the icon's own colours.
-    func testTheIconsOwnGreenIsNotBackdrop() {
-        // Messages' bubble and Spotify's disc, against the same key.
-        for colour in [(54, 220, 48), (30, 215, 96)] {
+    /// What an icon's own green is protected by is enclosure, not colour.
+    ///
+    /// Messages' bubble sits within a few dozen units of the backdrop and
+    /// always matched it; `testGreenInsideAnIconSurvives` is what proves it
+    /// survives, because the fill can never reach it. Colour only has to tell
+    /// the backdrop from things that are plainly not it.
+    func testPlainlyDifferentColoursAreNotBackdrop() {
+        // The plate, its blue frame, and the gold of the Clash Royale crest.
+        for colour in [(10, 10, 12), (26, 60, 140), (196, 148, 44)] {
             XCTAssertFalse(
                 SpriteSheet.isBackdrop(
                     red: colour.0, green: colour.1, blue: colour.2,
