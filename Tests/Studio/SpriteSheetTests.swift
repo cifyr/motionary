@@ -88,6 +88,18 @@ final class SpriteSheetTests: XCTestCase {
         XCTAssertTrue(pixels.isGreenish(x: 50, y: 50), "the icon's green did not survive")
     }
 
+    /// A sheet's margins rarely divide into exactly equal cells, so a cut
+    /// catches a stripe of the icon next door. It is not backdrop, so the fill
+    /// leaves it and the trim treats it as content.
+    func testASliverOfTheNeighbourIsDiscarded() throws {
+        let cell = try Self.iconWithNeighbourSliver()
+        let cleared = try XCTUnwrap(SpriteSheet.removingSurround(cell))
+        let pixels = try Pixels(cleared)
+
+        XCTAssertEqual(pixels.alpha(x: 1, y: 50), 0, "the neighbour's sliver survived")
+        XCTAssertEqual(pixels.alpha(x: 50, y: 50), 255, "the icon itself was discarded")
+    }
+
     func testASheetWithNoRowsSlicesToNothing() throws {
         let sheet = try Self.solid(width: 100, height: 100)
         XCTAssertTrue(SpriteSheet.slice(sheet, rows: 0, columns: 4).isEmpty)
@@ -211,6 +223,25 @@ final class SpriteSheetTests: XCTestCase {
         // The green bubble inside it, the same green as the backdrop.
         context.setFillColor(CGColor(red: 0.24, green: 0.94, blue: 0.20, alpha: 1))
         context.fill(CGRect(x: 40, y: 40, width: 20, height: 20))
+        return try XCTUnwrap(context.makeImage())
+    }
+
+    /// A centred icon plus a stripe of the neighbour down the left edge, which
+    /// is what an imperfectly divided sheet hands each cell.
+    private static func iconWithNeighbourSliver() throws -> CGImage {
+        let side = 100
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(red: 0.24, green: 0.94, blue: 0.20, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        // This cell's icon, in the middle.
+        context.setFillColor(CGColor(red: 0.05, green: 0.05, blue: 0.07, alpha: 1))
+        context.fill(CGRect(x: 25, y: 25, width: 50, height: 50))
+        // The neighbour's edge, cut into this cell and touching it.
+        context.setFillColor(CGColor(red: 0.1, green: 0.1, blue: 0.5, alpha: 1))
+        context.fill(CGRect(x: 0, y: 20, width: 4, height: 60))
         return try XCTUnwrap(context.makeImage())
     }
 

@@ -177,6 +177,13 @@ enum SpriteSheet {
             if y < height - 1 { stack.append(point + width) }
         }
 
+        // Anything left that is not this cell's own icon is a sliver of the
+        // neighbouring one, caught because a sheet's margins rarely divide
+        // into exactly equal cells. It is not backdrop, so the fill leaves it,
+        // and the trim then treats it as content - a stripe down the side of
+        // half the icons.
+        discardStrays(&outside, width: width, height: height)
+
         // Clear what the fill reached, and take the backdrop's colour cast out
         // of what borders it - an antialiased edge is part icon, part
         // backdrop, and left alone it reads as a coloured rim.
@@ -217,6 +224,62 @@ enum SpriteSheet {
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             ) else { return nil }
             return context.makeImage()
+        }
+    }
+
+    /// Marks everything that is not the cell's own icon as backdrop.
+    ///
+    /// The icon sits in the middle of its cell, so the piece under the centre
+    /// is the one to keep. A piece that touches the cell's edge belongs to the
+    /// neighbour it was cut from - unless it is a fair share of the icon's own
+    /// size, which is the case where the icon really does run to the edge and
+    /// throwing it away would leave nothing.
+    private static func discardStrays(_ outside: inout [Bool], width: Int, height: Int) {
+        // Label the pieces the fill did not reach.
+        var label = [Int](repeating: 0, count: width * height)
+        var areas: [Int] = [0]
+        var touchesEdge: [Bool] = [false]
+
+        for start in 0 ..< width * height where !outside[start] && label[start] == 0 {
+            let current = areas.count
+            var area = 0
+            var edge = false
+            var stack = [start]
+            label[start] = current
+            while let point = stack.popLast() {
+                area += 1
+                let x = point % width
+                let y = point / width
+                if x == 0 || y == 0 || x == width - 1 || y == height - 1 { edge = true }
+                for neighbour in [
+                    x > 0 ? point - 1 : -1,
+                    x < width - 1 ? point + 1 : -1,
+                    y > 0 ? point - width : -1,
+                    y < height - 1 ? point + width : -1,
+                ] where neighbour >= 0 && !outside[neighbour] && label[neighbour] == 0 {
+                    label[neighbour] = current
+                    stack.append(neighbour)
+                }
+            }
+            areas.append(area)
+            touchesEdge.append(edge)
+        }
+        guard areas.count > 2 else { return }
+
+        // The piece under the middle of the cell, or the biggest one when the
+        // middle happens to be a hole in the artwork.
+        var main = label[(height / 2) * width + width / 2]
+        if main == 0 {
+            main = (1 ..< areas.count).max { areas[$0] < areas[$1] } ?? 0
+        }
+        guard main != 0 else { return }
+
+        for point in 0 ..< width * height where !outside[point] {
+            let piece = label[point]
+            guard piece != main, touchesEdge[piece] else { continue }
+            // A quarter of the icon is too much to be a cut neighbour.
+            guard areas[piece] * 4 < areas[main] else { continue }
+            outside[point] = true
         }
     }
 
