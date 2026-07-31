@@ -109,6 +109,10 @@ targets:
       # here, it is plain AVFoundation, and it is invisible from any screenshot,
       # so it is covered here rather than needing an App test target.
       - path: App/AudioSessionPolicy.swift
+      # Whether the in-app preview keeps step with the widget is decided by the
+      # drift maths here, and the two only disagree after minutes of playing -
+      # which is exactly what nobody notices by watching.
+      - path: App/LoopingCompositionView.swift
       - path: Resources
         buildPhase: resources
     settings:

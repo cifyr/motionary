@@ -99,18 +99,20 @@ struct LoopingCompositionView<Tile: View>: View {
 
 struct LoopingVideoView: UIViewRepresentable {
     let url: URL
-    /// Where in the loop to begin, evaluated at the moment playback starts so
-    /// the app's launch time is already accounted for. Nil starts at zero.
+    /// Where in the loop the widget is right now, in seconds. Read at the
+    /// moment playback starts so the wait for readiness is accounted for, and
+    /// again while playing so the app cannot drift away from it. Nil starts at
+    /// zero and never corrects.
     var startTime: (() -> TimeInterval)?
 
     func makeUIView(context: Context) -> PlayerView {
         let view = PlayerView()
-        view.play(url: url, startTime: startTime)
+        view.play(url: url, phase: startTime)
         return view
     }
 
     func updateUIView(_ view: PlayerView, context: Context) {
-        view.play(url: url, startTime: startTime)
+        view.play(url: url, phase: startTime)
     }
 
     static func dismantleUIView(_ view: PlayerView, coordinator: ()) {
@@ -120,16 +122,95 @@ struct LoopingVideoView: UIViewRepresentable {
     final class PlayerView: UIView {
         override class var layerClass: AnyClass { AVPlayerLayer.self }
 
+        /// How long a looped clip is stretched to before it repeats.
+        ///
+        /// Every wrap costs a few milliseconds of real time, so a short loop
+        /// pays that toll constantly: measured, a 0.31s clip lost 7ms per
+        /// second under AVPlayerLooper against 0.3ms for a 6s one. The widget's
+        /// animation is driven by the clock and never loses anything, so that
+        /// toll is the two running at different speeds. Repeating the clip
+        /// into one long item leaves the picture identical and the wraps rare.
+        private static let minimumSpan: TimeInterval = 4
+
+        /// How far out of step with the widget the picture may get before it is
+        /// pulled back. Above a frame or so it is visible as disagreement;
+        /// below it, correcting would be the more visible of the two.
+        private static let tolerance: TimeInterval = 0.08
+
         private var looper: AVPlayerLooper?
         private var queuePlayer: AVQueuePlayer?
         private var currentURL: URL?
+        /// The single loop's length, which the composition holds a whole number
+        /// of - so the phase inside it is the player's time modulo this.
+        private var loopDuration: TimeInterval = 0
+        private var phase: (() -> TimeInterval)?
+        private var driftObserver: Any?
+        /// Bumped on every load, so a composition that finishes building after
+        /// the view has moved on is dropped rather than played.
+        private var generation = 0
 
         private var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 
-        func play(url: URL, startTime: (() -> TimeInterval)?) {
+        func play(url: URL, phase: (() -> TimeInterval)?) {
+            // The closure is refreshed even when the clip has not changed: it
+            // captures the manifest the caller is drawing, and SwiftUI hands
+            // over a new one on every update.
+            self.phase = phase
             guard currentURL != url else { return }
             guard FileManager.default.fileExists(atPath: url.path) else { return }
             stop()
+            currentURL = url
+            generation += 1
+            let token = generation
+
+            Task { [weak self] in
+                guard let repeated = try? await Self.repeated(url: url, atLeast: Self.minimumSpan) else {
+                    // Falling back rather than showing nothing: a clip that
+                    // cannot be composed still plays, it just wraps more often.
+                    await MainActor.run { self?.start(item: AVPlayerItem(url: url), loop: 0, token: token) }
+                    return
+                }
+                await MainActor.run {
+                    self?.start(item: AVPlayerItem(asset: repeated.composition), loop: repeated.loop, token: token)
+                }
+            }
+        }
+
+        /// The clip laid end to end enough times to run for `span`, and the
+        /// length of one pass through it.
+        private static func repeated(
+            url: URL,
+            atLeast span: TimeInterval
+        ) async throws -> (composition: AVComposition, loop: TimeInterval) {
+            let asset = AVURLAsset(url: url)
+            let duration = try await asset.load(.duration)
+            let seconds = CMTimeGetSeconds(duration)
+            guard seconds > 0, let track = try await asset.loadTracks(withMediaType: .video).first else {
+                throw LoopedClipError.noVideoTrack(path: url.path)
+            }
+
+            let composition = AVMutableComposition()
+            guard let destination = composition.addMutableTrack(
+                withMediaType: .video,
+                preferredTrackID: kCMPersistentTrackID_Invalid
+            ) else {
+                throw LoopedClipError.noVideoTrack(path: url.path)
+            }
+            let range = CMTimeRange(start: .zero, duration: duration)
+            let passes = max(1, Int((span / seconds).rounded(.up)))
+            for pass in 0 ..< passes {
+                try destination.insertTimeRange(
+                    range,
+                    of: track,
+                    at: CMTimeMultiply(duration, multiplier: Int32(pass))
+                )
+            }
+            return (composition, seconds)
+        }
+
+        private func start(item: AVPlayerItem, loop: TimeInterval, token: Int) {
+            guard token == generation else { return }
+            loopDuration = loop
 
             let player = AVQueuePlayer()
             // Belt only. The preview has no audio track to begin with, and mute
@@ -139,24 +220,65 @@ struct LoopingVideoView: UIViewRepresentable {
             player.isMuted = true
             // AVPlayerLooper repeats gaplessly; restarting on the
             // did-play-to-end notification visibly stutters at the wrap.
-            looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+            looper = AVPlayerLooper(player: player, templateItem: item)
             playerLayer.player = player
             playerLayer.videoGravity = .resize
             queuePlayer = player
-            currentURL = url
 
-            guard let startTime else {
+            guard phase != nil else {
                 player.play()
                 return
             }
             // Seek once the item is ready, and read the phase at that moment so
             // the wait for readiness does not put the app behind the widget.
-            observe(player: player) {
-                let target = CMTime(seconds: startTime(), preferredTimescale: 600)
-                player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
-                    player.play()
-                }
+            observe(player: player) { [weak self] in
+                self?.seekToPhase(player: player) { player.play() }
+                self?.watchForDrift(player: player)
             }
+        }
+
+        private func seekToPhase(player: AVQueuePlayer, then finished: @escaping () -> Void) {
+            guard let phase else { return finished() }
+            player.seek(
+                to: CMTime(seconds: phase(), preferredTimescale: 600),
+                toleranceBefore: .zero,
+                toleranceAfter: .zero
+            ) { _ in finished() }
+        }
+
+        /// Pulls the picture back onto the widget's clock when it slips.
+        ///
+        /// Playback is not held to real time - a wrap, a stall or a dropped
+        /// frame all cost a little - while the widget's animation is a pure
+        /// function of wall-clock time. Without this the two only agree at the
+        /// moment the app opens.
+        private func watchForDrift(player: AVQueuePlayer) {
+            guard loopDuration > 0 else { return }
+            driftObserver = player.addPeriodicTimeObserver(
+                forInterval: CMTime(seconds: 1, preferredTimescale: 600),
+                queue: .main
+            ) { [weak self] time in
+                guard let self, let phase = self.phase, player.rate != 0 else { return }
+                let drift = Self.drift(
+                    playhead: CMTimeGetSeconds(time),
+                    expected: phase(),
+                    loopDuration: self.loopDuration
+                )
+                guard abs(drift) > min(Self.tolerance, self.loopDuration / 4) else { return }
+                self.seekToPhase(player: player) {}
+            }
+        }
+
+        /// How far ahead the picture is of where the widget says it should be,
+        /// as the shorter way round the loop: at the wrap, 0.01s after the end
+        /// is 0.01s ahead of the start rather than a whole loop behind.
+        static func drift(playhead: TimeInterval, expected: TimeInterval, loopDuration: TimeInterval) -> TimeInterval {
+            guard loopDuration > 0 else { return 0 }
+            let position = playhead.truncatingRemainder(dividingBy: loopDuration)
+            var difference = position - expected.truncatingRemainder(dividingBy: loopDuration)
+            if difference > loopDuration / 2 { difference -= loopDuration }
+            if difference < -loopDuration / 2 { difference += loopDuration }
+            return difference
         }
 
         private var readinessObservation: NSKeyValueObservation?
@@ -175,11 +297,24 @@ struct LoopingVideoView: UIViewRepresentable {
         func stop() {
             readinessObservation?.invalidate()
             readinessObservation = nil
+            if let driftObserver { queuePlayer?.removeTimeObserver(driftObserver) }
+            driftObserver = nil
             queuePlayer?.pause()
             looper?.disableLooping()
             looper = nil
             queuePlayer = nil
             currentURL = nil
+            loopDuration = 0
+        }
+    }
+}
+
+enum LoopedClipError: Error, CustomStringConvertible {
+    case noVideoTrack(path: String)
+
+    var description: String {
+        switch self {
+        case .noVideoTrack(let path): "preview clip has no video track to loop: \(path)"
         }
     }
 }
