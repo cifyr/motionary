@@ -60,6 +60,34 @@ final class SpriteSheetTests: XCTestCase {
         XCTAssertTrue(Self.isGreen(cells[1]))
     }
 
+    /// 1254 across 7 columns is 179.14, and rounding each cell's own origin
+    /// and size drifts by a pixel and a half before the last column - every
+    /// icon cut slightly wrong, worse the further right it sits.
+    func testCellsTileExactlyWhenTheSheetDoesNotDivideEvenly() throws {
+        let sheet = try Self.solid(width: 1254, height: 1254)
+        let cells = SpriteSheet.slice(sheet, rows: 7, columns: 7)
+        XCTAssertEqual(cells.count, 49)
+
+        // Widths of one row must add back up to the sheet, with no cell lost
+        // or doubled.
+        let firstRow = cells.prefix(7).map(\.width)
+        XCTAssertEqual(firstRow.reduce(0, +), 1254, "the cut drifts across the row")
+        XCTAssertTrue(firstRow.allSatisfy { abs($0 - 179) <= 1 }, "cells are wildly uneven: \(firstRow)")
+    }
+
+    /// Green icons on a green sheet: keying by colour hollows out Messages,
+    /// Phone, FaceTime, WhatsApp and Spotify. Only backdrop connected to the
+    /// border may go.
+    func testGreenInsideAnIconSurvives() throws {
+        let cell = try Self.greenIconOnGreen()
+        let cleared = try XCTUnwrap(SpriteSheet.removingSurround(cell))
+        let pixels = try Pixels(cleared)
+
+        XCTAssertEqual(pixels.alpha(x: 2, y: 2), 0, "the surround was not cleared")
+        XCTAssertEqual(pixels.alpha(x: 50, y: 50), 255, "the icon's own green was removed")
+        XCTAssertTrue(pixels.isGreenish(x: 50, y: 50), "the icon's green did not survive")
+    }
+
     func testASheetWithNoRowsSlicesToNothing() throws {
         let sheet = try Self.solid(width: 100, height: 100)
         XCTAssertTrue(SpriteSheet.slice(sheet, rows: 0, columns: 4).isEmpty)
@@ -163,6 +191,61 @@ final class SpriteSheetTests: XCTestCase {
         context.setFillColor(CGColor(red: 0, green: 1, blue: 0, alpha: 1))
         context.fill(CGRect(x: 50, y: 50, width: 50, height: 50))
         return try XCTUnwrap(context.makeImage())
+    }
+
+    /// A green backdrop with a dark plate in the middle carrying a green
+    /// shape - a Messages or WhatsApp icon in miniature. The inner green is
+    /// enclosed by the plate, so nothing connects it to the border.
+    private static func greenIconOnGreen() throws -> CGImage {
+        let side = 100
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        // Backdrop: the bright green these sheets arrive on.
+        context.setFillColor(CGColor(red: 0.24, green: 0.94, blue: 0.20, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        // The icon's dark plate.
+        context.setFillColor(CGColor(red: 0.05, green: 0.05, blue: 0.07, alpha: 1))
+        context.fill(CGRect(x: 25, y: 25, width: 50, height: 50))
+        // The green bubble inside it, the same green as the backdrop.
+        context.setFillColor(CGColor(red: 0.24, green: 0.94, blue: 0.20, alpha: 1))
+        context.fill(CGRect(x: 40, y: 40, width: 20, height: 20))
+        return try XCTUnwrap(context.makeImage())
+    }
+
+    /// Reads pixels back in a known layout, row 0 at the top.
+    private struct Pixels {
+        let bytes: [UInt8]
+        let width: Int
+
+        init(_ image: CGImage) throws {
+            let width = image.width
+            let height = image.height
+            var buffer = [UInt8](repeating: 0, count: width * height * 4)
+            let drew = buffer.withUnsafeMutableBytes { raw -> Bool in
+                guard let context = CGContext(
+                    data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                    bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                ) else { return false }
+                context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+                return true
+            }
+            XCTAssertTrue(drew, "could not read the image back")
+            self.width = width
+            bytes = buffer
+        }
+
+        func alpha(x: Int, y: Int) -> Int { Int(bytes[(y * width + x) * 4 + 3]) }
+
+        func isGreenish(x: Int, y: Int) -> Bool {
+            let index = (y * width + x) * 4
+            let red = Int(bytes[index])
+            let green = Int(bytes[index + 1])
+            let blue = Int(bytes[index + 2])
+            return green > 120 && green > red + 40 && green > blue + 40
+        }
     }
 
     private static func average(_ image: CGImage) -> (r: Int, g: Int, b: Int) {

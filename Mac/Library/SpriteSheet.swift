@@ -72,22 +72,152 @@ enum SpriteSheet {
     /// one-pixel drift turns into every icon being cropped slightly wrong.
     static func slice(_ image: CGImage, rows: Int, columns: Int) -> [CGImage] {
         guard rows > 0, columns > 0 else { return [] }
-        let cellWidth = CGFloat(image.width) / CGFloat(columns)
-        let cellHeight = CGFloat(image.height) / CGFloat(rows)
+        // Boundaries first, then the rects between them. Rounding each cell's
+        // own origin and size instead - which is what `.integral` on a
+        // separately computed rect does - leaves gaps and overlaps wherever
+        // the sheet does not divide evenly: 1254 across 7 columns is 179.14,
+        // and by the last column the cut has drifted a pixel and a half.
+        func bounds(_ total: Int, _ count: Int) -> [Int] {
+            (0 ... count).map { Int((Double(total) * Double($0) / Double(count)).rounded()) }
+        }
+        let xs = bounds(image.width, columns)
+        let ys = bounds(image.height, rows)
+
         var cells: [CGImage] = []
         for row in 0 ..< rows {
             for column in 0 ..< columns {
                 let rect = CGRect(
-                    x: CGFloat(column) * cellWidth,
-                    y: CGFloat(row) * cellHeight,
-                    width: cellWidth,
-                    height: cellHeight
-                ).integral
+                    x: xs[column],
+                    y: ys[row],
+                    width: xs[column + 1] - xs[column],
+                    height: ys[row + 1] - ys[row]
+                )
                 guard let cell = image.cropping(to: rect) else { continue }
                 cells.append(cell)
             }
         }
         return cells
+    }
+
+    /// Clears the backdrop from around a cell without touching the artwork.
+    ///
+    /// Keying by colour alone removes every matching pixel wherever it is,
+    /// which on a green sheet takes the green out of Messages, Phone,
+    /// FaceTime, WhatsApp and Spotify - the icons most likely to be on it.
+    /// This fills inwards from the border instead, so only backdrop connected
+    /// to the outside goes, and green inside an icon stays green.
+    static func removingSurround(_ image: CGImage, tolerance: Double = 0.30) -> CGImage? {
+        let width = image.width
+        let height = image.height
+        guard width > 2, height > 2 else { return nil }
+
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drew = pixels.withUnsafeMutableBytes { raw -> Bool in
+            guard let context = CGContext(
+                data: raw.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drew else { return nil }
+
+        // The backdrop colour, taken from the corners: a sheet's cell has its
+        // artwork in the middle, so the corners are the one place certain to
+        // be backdrop.
+        let corners = [
+            (0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1),
+        ]
+        var keyR = 0, keyG = 0, keyB = 0
+        for (x, y) in corners {
+            let index = (y * width + x) * 4
+            keyR += Int(pixels[index])
+            keyG += Int(pixels[index + 1])
+            keyB += Int(pixels[index + 2])
+        }
+        keyR /= corners.count
+        keyG /= corners.count
+        keyB /= corners.count
+
+        // Scaled to the same 0-255 space the samples are in.
+        let reach = tolerance * 255 * 1.75
+
+        func matches(_ index: Int) -> Bool {
+            let dr = Double(Int(pixels[index]) - keyR)
+            let dg = Double(Int(pixels[index + 1]) - keyG)
+            let db = Double(Int(pixels[index + 2]) - keyB)
+            return (dr * dr + dg * dg + db * db).squareRoot() <= reach
+        }
+
+        // Flood fill inwards from every border pixel that is backdrop.
+        var outside = [Bool](repeating: false, count: width * height)
+        var stack: [Int] = []
+        for x in 0 ..< width {
+            stack.append(x)
+            stack.append((height - 1) * width + x)
+        }
+        for y in 0 ..< height {
+            stack.append(y * width)
+            stack.append(y * width + width - 1)
+        }
+
+        while let point = stack.popLast() {
+            guard !outside[point], matches(point * 4) else { continue }
+            outside[point] = true
+            let x = point % width
+            let y = point / width
+            if x > 0 { stack.append(point - 1) }
+            if x < width - 1 { stack.append(point + 1) }
+            if y > 0 { stack.append(point - width) }
+            if y < height - 1 { stack.append(point + width) }
+        }
+
+        // Clear what the fill reached, and take the backdrop's colour cast out
+        // of what borders it - an antialiased edge is part icon, part
+        // backdrop, and left alone it reads as a coloured rim.
+        for point in 0 ..< width * height {
+            let index = point * 4
+            if outside[point] {
+                pixels[index] = 0
+                pixels[index + 1] = 0
+                pixels[index + 2] = 0
+                pixels[index + 3] = 0
+                continue
+            }
+            let x = point % width
+            let y = point / width
+            let touchesOutside =
+                (x > 0 && outside[point - 1]) ||
+                (x < width - 1 && outside[point + 1]) ||
+                (y > 0 && outside[point - width]) ||
+                (y < height - 1 && outside[point + width])
+            guard touchesOutside else { continue }
+            // Only where the key's dominant channel is over-represented, so a
+            // genuinely green pixel of artwork is left as it is.
+            let green = Int(pixels[index + 1])
+            let others = max(Int(pixels[index]), Int(pixels[index + 2]))
+            if keyG > keyR, keyG > keyB, green > others {
+                pixels[index + 1] = UInt8(others)
+            }
+        }
+
+        return pixels.withUnsafeMutableBytes { raw -> CGImage? in
+            guard let context = CGContext(
+                data: raw.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return nil }
+            return context.makeImage()
+        }
     }
 
     /// The catalogue app a label names, matched loosely.
@@ -150,7 +280,10 @@ enum SpriteSheet {
             guard index < cells.count else { break }
 
             let name = skinName(for: label, prefix: prefix)
-            try library.importing(cells[index], named: name)
+            // Surround only: the icons on these sheets are frequently green
+            // themselves, and a colour key would hollow them out.
+            let cell = removingSurround(cells[index]) ?? cells[index]
+            try library.importing(cell, named: name, alreadyKeyed: true)
 
             if let app = app(named: label) {
                 report.entries.append(SkinSet.Entry(appID: app.id, skin: name))
