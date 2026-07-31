@@ -509,4 +509,41 @@ final class TilePlacementTests: XCTestCase {
         XCTAssertTrue(SnapEngine.isFullyInside(inside, frame: frame))
         XCTAssertFalse(SnapEngine.isFullyInside(straddling, frame: frame))
     }
+
+    /// New tiles land on a free spot: every one used to drop on the frame's
+    /// centre, so adding four apps began with un-stacking a pile.
+    func testNewTilesDoNotLandOnEachOther() {
+        var tiles: [PlacedTile] = []
+        for _ in 0 ..< 4 {
+            let center = engine.freePlacement(size: 180, avoiding: tiles)
+            tiles.append(PlacedTile(appID: "spotify", center: center, size: 180))
+        }
+
+        for tile in tiles {
+            XCTAssertTrue(
+                SnapEngine.isFullyInside(tile, frame: frame),
+                "a new tile landed where it cannot be tapped"
+            )
+        }
+        for (index, tile) in tiles.enumerated() {
+            for other in tiles[(index + 1)...] {
+                XCTAssertFalse(
+                    tile.rect.intersects(other.rect),
+                    "tiles overlap at \(tile.center) / \(other.center)"
+                )
+            }
+        }
+    }
+
+    /// A frame with no room left still answers with somewhere visible.
+    func testAFullFrameFallsBackToTheCentre() {
+        // One tile covering the whole frame leaves no free spot.
+        let wall = PlacedTile(
+            appID: "spotify",
+            center: CGPoint(x: frame.midX, y: frame.midY),
+            size: max(frame.width, frame.height) * 2
+        )
+        let center = engine.freePlacement(size: 180, avoiding: [wall])
+        XCTAssertEqual(center, CGPoint(x: frame.midX, y: frame.midY))
+    }
 }

@@ -119,6 +119,39 @@ struct SnapEngine {
         )
     }
 
+    /// Somewhere inside the widget frame a new tile can land without covering
+    /// one already placed.
+    ///
+    /// Every tile used to drop on the frame's centre, so adding four apps made
+    /// a stack that had to be dealt before anything could be arranged. Scans a
+    /// grid from the top left, the reading order a row of launchers is usually
+    /// built in; when the frame is genuinely full, the centre is still the
+    /// honest answer.
+    func freePlacement(size: CGFloat, avoiding tiles: [PlacedTile]) -> CGPoint {
+        let occupied = tiles.map { tile in
+            CGRect(
+                x: tile.center.x - tile.boundingExtent / 2,
+                y: tile.center.y - tile.boundingExtent / 2,
+                width: tile.boundingExtent,
+                height: tile.boundingExtent
+            )
+        }
+        let step = size * 0.55
+        var y = widgetRect.minY + size / 2
+        while y <= widgetRect.maxY - size / 2 {
+            var x = widgetRect.minX + size / 2
+            while x <= widgetRect.maxX - size / 2 {
+                let candidate = CGRect(x: x - size / 2, y: y - size / 2, width: size, height: size)
+                if !occupied.contains(where: { $0.intersects(candidate) }) {
+                    return CGPoint(x: x, y: y)
+                }
+                x += step
+            }
+            y += step
+        }
+        return CGPoint(x: widgetRect.midX, y: widgetRect.midY)
+    }
+
     /// Whether the whole tile is tappable, which only the part inside the widget
     /// frame is. The editor says how many tiles cross it, so a layout that leans
     /// on the wallpaper does so knowingly.

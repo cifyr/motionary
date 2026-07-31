@@ -20,9 +20,11 @@ struct LayoutEditor: View {
     @State private var placementBase: MediaTransform?
     @State private var scaleBase: Double?
     @State private var tileBase: CGPoint?
-    @State private var showingCatalogue = false
     /// The selected tile is collecting an alternate from the catalogue.
     @State private var addingAlternate = false
+    @State private var libraryTab: LibraryTab = .apps
+    /// Keyboard focus for the canvas, so arrow keys nudge the selection.
+    @FocusState private var canvasFocused: Bool
     /// Applied to tiles added later, so turning labels off once does not have
     /// to be repeated for every app placed after it.
     @State private var labelsDefault = true
@@ -287,6 +289,25 @@ struct LayoutEditor: View {
             .gesture(clipDrag)
             .simultaneousGesture(clipZoom)
             .onTapGesture { selection = nil }
+            .focusable()
+            .focusEffectDisabled()
+            .focused($canvasFocused)
+            .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow], phases: [.down, .repeat]) { press in
+                let step: CGFloat = press.modifiers.contains(.shift) ? 10 : 1
+                let moved = switch press.key {
+                case .leftArrow: nudgeSelection(dx: -step, dy: 0)
+                case .rightArrow: nudgeSelection(dx: step, dy: 0)
+                case .upArrow: nudgeSelection(dx: 0, dy: -step)
+                case .downArrow: nudgeSelection(dx: 0, dy: step)
+                default: false
+                }
+                return moved ? .handled : .ignored
+            }
+            // Selecting something on the canvas is the intent to work on it,
+            // arrow keys included.
+            .onChange(of: selection) { _, value in
+                if value != nil { canvasFocused = true }
+            }
     }
 
     /// The clip, in canvas coordinates.
@@ -612,9 +633,6 @@ struct LayoutEditor: View {
                 }
             }
 
-            if let asset = selectedAsset {
-                assetInspector(asset)
-            }
         }
         .disabled(store == nil)
     }
@@ -1028,29 +1046,82 @@ struct LayoutEditor: View {
 
     // MARK: - Sidebar
 
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Layout").font(.headline)
+    /// Which library the bottom of the sidebar shows. The inspector above it
+    /// answers the selection; these never reorder or disappear.
+    private enum LibraryTab: String, CaseIterable, Identifiable {
+        case apps = "Apps"
+        case looks = "Looks"
+        case pictures = "Pictures"
+        case clips = "Clips"
 
-            Button {
-                showingCatalogue = true
-            } label: {
-                Label("Add app", systemImage: "plus.app")
-            }
-            .popover(isPresented: $showingCatalogue) {
-                CataloguePicker { appID in
-                    add(appID: appID)
-                    showingCatalogue = false
+        var id: String { rawValue }
+    }
+
+    /// The sidebar is an inspector over a library. The inspector answers
+    /// "what am I editing right now" - a tile, a picture, or the scene itself
+    /// when nothing is selected - so the controls that matter are always at
+    /// the top instead of below the fold of one long column.
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            inspector
+
+            Divider()
+
+            Picker("Library", selection: $libraryTab) {
+                ForEach(LibraryTab.allCases) { tab in
+                    Text(tab.rawValue).tag(tab)
                 }
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
 
-            assetsSection
+            switch libraryTab {
+            case .apps:
+                catalogueSection
+                placedTilesSection
+            case .looks:
+                skinPicker
+                skinSetsSection
+            case .pictures:
+                assetsSection
+            case .clips:
+                variantsSection
+            }
+        }
+    }
 
-            variantsSection
+    @ViewBuilder
+    private var inspector: some View {
+        if let selection, let index = design.tiles.firstIndex(where: { $0.id == selection }) {
+            selected(index: index)
+        } else if let asset = selectedAsset {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Picture").font(.subheadline.weight(.semibold))
+                assetInspector(asset)
+                alignRow(
+                    extent: CGSize(width: asset.size.width, height: asset.size.height)
+                ) { center in
+                    guard let index = design.assets.firstIndex(where: { $0.id == asset.id })
+                    else { return }
+                    design.assets[index].center = center
+                } current: {
+                    design.assets.first { $0.id == asset.id }?.center ?? .zero
+                }
+                positionReadout(center: asset.center)
+            }
+        } else {
+            sceneInspector
+        }
+    }
+
+    /// Nothing selected means the scene itself is selected.
+    private var sceneInspector: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Scene").font(.subheadline.weight(.semibold))
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("Size")
+                    Text("Clip size")
                     Spacer()
                     Text(String(format: "%.0f%%", design.mediaTransform.scale * 100))
                         .monospacedDigit()
@@ -1117,6 +1188,17 @@ struct LayoutEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Toggle("Snap to grid", isOn: $design.snapEnabled)
+
+            Toggle("Icon labels", isOn: Binding(
+                get: { design.tiles.allSatisfy(\.showsLabel) && !design.tiles.isEmpty },
+                set: { on in
+                    labelsDefault = on
+                    for index in design.tiles.indices { design.tiles[index].showsLabel = on }
+                }
+            ))
+            .disabled(design.tiles.isEmpty)
+
             let outside = design.tiles.filter { !SnapEngine.isFullyInside($0, frame: design.widgetRect) }
             if !outside.isEmpty {
                 Text("""
@@ -1129,36 +1211,132 @@ struct LayoutEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            skinPicker
-
-            skinSetsSection
-
-            Toggle("Snap to grid", isOn: $design.snapEnabled)
-
-            Toggle("Icon labels", isOn: Binding(
-                get: { design.tiles.allSatisfy(\.showsLabel) && !design.tiles.isEmpty },
-                set: { on in
-                    labelsDefault = on
-                    for index in design.tiles.indices { design.tiles[index].showsLabel = on }
-                }
-            ))
-            .disabled(design.tiles.isEmpty)
-
-            if let selection, let index = design.tiles.firstIndex(where: { $0.id == selection }) {
-                Divider()
-                selected(index: index)
-            } else {
-                Text("Drag the picture to move it, pinch or use the slider to size it. Tap a tile to adjust it.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Text("The dashed frame is the widget. Only what falls inside it animates and answers a tap; the rest becomes the wallpaper, tiles included.")
+            Text("The dashed frame is the widget: only what falls inside it animates and answers a tap. Click anything on the canvas to edit it here.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// The catalogue lives in the sidebar rather than behind a button: adding
+    /// apps is the editor's most common act, and a popover made it a hunt.
+    private var catalogueSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Add an app").font(.caption.weight(.semibold))
+            CatalogueList(height: 200) { appID in
+                add(appID: appID)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var placedTilesSection: some View {
+        if !design.tiles.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Placed").font(.caption.weight(.semibold))
+                ForEach(design.tiles) { tile in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(AppCatalog.app(id: tile.appID)?.tint ?? .gray)
+                            .frame(width: 10, height: 10)
+                        Text(AppCatalog.app(id: tile.appID)?.name ?? tile.appID)
+                            .font(.caption)
+                            .foregroundStyle(selection == tile.id ? Color.accentColor : .primary)
+                        if !tile.alternates.isEmpty {
+                            Text("+\(tile.alternates.count)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { selection = tile.id }
+                }
+            }
+        }
+    }
+
+    // MARK: - Alignment
+
+    /// Where the align row puts a selected thing's edge, always against the
+    /// widget frame: it is the region a launcher lives in, and the edge the
+    /// eye lines things up against.
+    private func alignRow(
+        extent: CGSize,
+        set: @escaping (CGPoint) -> Void,
+        current: @escaping () -> CGPoint
+    ) -> some View {
+        let frame = design.widgetRect
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("Align in widget").font(.caption.weight(.semibold))
+            HStack(spacing: 4) {
+                alignButton("align.horizontal.left", "Left edge") {
+                    set(CGPoint(x: frame.minX + extent.width / 2, y: current().y))
+                }
+                alignButton("align.horizontal.center", "Centre") {
+                    set(CGPoint(x: frame.midX, y: current().y))
+                }
+                alignButton("align.horizontal.right", "Right edge") {
+                    set(CGPoint(x: frame.maxX - extent.width / 2, y: current().y))
+                }
+                Divider().frame(height: 14)
+                alignButton("align.vertical.top", "Top edge") {
+                    set(CGPoint(x: current().x, y: frame.minY + extent.height / 2))
+                }
+                alignButton("align.vertical.center", "Middle") {
+                    set(CGPoint(x: current().x, y: frame.midY))
+                }
+                alignButton("align.vertical.bottom", "Bottom edge") {
+                    set(CGPoint(x: current().x, y: frame.maxY - extent.height / 2))
+                }
+            }
+        }
+    }
+
+    private func alignButton(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).frame(width: 22, height: 18)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help(help)
+    }
+
+    private func positionReadout(center: CGPoint) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("x \(Int(center.x))  y \(Int(center.y)) px")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            Text("Arrow keys nudge 1 px; hold Shift for 10.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Moves whatever is selected by whole pixels, clamped like a drag is.
+    private func nudgeSelection(dx: CGFloat, dy: CGFloat) -> Bool {
+        let engine = SnapEngine(screenSize: model.screenPixelSize, widgetRect: design.widgetRect)
+        if let selection, let index = design.tiles.firstIndex(where: { $0.id == selection }) {
+            let moved = CGPoint(
+                x: design.tiles[index].center.x + dx,
+                y: design.tiles[index].center.y + dy
+            )
+            design.tiles[index].center = engine.clamp(
+                center: moved,
+                tileSize: design.tiles[index].boundingExtent
+            )
+            return true
+        }
+        if let selection, let index = design.assets.firstIndex(where: { $0.id == selection }) {
+            let asset = design.assets[index]
+            let moved = CGPoint(x: asset.center.x + dx, y: asset.center.y + dy)
+            design.assets[index].center = engine.clamp(
+                center: moved,
+                tileSize: max(asset.size.width, asset.size.height)
+            )
+            return true
+        }
+        return false
     }
 
     private func selected(index: Int) -> some View {
@@ -1206,6 +1384,16 @@ struct LayoutEditor: View {
                 get: { design.tiles[index].showsLabel },
                 set: { design.tiles[index].showsLabel = $0 }
             ))
+
+            alignRow(
+                extent: CGSize(width: tile.size, height: tile.size)
+            ) { center in
+                guard design.tiles.indices.contains(index) else { return }
+                design.tiles[index].center = center
+            } current: {
+                design.tiles.indices.contains(index) ? design.tiles[index].center : .zero
+            }
+            positionReadout(center: tile.center)
 
             alternatesSection(index: index)
 
@@ -1309,22 +1497,35 @@ struct LayoutEditor: View {
     }
 
     private func add(appID: String) {
-        // Dropped into the middle of the widget frame rather than the middle of
-        // the screen: outside that frame a tile is only a picture on the
-        // wallpaper, and a new tile should land somewhere it can be tapped.
-        let frame = design.widgetRect
-        var tile = PlacedTile(
-            appID: appID,
-            center: CGPoint(x: frame.midX, y: frame.midY),
-            size: 180
-        )
+        // On a free spot inside the widget frame - outside it a tile is only a
+        // picture on the wallpaper - and never on top of a tile already
+        // placed, which is what made adding four apps start with un-stacking.
+        let size: CGFloat = 180
+        let center = SnapEngine(
+            screenSize: model.screenPixelSize,
+            widgetRect: design.widgetRect
+        ).freePlacement(size: size, avoiding: design.tiles)
+        var tile = PlacedTile(appID: appID, center: center, size: size)
         tile.showsLabel = labelsDefault
         design.tiles.append(tile)
         selection = tile.id
     }
 }
 
+/// The popover shape of the catalogue, for flows that collect one app - a
+/// slot's alternates. The sidebar embeds `CatalogueList` directly instead.
 private struct CataloguePicker: View {
+    let onPick: (String) -> Void
+
+    var body: some View {
+        CatalogueList(onPick: onPick)
+            .padding(12)
+            .frame(width: 240)
+    }
+}
+
+private struct CatalogueList: View {
+    var height: CGFloat = 260
     let onPick: (String) -> Void
 
     @State private var query = ""
@@ -1337,7 +1538,7 @@ private struct CataloguePicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField("Search", text: $query)
+            TextField("Search apps", text: $query)
                 .textFieldStyle(.roundedBorder)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
@@ -1360,12 +1561,15 @@ private struct CataloguePicker: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    if matches.isEmpty {
+                        Text("No app matches \"\(query)\".")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
-            .frame(height: 260)
+            .frame(height: height)
         }
-        .padding(12)
-        .frame(width: 240)
     }
 }
 
