@@ -131,17 +131,15 @@ struct LayoutEditor: View {
     var body: some View {
         VStack(spacing: 0) {
             editorToolbar
-            Divider()
             HStack(alignment: .top, spacing: 0) {
-                ScrollView { layersPanel.padding(12) }
-                    .frame(width: Self.layersWidth)
-                    .background(.quaternary.opacity(0.25))
-                Divider()
+                layersPanel
                 ScrollView([.horizontal, .vertical]) {
-                    screen.padding(20)
+                    screen
+                        .padding(28)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                Divider()
+                .background(StudioTheme.canvasBackground)
                 // Scrolled, because the sidebar holds more than the window is
                 // tall. Overflowing it squeezed the flexible child - the skin
                 // grid - down to nothing, so an imported skin was in the view
@@ -150,14 +148,23 @@ struct LayoutEditor: View {
                 ScrollView {
                     sidebar
                         .frame(width: Self.sidebarWidth, alignment: .leading)
-                        .padding(12)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 12)
                 }
-                .frame(width: Self.sidebarWidth + 24)
-                .background(.quaternary.opacity(0.25))
+                .frame(width: Self.sidebarWidth + 30)
+                .background(StudioTheme.panel)
+                .overlay(alignment: .leading) {
+                    Rectangle().fill(StudioTheme.panelEdge).frame(width: 1)
+                }
             }
-            Divider()
             statusBar
         }
+        .background(StudioTheme.canvasWell)
+        // A fixed dark theme: the canvas is a phone screen, and a panel that
+        // changed weight with the system appearance would change what the
+        // artwork beside it looks like.
+        .environment(\.colorScheme, .dark)
+        .tint(StudioTheme.accent)
         .task {
             reloadSkins()
             reloadBackground()
@@ -263,7 +270,7 @@ struct LayoutEditor: View {
         let index = singleSelection.flatMap { id in design.tiles.firstIndex { $0.id == id } }
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Skins").font(.caption.weight(.semibold))
+                StudioTheme.eyebrow("Skins").foregroundStyle(StudioTheme.textTertiary)
                 Spacer()
                 Button("Import...") { importSkins() }.buttonStyle(.link)
             }
@@ -727,7 +734,7 @@ struct LayoutEditor: View {
     private var assetsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Pictures").font(.caption.weight(.semibold))
+                StudioTheme.eyebrow("Pictures").foregroundStyle(StudioTheme.textTertiary)
                 Spacer()
                 Button("Add...") { importAssets() }.buttonStyle(.link)
             }
@@ -937,7 +944,7 @@ struct LayoutEditor: View {
     private var skinSetsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Skin sets").font(.caption.weight(.semibold))
+                StudioTheme.eyebrow("Skin sets").foregroundStyle(StudioTheme.textTertiary)
                 Spacer()
                 Button("New set") {
                     skinSets.append(SkinSet(name: "Set \(skinSets.count + 1)"))
@@ -1084,7 +1091,7 @@ struct LayoutEditor: View {
     private var variantsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Animation variants").font(.caption.weight(.semibold))
+                StudioTheme.eyebrow("Animation variants").foregroundStyle(StudioTheme.textTertiary)
                 Spacer()
                 Button("Add...") { importVariants() }.buttonStyle(.link)
             }
@@ -1188,15 +1195,28 @@ struct LayoutEditor: View {
         VStack(alignment: .leading, spacing: 12) {
             inspector
 
-            Divider()
+            Rectangle().fill(StudioTheme.headerEdge).frame(height: 1)
 
-            Picker("Library", selection: $libraryTab) {
+            // A trough with a raised chip on the selected tab, the way the
+            // mockup draws it - a system segmented control reads as a form
+            // field rather than a place to live.
+            HStack(spacing: 2) {
                 ForEach(LibraryTab.allCases) { tab in
-                    Text(tab.rawValue).tag(tab)
+                    Text(tab.rawValue)
+                        .font(StudioTheme.body)
+                        .foregroundStyle(libraryTab == tab ? StudioTheme.textBright : StudioTheme.textTertiary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                        .background(
+                            libraryTab == tab ? StudioTheme.controlFill : .clear,
+                            in: RoundedRectangle(cornerRadius: StudioTheme.radius, style: .continuous)
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture { libraryTab = tab }
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            .padding(2)
+            .background(StudioTheme.well, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             switch libraryTab {
             case .apps:
@@ -1246,21 +1266,32 @@ struct LayoutEditor: View {
     /// "Editing / Tile — opens Music": what is selected, and the one fact
     /// about it worth reading before anything else.
     func inspectorHeading(_ title: String, detail: String?) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text("EDITING")
-                .font(.system(size: 9, weight: .semibold).monospaced())
-                .foregroundStyle(.tertiary)
-            HStack(spacing: 6) {
-                Text(title).font(.subheadline.weight(.semibold))
+        VStack(alignment: .leading, spacing: 4) {
+            StudioTheme.eyebrow("Editing")
+                .foregroundStyle(StudioTheme.accent)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(StudioTheme.textBright)
                 if let detail {
                     Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(StudioTheme.body)
+                        .foregroundStyle(StudioTheme.textTertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 11)
+        .background(StudioTheme.headerFill)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(StudioTheme.headerEdge).frame(height: 1)
+        }
+        // Bleeds to the panel's edges: it is a header strip, not a card.
+        .padding(.horizontal, -15)
+        .padding(.top, -12)
     }
 
     /// Typed position, because a drag cannot hit an exact pixel and reading
@@ -1284,8 +1315,8 @@ struct LayoutEditor: View {
             Text("px").font(.caption2).foregroundStyle(.secondary)
             Spacer()
         }
-        .textFieldStyle(.roundedBorder)
-        .font(.caption.monospacedDigit())
+        .textFieldStyle(StudioFieldStyle())
+        .font(.system(size: 11, design: .monospaced))
     }
 
     /// Nothing selected means the scene itself is selected. It is never blank.
@@ -1294,7 +1325,7 @@ struct LayoutEditor: View {
             inspectorHeading("Scene", detail: "wallpaper, frame, clip")
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Tile grid").font(.caption.weight(.semibold))
+                StudioTheme.eyebrow("Tile grid").foregroundStyle(StudioTheme.textTertiary)
                 HStack(spacing: 6) {
                     Stepper(
                         "\(design.grid.columns) across",
@@ -1434,7 +1465,7 @@ struct LayoutEditor: View {
     /// apps is the editor's most common act, and a popover made it a hunt.
     private var catalogueSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Add an app").font(.caption.weight(.semibold))
+            StudioTheme.eyebrow("Add an app").foregroundStyle(StudioTheme.textTertiary)
             CatalogueList(height: 200) { appID in
                 add(appID: appID)
             }
@@ -1445,7 +1476,7 @@ struct LayoutEditor: View {
     private var placedTilesSection: some View {
         if !design.tiles.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Placed").font(.caption.weight(.semibold))
+                StudioTheme.eyebrow("Placed").foregroundStyle(StudioTheme.textTertiary)
                 ForEach(design.tiles) { tile in
                     HStack(spacing: 6) {
                         Circle()
@@ -1584,7 +1615,7 @@ struct LayoutEditor: View {
 
             Divider()
 
-            Text("Position").font(.caption.weight(.semibold))
+            StudioTheme.eyebrow("Position").foregroundStyle(StudioTheme.textTertiary)
             positionFields(center: tile.center) { center in
                 guard design.tiles.indices.contains(index) else { return }
                 design.tiles[index].center = center
@@ -1621,8 +1652,7 @@ struct LayoutEditor: View {
                     .font(.caption.monospaced())
                 Spacer()
                 Button("Snap to cell") { snapToCell(index: index) }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .buttonStyle(.studioCompact)
                     .disabled(design.grid.firstFreeCell(occupied: occupiedCells) == nil && tile.cell == nil)
             }
 
@@ -1702,7 +1732,7 @@ struct LayoutEditor: View {
         Divider()
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Phone can swap to").font(.caption.weight(.semibold))
+                StudioTheme.eyebrow("Phone can swap to").foregroundStyle(StudioTheme.textTertiary)
                 Spacer()
                 Button("Add...") { addingAlternate = true }
                     .buttonStyle(.link)
@@ -1808,8 +1838,11 @@ private struct CataloguePicker: View {
     }
 }
 
+/// The catalogue as the mockup draws it: a grid of plates, four across, each
+/// with the app's tint and its name under it. A list of names reads as a form;
+/// this reads as the thing being placed.
 private struct CatalogueList: View {
-    var height: CGFloat = 260
+    var height: CGFloat = 240
     let onPick: (String) -> Void
 
     @State private var query = ""
@@ -1820,39 +1853,68 @@ private struct CatalogueList: View {
         return all.filter { $0.name.localizedCaseInsensitiveContains(query) }
     }
 
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 4)
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             TextField("Search apps", text: $query)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(StudioFieldStyle())
+
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
+                LazyVGrid(columns: columns, spacing: 8) {
                     ForEach(matches) { app in
                         Button { onPick(app.id) } label: {
-                            HStack {
-                                Circle().fill(app.tint).frame(width: 14, height: 14)
-                                Text(app.name)
-                                Spacer()
-                                // Some Apple apps publish no URL scheme, so a
-                                // tile for one can never open anything. Better
-                                // said here than discovered by tapping it.
-                                if !app.canLaunch {
-                                    Image(systemName: "hand.raised.slash")
-                                        .foregroundStyle(.secondary)
-                                        .help("\(app.name) cannot be opened from a widget: it publishes no URL scheme.")
+                            VStack(spacing: 4) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(StudioTheme.controlFill)
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(app.tint.opacity(0.35))
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .strokeBorder(StudioTheme.controlEdge, lineWidth: 1)
+                                    Image(systemName: app.symbol)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(StudioTheme.text)
+                                    // Some Apple apps publish no URL scheme, so
+                                    // a tile for one can never open anything.
+                                    // Better said here than found by tapping it.
+                                    if !app.canLaunch {
+                                        Image(systemName: "hand.raised.slash")
+                                            .font(.system(size: 8))
+                                            .foregroundStyle(StudioTheme.textDim)
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                                            .padding(3)
+                                    }
                                 }
+                                .frame(height: 36)
+                                Text(app.name)
+                                    .font(.system(size: 9.5))
+                                    .foregroundStyle(StudioTheme.textTertiary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
                             }
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .help(app.canLaunch
+                            ? "Add \(app.name)"
+                            : "\(app.name) cannot be opened from a widget: it publishes no URL scheme.")
                     }
-                    if matches.isEmpty {
-                        Text("No app matches \"\(query)\".")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                }
+                if matches.isEmpty {
+                    Text("Nothing named \"\(query)\". Try another name.")
+                        .font(StudioTheme.small)
+                        .foregroundStyle(StudioTheme.textDim)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 8)
                 }
             }
             .frame(height: height)
+
+            Text("Click an app to add it. New tiles fill the next free cell.")
+                .font(.system(size: 10))
+                .foregroundStyle(StudioTheme.textDim)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
