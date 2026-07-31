@@ -80,7 +80,7 @@ enum SlotChoices {
         guard let value else { return tile }
         if value == hiddenValue { return nil }
         if value == tile.appID { return tile }
-        guard let alternate = tile.alternates.first(where: { $0.appID == value }) else {
+        guard let alternate = tile.offeredAlternates.first(where: { $0.appID == value }) else {
             // A rebuild can drop the chosen alternate from the slot's list. The
             // authored occupant is the one guaranteed to exist, and falling
             // back beats a slot that silently launches an app it does not show.

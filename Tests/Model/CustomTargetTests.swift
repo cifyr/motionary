@@ -97,3 +97,50 @@ final class CustomTargetTests: XCTestCase {
         XCTAssertEqual(decoded.appID, "spotify")
     }
 }
+
+/// A slot's swap list has to exclude the app the slot already shows: it is not
+/// an alternative to itself, and it resolves to the same baked icon filename,
+/// which stopped a build partway through writing the Resources folder.
+final class OfferedAlternatesTests: XCTestCase {
+    private func tile(appID: String, alternates: [TileAlternate]) -> PlacedTile {
+        PlacedTile(appID: appID, center: .zero, size: 100, alternates: alternates)
+    }
+
+    func testTheTilesOwnAppIsNotOffered() {
+        let subject = tile(appID: "spotify", alternates: [
+            .init(appID: "spotify", skin: "a.png"),
+            .init(appID: "mail", skin: "b.png"),
+        ])
+        XCTAssertEqual(subject.offeredAlternates.map(\.appID), ["mail"])
+    }
+
+    /// Which is what happens after changing a tile's app to one already in its
+    /// list, rather than something anyone sets up deliberately.
+    func testTheSameAppIsNotOfferedTwice() {
+        let subject = tile(appID: "calendar", alternates: [
+            .init(appID: "mail", skin: "a.png"),
+            .init(appID: "mail", skin: "b.png"),
+        ])
+        XCTAssertEqual(subject.offeredAlternates.count, 1)
+    }
+
+    func testAnHonestListIsUntouched() {
+        let subject = tile(appID: "calendar", alternates: [
+            .init(appID: "mail"), .init(appID: "spotify"),
+        ])
+        XCTAssertEqual(subject.offeredAlternates.map(\.appID), ["mail", "spotify"])
+    }
+
+    /// The icon filenames a build writes have to be distinct, which is the
+    /// thing the collision actually broke.
+    func testEveryOfferedAlternateHasItsOwnIconName() {
+        let subject = tile(appID: "spotify", alternates: [
+            .init(appID: "spotify"), .init(appID: "mail"), .init(appID: "maps"),
+        ])
+        var names = [PrebuiltDesign.iconResource(tileID: subject.id)]
+        names += subject.offeredAlternates.map {
+            PrebuiltDesign.iconResource(tileID: subject.id, appID: $0.appID, authoredAppID: subject.appID)
+        }
+        XCTAssertEqual(Set(names).count, names.count, "two icons would be written to one filename")
+    }
+}
