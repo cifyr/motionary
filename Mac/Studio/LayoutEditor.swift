@@ -1805,6 +1805,8 @@ struct LayoutEditor: View {
                     }
                     design.tiles[index].custom = nil
                     design.tiles[index].appID = chosen
+                    // A slot cannot offer a swap to the app it already shows.
+                    design.tiles[index].alternates.removeAll { $0.appID == chosen }
                 }
             )) {
                 ForEach(AppCatalog.all) { entry in
@@ -2001,7 +2003,7 @@ struct LayoutEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            ForEach(tile.alternates) { alternate in
+            ForEach(tile.offeredAlternates) { alternate in
                 HStack(spacing: 6) {
                     Circle()
                         .fill(AppCatalog.app(id: alternate.appID)?.tint ?? .gray)

@@ -187,6 +187,17 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         custom?.name ?? AppCatalog.app(id: appID)?.name ?? appID
     }
 
+    /// The alternates actually on offer: never the tile's own app, and never
+    /// the same app twice.
+    ///
+    /// A slot offering its own occupant is not a choice, and it resolves to
+    /// the same baked icon filename as the authored one - which is how a build
+    /// came to copy two files over the same destination and stop.
+    var offeredAlternates: [TileAlternate] {
+        var seen: Set<String> = [appID]
+        return alternates.filter { seen.insert($0.appID).inserted }
+    }
+
     /// Whether a tap on this tile can open anything at all.
     var canLaunch: Bool {
         if let custom { return !custom.launchCandidates.isEmpty }

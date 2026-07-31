@@ -193,14 +193,14 @@ struct BundleWriter {
             // Alternates first: they cannot stop the authored icon shipping.
             // Only skinned ones have a file at all - the rest draw their
             // catalogue SF Symbol on the phone, exactly like a missing icon.
-            for alternate in tile.alternates {
+            for alternate in tile.offeredAlternates {
                 guard let skin = alternate.skin, let rendered = artwork.url(forSkin: skin) else { continue }
                 let name = PrebuiltDesign.iconResource(
                     tileID: tile.id,
                     appID: alternate.appID,
                     authoredAppID: tile.appID
                 )
-                try manager.copyItem(at: rendered, to: resources.appendingPathComponent("\(name).png"))
+                try replace(rendered, with: "\(name).png")
             }
 
             guard let rendered = artwork.url(for: tile) else {
@@ -208,10 +208,7 @@ struct BundleWriter {
                 // which is a worse icon rather than a missing one.
                 continue
             }
-            try manager.copyItem(
-                at: rendered,
-                to: resources.appendingPathComponent("\(PrebuiltDesign.iconResource(tileID: tile.id)).png")
-            )
+            try replace(rendered, with: "\(PrebuiltDesign.iconResource(tileID: tile.id)).png")
         }
     }
 
@@ -238,6 +235,19 @@ struct BundleWriter {
                 options: .atomic
             )
         }
+    }
+
+    /// Writes over whatever is already there.
+    ///
+    /// `copyItem` throws on an existing file, and two tiles sharing artwork -
+    /// or one written twice - is a normal thing for a design to do, not a
+    /// reason to abandon a build halfway through the Resources folder.
+    private func replace(_ source: URL, with name: String) throws {
+        let destination = resources.appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.copyItem(at: source, to: destination)
     }
 
     private func copy(_ source: URL, to name: String) throws {
