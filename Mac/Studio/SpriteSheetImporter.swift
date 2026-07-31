@@ -8,6 +8,11 @@ import UniformTypeIdentifiers
 /// seven columns of names is seven columns of icons. What comes out is a set
 /// the phone can swap within, plus every unmatched icon still in the library
 /// to be put on a tile by hand.
+///
+/// Carries the studio's colours itself rather than inheriting them: a sheet is
+/// presented outside the editor's view tree, so the environment set on the
+/// editor never reaches here - which is how this first shipped as white text
+/// on a white panel.
 struct SpriteSheetImporter: View {
     /// Called with the finished set so the editor can add it to its library.
     let onImport: (SkinSet) -> Void
@@ -28,97 +33,124 @@ struct SpriteSheetImporter: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Import a sprite sheet").font(.headline)
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Import a sprite sheet")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(StudioTheme.textBright)
                 Text("One picture of icons on a grid, and the names that go with them. The names decide the grid: seven columns of names cuts the sheet into seven columns.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(StudioTheme.small)
+                    .foregroundStyle(StudioTheme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 14) {
                 sheetWell
                 VStack(alignment: .leading, spacing: 8) {
-                    TextField("Set name", text: $setName)
-                        .textFieldStyle(.roundedBorder)
+                    StudioTheme.eyebrow("Set name").foregroundStyle(StudioTheme.textTertiary)
+                    TextField("Neon", text: $setName)
+                        .textFieldStyle(StudioFieldStyle())
+
                     if let sheet {
                         Text("\(sheet.width) × \(sheet.height) px")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .font(StudioTheme.mono)
+                            .foregroundStyle(StudioTheme.textSecondary)
                     }
                     if let layout {
                         Text("\(layout.columns) across × \(layout.rows) down · \(layout.cellCount) cells")
-                            .font(.caption.monospacedDigit())
-                        let matched = layout.flattened.filter { !$0.isEmpty && SpriteSheet.app(named: $0) != nil }.count
-                        let named = layout.flattened.filter { !$0.isEmpty }.count
-                        Text("\(matched) of \(named) names match an app. The rest import as artwork you can put on any tile.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .font(StudioTheme.mono)
+                            .foregroundStyle(StudioTheme.accent)
+                        let named = layout.flattened.filter { !$0.isEmpty }
+                        let matched = named.filter { SpriteSheet.app(named: $0) != nil }.count
+                        Text("\(matched) of \(named.count) names match an app. The rest import as artwork you can put on any tile.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(StudioTheme.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     } else {
                         Text("Paste the names below to set the grid.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 10))
+                            .foregroundStyle(StudioTheme.textDim)
                     }
                     Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Names").font(.caption.weight(.semibold))
+            VStack(alignment: .leading, spacing: 5) {
+                StudioTheme.eyebrow("Names").foregroundStyle(StudioTheme.textTertiary)
                 TextEditor(text: $namesText)
                     .font(.system(size: 11, design: .monospaced))
-                    .frame(height: 170)
+                    .foregroundStyle(StudioTheme.text)
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
+                    .frame(height: 165)
+                    .background(StudioTheme.well, in: RoundedRectangle(cornerRadius: StudioTheme.radius, style: .continuous))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 6).strokeBorder(.secondary.opacity(0.3))
+                        RoundedRectangle(cornerRadius: StudioTheme.radius, style: .continuous)
+                            .strokeBorder(StudioTheme.headerEdge, lineWidth: 1)
                     }
                 Text("A markdown table works as pasted, pipes and bold and all. A blank cell skips that icon.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10))
+                    .foregroundStyle(StudioTheme.textDim)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let failure {
                 Text(failure)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(StudioTheme.small)
+                    .foregroundStyle(Color(hex: 0xff8f6b))
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack {
+            HStack(spacing: 8) {
                 Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(.studio)
+                    .keyboardShortcut(.cancelAction)
                 Button(busy ? "Importing..." : "Import") { runImport() }
+                    .buttonStyle(.studioProminent)
                     .disabled(!canImport)
             }
         }
         .padding(20)
         .frame(width: 620)
+        .background(StudioTheme.panel)
+        .environment(\.colorScheme, .dark)
+        .tint(StudioTheme.accent)
     }
 
     private var sheetWell: some View {
         RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .strokeBorder(
-                sheet == nil ? Color.secondary.opacity(0.4) : Color.accentColor,
-                style: StrokeStyle(lineWidth: 1.5, dash: sheet == nil ? [6, 4] : [])
-            )
-            .frame(width: 160, height: 160)
+            .fill(StudioTheme.well)
+            .frame(width: 164, height: 164)
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(
+                        sheet == nil ? StudioTheme.controlEdge : StudioTheme.accent,
+                        style: StrokeStyle(lineWidth: 1.5, dash: sheet == nil ? [6, 4] : [])
+                    )
+            }
             .overlay {
                 if let sheet {
                     Image(decorative: sheet, scale: 1)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .padding(6)
+                        .padding(7)
                 } else {
-                    VStack(spacing: 6) {
-                        Image(systemName: "square.grid.3x3").font(.title2)
-                        Text("Drop a sheet").font(.caption)
+                    VStack(spacing: 7) {
+                        Image(systemName: "square.grid.3x3")
+                            .font(.system(size: 20))
+                        Text("Drop a sheet")
+                            .font(StudioTheme.small)
+                        Text("or click")
+                            .font(.system(size: 10))
+                            .foregroundStyle(StudioTheme.textDim)
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(StudioTheme.textTertiary)
                 }
             }
+            .contentShape(Rectangle())
             .onTapGesture { chooseSheet() }
             .onDrop(of: [.fileURL], isTargeted: nil) { providers in
                 guard let provider = providers.first else { return false }
