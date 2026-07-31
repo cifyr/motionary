@@ -1,104 +1,62 @@
 import SwiftUI
 
-/// One spot of the design, edited on the phone.
+/// One slot of the design, changed on the phone.
 ///
-/// A spot is either a slot the studio placed - which already carries a skin set
-/// and a list of apps - or a cell of the grid the design left empty. Both are
-/// changed the same way, because from the phone's side they are the same thing:
-/// pick the artwork, then say what it opens.
+/// A slot carries a set: the app the studio put there and every other app the
+/// same icon pack was drawn for. Picking one of them is a single choice, not
+/// two - the artwork and the app it stands for travel together, so choosing the
+/// Spotify drawing points the slot at Spotify and names it Spotify. What is left
+/// over is the link, which only matters when the set names something the
+/// catalogue has never heard of, or when this phone opens it some other way.
 struct SlotEditorView: View {
-    /// What is being edited. An authored tile is the one from the manifest, not
-    /// the effective one: the picker offers the *set's* skins, and the effective
-    /// tile has already had the phone's own choice written over it.
-    enum Spot: Identifiable, Equatable {
-        case tile(PlacedTile)
-        case cell(GridCell)
-
-        var id: String {
-            switch self {
-            case .tile(let tile): tile.id.uuidString
-            case .cell(let cell): "cell-\(cell.label)"
-            }
-        }
-
-        var cell: GridCell? {
-            if case .cell(let cell) = self { return cell }
-            return nil
-        }
-
-        var tile: PlacedTile? {
-            if case .tile(let tile) = self { return tile }
-            return nil
-        }
-    }
-
-    /// The artwork on a spot. Kept apart from the app so the two can be chosen
-    /// independently, which is the whole point: an icon is a picture, not a
-    /// claim about what it opens.
-    enum IconChoice: Equatable {
-        /// The icon the studio baked for this slot. Only an authored tile has
-        /// one to go back to.
-        case authored
-        /// Nothing drawn at all.
-        case none
-        case skin(String)
-    }
-
+    /// The authored tile from the manifest, not the effective one: the set and
+    /// the slot's own default both live there, and the phone's choice has
+    /// already been written over the effective copy.
     let manifest: BuildManifest
-    let spot: Spot
+    let tile: PlacedTile
     /// Called after every write, so the screen behind re-reads the choices.
     let onChange: () -> Void
 
     @Environment(\.dismiss) private var dismiss
 
-    @State private var icon: IconChoice = .authored
-    @State private var opensApp = false
-    /// A catalogue id, or `customValue` when the app is typed by hand.
-    @State private var appSelection = ""
+    /// The chosen entry's id: an appID, or `blankValue` for no icon at all.
+    @State private var selection = ""
+    @State private var customLink = false
     @State private var customName = ""
     @State private var customScheme = ""
 
-    private static let customValue = "-custom-"
-
-    /// The skins this spot may wear.
+    /// One thing the slot can become: an app drawn in this set's style.
     ///
-    /// A slot the studio styled offers its own set and nothing else - that is
-    /// the point of a set. An empty cell belongs to no set, so it offers what
-    /// the design's own slots are wearing, which is the pack it was built in.
-    /// Only a design with no styled slots at all falls back to the whole
-    /// library, where there is no set to prefer.
-    private var skins: [String] {
-        if let tile = spot.tile, !tile.setSkins.isEmpty { return tile.setSkins }
-        var seen = Set<String>()
-        let designs = manifest.placedTiles
-            .flatMap(\.setSkins)
-            .filter { seen.insert($0).inserted }
-        return designs.isEmpty ? PrebuiltDesign.skinNames(designID: manifest.designID) : designs
+    /// The blank comes first and belongs to every set - a slot has to be able
+    /// to hold nothing without disappearing, which is what it did when blanking
+    /// simply dropped it.
+    private struct Entry: Identifiable {
+        let appID: String
+        let skin: String?
+        var id: String { appID }
     }
 
-    /// The apps offered without typing anything: every catalogue entry that can
-    /// actually be opened. One that publishes no scheme is left out, because
-    /// picking it would produce a tile that silently does nothing.
-    private var catalogue: [CatalogApp] {
-        AppCatalog.all.filter(\.canLaunch).sorted { $0.name < $1.name }
+    private var entries: [Entry] {
+        [Entry(appID: SlotChoices.blankValue, skin: nil), Entry(appID: tile.appID, skin: tile.skin)]
+            + tile.offeredAlternates.map { Entry(appID: $0.appID, skin: $0.skin) }
+    }
+
+    private var isBlank: Bool { selection == SlotChoices.blankValue }
+
+    /// The catalogue entry behind the selection, when there is one. A set drawn
+    /// for a category rather than an app - "Games", "Banking" - has none, and
+    /// then the name and the link are this phone's to supply.
+    private var catalogueApp: CatalogApp? {
+        isBlank ? nil : AppCatalog.app(id: selection)
     }
 
     var body: some View {
         NavigationStack {
             List {
                 iconSection
-                appSection
-                if canClear {
-                    Section {
-                        Button("Empty this spot", role: .destructive) {
-                            icon = .none
-                            opensApp = false
-                            write()
-                        }
-                    }
-                }
+                if !isBlank { linkSection }
             }
-            .navigationTitle(title)
+            .navigationTitle(isBlank ? "Blank spot" : displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -110,230 +68,182 @@ struct SlotEditorView: View {
         .onAppear(perform: load)
     }
 
-    private var title: String {
-        switch spot {
-        case .tile(let tile): tile.displayName
-        case .cell(let cell): "Empty spot \(cell.label)"
-        }
+    /// What the slot is called right now: the name this phone gave it, else the
+    /// catalogue's, else the set's own word for it.
+    private var displayName: String {
+        if customLink, !customName.isEmpty { return customName }
+        return catalogueApp?.name ?? selection
     }
 
-    /// Only a spot with something in it can be emptied. Offering it on one that
-    /// is already blank is a button that does nothing.
-    private var canClear: Bool {
-        switch spot {
-        case .tile: icon != .none
-        case .cell(let cell): SlotChoices.addition(designID: manifest.designID, cell: cell) != nil
-        }
-    }
-
-    // MARK: - The icon
+    // MARK: - The set
 
     private var iconSection: some View {
         Section {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 58), spacing: 10)], spacing: 10) {
-                swatch(.none) {
-                    Image(systemName: "square.dashed")
-                        .font(.system(size: 18))
-                        .foregroundStyle(.secondary)
-                }
-                if spot.tile != nil {
-                    swatch(.authored) {
-                        Image(systemName: "arrow.uturn.backward")
-                            .font(.system(size: 16))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                ForEach(skins, id: \.self) { skin in
-                    swatch(.skin(skin)) {
-                        if let image = PrebuiltDesign.skinURL(designID: manifest.designID, skin: skin)
-                            .flatMap({ ImageLoader.load(at: $0, maxPixelSize: 160) }) {
-                            Image(decorative: image, scale: 1).resizable().scaledToFit()
-                        } else {
-                            Image(systemName: "questionmark")
-                                .font(.system(size: 16))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 62), spacing: 10)], spacing: 10) {
+                ForEach(entries) { entry in
+                    swatch(entry)
                 }
             }
             .padding(.vertical, 4)
         } header: {
             Text("Icon")
         } footer: {
-            Text(skins.isEmpty
-                 ? "This build shipped no icons for this spot. Rebuild from the studio to send its icon set over."
-                 : "The icons this design carries for this spot. None leaves it blank.")
+            Text("""
+            The apps this slot's icon pack was drawn for. Choosing one changes \
+            the picture and what it opens together. Blank leaves the spot empty \
+            without giving it up - it stays here to change back.
+            """)
         }
     }
 
-    private func swatch(_ choice: IconChoice, @ViewBuilder content: () -> some View) -> some View {
-        Button {
-            icon = choice
+    private func swatch(_ entry: Entry) -> some View {
+        let isSelected = selection == entry.appID
+        return Button {
+            guard selection != entry.appID else { return }
+            selection = entry.appID
+            // The link belonged to the app that was there. Carrying it over
+            // would leave the slot showing one app and opening another, which
+            // is the exact confusion a set is meant to remove.
+            customLink = false
+            customName = ""
+            customScheme = ""
             write()
         } label: {
-            content()
+            VStack(spacing: 4) {
+                Group {
+                    if let skin = entry.skin,
+                       let image = PrebuiltDesign.skinURL(designID: manifest.designID, skin: skin)
+                           .flatMap({ ImageLoader.load(at: $0, maxPixelSize: 160) }) {
+                        Image(decorative: image, scale: 1).resizable().scaledToFit()
+                    } else if entry.appID == SlotChoices.blankValue {
+                        Image(systemName: "square.dashed")
+                            .font(.system(size: 18))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Image(systemName: AppCatalog.app(id: entry.appID)?.symbol ?? "questionmark")
+                            .font(.system(size: 18))
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 .frame(width: 54, height: 54)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(icon == choice ? Color.accentColor : .clear, lineWidth: 2.5)
+                        .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2.5)
                 }
+
+                Text(name(of: entry))
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(label(for: choice))
-        .accessibilityAddTraits(icon == choice ? [.isSelected] : [])
+        .accessibilityLabel(name(of: entry))
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
-    private func label(for choice: IconChoice) -> String {
-        switch choice {
-        case .authored: "The design's own icon"
-        case .none: "No icon"
-        case .skin(let name): name
-        }
+    private func name(of entry: Entry) -> String {
+        entry.appID == SlotChoices.blankValue ? "Blank" : (AppCatalog.app(id: entry.appID)?.name ?? entry.appID)
     }
 
-    // MARK: - The app
+    // MARK: - What it opens
 
-    private var appSection: some View {
+    @ViewBuilder
+    private var linkSection: some View {
         Section {
-            Toggle("Choose the app it opens", isOn: Binding(
-                get: { opensApp },
-                set: { on in
-                    opensApp = on
-                    if on, appSelection.isEmpty { appSelection = catalogue.first?.id ?? Self.customValue }
-                    write()
-                }
-            ))
-
-            if opensApp {
-                Picker("App", selection: Binding(
-                    get: { appSelection },
-                    set: { appSelection = $0; write() }
-                )) {
-                    ForEach(catalogue) { app in
-                        Label(app.name, systemImage: app.symbol).tag(app.id)
+            // A set drawn for a category has no app behind it, so there is
+            // nothing to fall back to and the fields are the only answer.
+            if catalogueApp == nil {
+                Text("This icon stands for \(selection), which is not an app this build knows. Name it and say what it opens.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                Toggle("Open something else", isOn: Binding(
+                    get: { customLink },
+                    set: { on in
+                        customLink = on
+                        if on, customName.isEmpty { customName = catalogueApp?.name ?? selection }
+                        if on, customScheme.isEmpty { customScheme = catalogueApp?.scheme ?? "" }
+                        write()
                     }
-                    Text("Something else…").tag(Self.customValue)
-                }
+                ))
+            }
 
-                if appSelection == Self.customValue {
-                    TextField("Name", text: Binding(
-                        get: { customName },
-                        set: { customName = $0; write() }
-                    ))
-                    .textFieldStyle(.roundedBorder)
+            if customLink || catalogueApp == nil {
+                TextField("Name", text: Binding(
+                    get: { customName },
+                    set: { customName = $0; write() }
+                ))
+                .textFieldStyle(.roundedBorder)
 
-                    TextField("scheme:// or https://", text: Binding(
-                        get: { customScheme },
-                        set: { customScheme = $0; write() }
-                    ))
-                    .textFieldStyle(.roundedBorder)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                }
+                TextField("scheme:// or https://", text: Binding(
+                    get: { customScheme },
+                    set: { customScheme = $0; write() }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            }
 
-                if let first = target()?.launchCandidates.first {
-                    Text("Opens \(first.absoluteString)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                } else if appSelection == Self.customValue {
-                    Text("Type the app's URL scheme - spotify, things, bear. A web address works too.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+            if let first = target()?.launchCandidates.first {
+                Text("Opens \(first.absoluteString)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else if customLink || catalogueApp == nil {
+                Text("Type the app's URL scheme - spotify, things, bear. A web address works too.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         } header: {
             Text("Opens")
         } footer: {
-            Text(opensApp
-                 ? "Motionary opens the app for you, so a spot can point at anything on this phone."
-                 : defaultOpensDescription)
-        }
-    }
-
-    private var defaultOpensDescription: String {
-        switch spot {
-        case .tile(let tile): "Opens \(tile.displayName), as the design was built."
-        case .cell: "This spot opens nothing until an app is chosen."
+            if !customLink, let app = catalogueApp {
+                Text(app.canLaunch
+                     ? "Opens \(app.name) through Motionary."
+                     : "\(app.name) publishes no way in, so this spot opens nothing until a link is given.")
+            }
         }
     }
 
     // MARK: - Reading and writing
 
     private func load() {
-        switch spot {
-        case .tile(let tile):
-            if SlotChoices.choice(designID: manifest.designID, tileID: tile.id) == .hidden {
-                icon = .none
-            } else if let chosen = SlotChoices.icon(designID: manifest.designID, tileID: tile.id) {
-                icon = chosen.isEmpty ? .none : .skin(chosen)
-            } else {
-                icon = .authored
-            }
-            adopt(SlotChoices.link(designID: manifest.designID, tileID: tile.id))
-        case .cell(let cell):
-            let addition = SlotChoices.addition(designID: manifest.designID, cell: cell)
-            icon = addition?.skin.map(IconChoice.skin) ?? .none
-            adopt(addition?.target)
+        switch SlotChoices.choice(designID: manifest.designID, tileID: tile.id) {
+        case .hidden: selection = SlotChoices.blankValue
+        case .app(let id): selection = id
+        case .standard: selection = tile.appID
+        }
+        if let stored = SlotChoices.link(designID: manifest.designID, tileID: tile.id) {
+            customLink = true
+            customName = stored.name
+            customScheme = stored.scheme
         }
     }
 
-    /// Matches a stored target back to the catalogue where it came from one, so
-    /// re-opening the sheet shows the app that was picked rather than dropping
-    /// every choice into the hand-typed fields.
-    private func adopt(_ target: CustomTarget?) {
-        guard let target else {
-            opensApp = false
-            appSelection = ""
-            return
-        }
-        opensApp = true
-        customName = target.name
-        customScheme = target.scheme
-        appSelection = catalogue.first { $0.scheme == target.scheme && $0.name == target.name }?.id
-            ?? Self.customValue
-    }
-
-    /// What the spot should open, or nil when it keeps the design's own target.
+    /// What the slot should open, or nil when the chosen app's own route is
+    /// what it uses.
     private func target() -> CustomTarget? {
-        guard opensApp else { return nil }
-        if appSelection == Self.customValue {
-            return CustomTarget(name: customName, scheme: customScheme)
-        }
-        guard let app = catalogue.first(where: { $0.id == appSelection }) else { return nil }
-        return CustomTarget(name: app.name, scheme: app.scheme ?? "", webFallback: app.webFallback)
+        guard customLink || catalogueApp == nil, !isBlank else { return nil }
+        let name = customName.trimmingCharacters(in: .whitespaces)
+        return CustomTarget(name: name.isEmpty ? selection : name, scheme: customScheme)
     }
 
     private func write() {
-        switch spot {
-        case .tile(let tile):
-            SlotChoices.set(icon == .none ? .hidden : .standard, designID: manifest.designID, tileID: tile.id)
-            switch icon {
-            case .authored, .none: SlotChoices.setIcon(nil, designID: manifest.designID, tileID: tile.id)
-            case .skin(let name): SlotChoices.setIcon(name, designID: manifest.designID, tileID: tile.id)
-            }
-            SlotChoices.setLink(target(), designID: manifest.designID, tileID: tile.id)
-        case .cell(let cell):
-            let chosen = target()
-            // A spot with neither artwork nor a destination is an empty spot,
-            // and storing one would leave an invisible tile swallowing taps.
-            guard icon != .none || chosen != nil else {
-                SlotChoices.setAddition(nil, designID: manifest.designID, cell: cell)
-                break
-            }
-            var skin: String?
-            if case .skin(let name) = icon { skin = name }
-            SlotChoices.setAddition(
-                SlotChoices.Addition(
-                    cell: cell,
-                    skin: skin,
-                    target: chosen,
-                    name: chosen?.name ?? skin ?? cell.label
-                ),
-                designID: manifest.designID,
-                cell: cell
-            )
+        let choice: SlotChoices.Choice = if isBlank {
+            .hidden
+        } else if selection == tile.appID {
+            .standard
+        } else {
+            .app(selection)
         }
+        SlotChoices.set(choice, designID: manifest.designID, tileID: tile.id)
+        // The set already carries the artwork for whichever app was chosen, so
+        // the per-slot icon override is only in the way here: it would pin the
+        // old picture onto the new app.
+        SlotChoices.setIcon(nil, designID: manifest.designID, tileID: tile.id)
+        SlotChoices.setLink(target(), designID: manifest.designID, tileID: tile.id)
         WidgetCenterBridge.reloadAll()
         onChange()
     }

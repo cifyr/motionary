@@ -18,10 +18,11 @@ struct HomeView: View {
     /// Bumped by the slots sheet so the composition re-reads the choices; the
     /// store itself is UserDefaults, which SwiftUI does not observe.
     @State private var slotsEdition = 0
-    /// Taps change a spot rather than open an app, and the empty cells of the
-    /// grid become targets of their own.
+    /// Taps change a slot rather than open an app, and a blanked slot comes
+    /// back as a target so it can be changed again.
     @State private var isEditing = false
-    @State private var editingSpot: SlotEditorView.Spot?
+    @State private var editingTile: PlacedTile?
+    @Environment(\.displayScale) private var displayScale
 
     /// Whatever there is to say right now, from either source.
     private var message: String? { note ?? router.lastFailure }
@@ -48,10 +49,9 @@ struct HomeView: View {
                 EditingBar(onOptions: { choosingSlots = true }, onDone: { isEditing = false })
             } else {
                 SaveButton(saving: saving) { save() }
-                // Anything to change at all: a spot to fill, or a clip variant.
+                // Anything to change at all: a slot, or a clip variant.
                 if let manifest = entry?.manifest,
-                   !manifest.placedTiles.isEmpty || !manifest.builtVariants.isEmpty
-                    || manifest.grid != nil {
+                   !manifest.placedTiles.isEmpty || !manifest.builtVariants.isEmpty {
                     SlotsButton { isEditing = true }
                 }
             }
@@ -76,21 +76,24 @@ struct HomeView: View {
                 SlotSettingsView(manifest: manifest) { slotsEdition += 1 }
             }
         }
-        .sheet(item: $editingSpot) { spot in
+        .sheet(item: $editingTile) { tile in
             if let manifest = entry?.manifest {
-                SlotEditorView(manifest: manifest, spot: spot) { slotsEdition += 1 }
+                SlotEditorView(manifest: manifest, tile: tile) { slotsEdition += 1 }
             }
         }
         // A swipe rather than any chrome: the whole point of this screen is to
         // be the Home Screen, and a switcher on top of it would spoil that.
-        // Off while editing, where a drag across the spots would otherwise
-        // swap the design out from under whatever is being changed.
+        // Across the background only, so a drag that starts on an icon is that
+        // icon's - sideways for the animation, up or down for the design.
         .gesture(
             DragGesture(minimumDistance: 40)
                 .onEnded { value in
-                    guard !isEditing else { return }
-                    guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                    switchDesign(by: value.translation.width < 0 ? 1 : -1)
+                    guard !isOnASlot(value.startLocation) else { return }
+                    if abs(value.translation.width) > abs(value.translation.height) {
+                        switchVariant(by: value.translation.width < 0 ? 1 : -1)
+                    } else {
+                        switchDesign(by: value.translation.height < 0 ? 1 : -1)
+                    }
                 }
         )
     }
@@ -126,13 +129,14 @@ struct HomeView: View {
         // the variant's own - lengths need not match across variants.
         let variant = VariantChoice.resolved(in: manifest)
         let loop = variant?.loopFrameCount ?? manifest.loopFrameCount
-        // Editing adds a target for every cell nothing sits in, so a spot can
-        // be filled rather than only changed.
-        let empties = isEditing ? emptySpots(manifest: manifest) : [:]
+        // Blanked slots come back while editing: one that draws nothing would
+        // otherwise be unreachable, and blanking it would be a one-way door.
+        let blanked = isEditing ? SlotChoices.blankedTiles(manifest: manifest) : []
+        let blankIDs = Set(blanked.map(\.id))
         return LoopingCompositionView(
             screenSize: manifest.screenSize,
             viewport: CGRect(origin: .zero, size: manifest.screenSize),
-            tiles: SlotChoices.effectiveTiles(manifest: manifest) + empties.values.map(\.tile),
+            tiles: SlotChoices.effectiveTiles(manifest: manifest) + blanked,
             videoURL: variant.flatMap { entry.previewURL(variant: $0.id) } ?? entry.previewURL,
             // The tile-free variant when the build has one: the live tiles
             // drawn over it are the occupants the phone chose, and a swapped
@@ -157,20 +161,19 @@ struct HomeView: View {
                     .map { Image(decorative: $0, scale: 1) }
             }
         ) { tile, side in
-            if let empty = empties[tile.id] {
-                EmptySpotTarget(side: side) { editingSpot = .cell(empty.cell) }
-                    .accessibilityLabel("Fill the empty spot \(empty.cell.label)")
-            } else {
-                Button {
-                    guard !isEditing else {
-                        // The authored tile, not the effective one: the editor
-                        // offers the slot's own set and its own default, both
-                        // of which the phone's choice has already written over.
-                        editingSpot = .tile(manifest.placedTiles.first { $0.id == tile.id } ?? tile)
-                        return
-                    }
-                    router.launch(tile: tile)
-                } label: {
+            Button {
+                guard !isEditing else {
+                    // The authored tile, not the effective one: the editor
+                    // offers the slot's own set and its own default, both of
+                    // which the phone's choice has already written over.
+                    editingTile = manifest.placedTiles.first { $0.id == tile.id } ?? tile
+                    return
+                }
+                router.launch(tile: tile)
+            } label: {
+                if blankIDs.contains(tile.id) {
+                    BlankSlot(side: side)
+                } else {
                     TileView(
                         tile: tile,
                         side: side,
@@ -183,32 +186,50 @@ struct HomeView: View {
                         ) ?? icons.image(for: tile)
                     )
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(isEditing ? "Change \(tile.displayName)" : "Open \(tile.displayName)")
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(label(for: tile, isBlank: blankIDs.contains(tile.id)))
         }
         .ignoresSafeArea()
     }
 
-    /// A tappable stand-in for every cell nothing occupies, keyed by the id its
-    /// tile would take so the composition can lay them out like any other.
-    private func emptySpots(manifest: BuildManifest) -> [UUID: (cell: GridCell, tile: PlacedTile)] {
-        guard let grid = manifest.grid else { return [:] }
-        let sibling = manifest.placedTiles.first
-        return SlotChoices.freeCells(manifest: manifest).reduce(into: [:]) { result, cell in
-            let id = SlotChoices.addedTileID(designID: manifest.designID, cell: cell)
-            result[id] = (
-                cell,
-                PlacedTile(
-                    id: id,
-                    appID: "",
-                    center: grid.cellCenter(cell, in: manifest.widgetRect),
-                    size: sibling?.size ?? grid.tileSide(in: manifest.widgetRect),
-                    showsLabel: false,
-                    cell: cell
-                )
-            )
+    private func label(for tile: PlacedTile, isBlank: Bool) -> String {
+        if isBlank { return "Fill the blank spot" }
+        return isEditing ? "Change \(tile.displayName)" : "Open \(tile.displayName)"
+    }
+
+    /// Whether a drag began on an icon. A slot is a button, and a swipe that
+    /// starts inside one belongs to it rather than to the background.
+    private func isOnASlot(_ point: CGPoint) -> Bool {
+        guard let manifest = entry?.manifest else { return false }
+        let scale = 1 / max(displayScale, 1)
+        return (SlotChoices.effectiveTiles(manifest: manifest) + SlotChoices.blankedTiles(manifest: manifest))
+            .contains { tile in
+                CGRect(
+                    x: tile.rect.minX * scale,
+                    y: tile.rect.minY * scale,
+                    width: tile.size * scale,
+                    height: tile.size * scale
+                ).contains(point)
+            }
+    }
+
+    /// Steps through the clip variants, the design's own clip included. Falls
+    /// through to the designs when this one has no alternatives, so a sideways
+    /// swipe always does something rather than nothing.
+    private func switchVariant(by step: Int) {
+        guard let manifest = entry?.manifest, !manifest.builtVariants.isEmpty else {
+            switchDesign(by: step)
+            return
         }
+        let options: [UUID?] = [nil] + manifest.builtVariants.map { Optional($0.id) }
+        let current = VariantChoice.resolved(in: manifest)?.id
+        let position = options.firstIndex(of: current) ?? 0
+        let next = options[(position + step + options.count) % options.count]
+        VariantChoice.set(next, designID: manifest.designID)
+        WidgetCenterBridge.reloadAll()
+        slotsEdition += 1
+        note = next.flatMap { id in manifest.builtVariants.first { $0.id == id }?.name } ?? "Standard"
     }
 
     private func save() {
@@ -340,33 +361,23 @@ private struct SaveButton: View {
     }
 }
 
-/// A cell of the grid with nothing in it, offered as a target while editing.
+/// A slot the phone blanked.
 ///
-/// Drawn as an outline rather than a plate: it has to read as a hole in the
-/// layout that can be filled, not as a tile that is already there.
-private struct EmptySpotTarget: View {
+/// It draws nothing on the Home Screen at all - the widget simply leaves it out
+/// - but while editing it has to be here and obviously tappable, or blanking a
+/// slot would be the one change that cannot be undone from the screen it was
+/// made on.
+private struct BlankSlot: View {
     let side: CGFloat
-    let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            RoundedRectangle(cornerRadius: side * 0.22, style: .continuous)
-                .strokeBorder(
-                    .white.opacity(0.7),
-                    style: StrokeStyle(lineWidth: max(1.5, side * 0.02), dash: [side * 0.1, side * 0.07])
-                )
-                .background {
-                    RoundedRectangle(cornerRadius: side * 0.22, style: .continuous)
-                        .fill(.black.opacity(0.25))
-                }
-                .overlay {
-                    Image(systemName: "plus")
-                        .font(.system(size: side * 0.34, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.85))
-                }
-                .frame(width: side, height: side)
-        }
-        .buttonStyle(.plain)
+        RoundedRectangle(cornerRadius: side * 0.22, style: .continuous)
+            .fill(.black.opacity(0.25))
+            .overlay {
+                RoundedRectangle(cornerRadius: side * 0.22, style: .continuous)
+                    .strokeBorder(Color.accentColor, lineWidth: max(1.5, side * 0.03))
+            }
+            .frame(width: side, height: side)
     }
 }
 
