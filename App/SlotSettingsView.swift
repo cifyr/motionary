@@ -17,8 +17,6 @@ struct SlotSettingsView: View {
     @State private var variantID: UUID?
 
     private var tiles: [PlacedTile] { manifest.placedTiles }
-    /// Every icon that shipped with this design, for the picker.
-    private var skinNames: [String] { PrebuiltDesign.skinNames(designID: manifest.designID) }
 
     var body: some View {
         NavigationStack {
@@ -42,28 +40,24 @@ struct SlotSettingsView: View {
 
                 Section {
                     ForEach(tiles) { tile in
-                        DisclosureGroup {
-                            slotDetail(tile)
-                        } label: {
-                            slotRow(tile)
-                        }
+                        slotRow(tile)
                     }
+                } header: {
+                    Text("Slots")
                 } footer: {
                     Text("""
                     Each slot offers the apps chosen for it in the studio. \
-                    Open one to point it at any other app on this phone, or to \
-                    change its icon. A hidden slot draws nothing and answers no taps.
+                    To change an icon, point a slot somewhere else, or fill an \
+                    empty spot, tap it on the screen behind this sheet.
                     """)
                 }
 
-                if !choices.isEmpty {
-                    Section {
-                        Button("Reset to the design's own apps", role: .destructive) {
-                            for tile in tiles {
-                                write(.standard, tile: tile)
-                            }
-                        }
+                Section {
+                    Button("Put everything back the way it was built", role: .destructive) {
+                        reset()
                     }
+                } footer: {
+                    Text("Clears every icon, link and filled spot chosen on this phone.")
                 }
             }
             .navigationTitle("Design options")
@@ -95,100 +89,20 @@ struct SlotSettingsView: View {
         )
     }
 
-    /// Everything a slot can be changed to on the phone: the app it opens,
-    /// including one the design never named, and the icon it wears.
-    private func slotDetail(_ tile: PlacedTile) -> some View {
-        let target = SlotChoices.link(designID: manifest.designID, tileID: tile.id)
-        return VStack(alignment: .leading, spacing: 10) {
-            Toggle("Open a different app", isOn: Binding(
-                get: { target != nil },
-                set: { on in
-                    SlotChoices.setLink(
-                        on ? CustomTarget(name: name(for: tile.appID), scheme: "") : nil,
-                        designID: manifest.designID,
-                        tileID: tile.id
-                    )
-                    push()
-                }
-            ))
-
-            if let target {
-                TextField("Name", text: Binding(
-                    get: { target.name },
-                    set: { newName in
-                        var updated = target
-                        updated.name = newName
-                        SlotChoices.setLink(updated, designID: manifest.designID, tileID: tile.id)
-                        push()
-                    }
-                ))
-                .textFieldStyle(.roundedBorder)
-
-                TextField("scheme:// or https://", text: Binding(
-                    get: { target.scheme },
-                    set: { newScheme in
-                        var updated = target
-                        updated.scheme = newScheme
-                        SlotChoices.setLink(updated, designID: manifest.designID, tileID: tile.id)
-                        push()
-                    }
-                ))
-                .textFieldStyle(.roundedBorder)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-
-                Text(target.launchCandidates.first.map { "Opens \($0.absoluteString)" }
-                    ?? "Type the app's URL scheme - spotify, things, bear. A web address works too.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            if !skinNames.isEmpty {
-                Text("Icon").font(.caption.weight(.semibold))
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        iconChoice(nil, for: tile)
-                        ForEach(skinNames, id: \.self) { skin in
-                            iconChoice(skin, for: tile)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
+    /// Everything this phone decided, undone at once.
+    ///
+    /// Per-spot editing happens on the screen itself; what belongs here is the
+    /// way back, because a filled spot cannot otherwise be found once it looks
+    /// like part of the design.
+    private func reset() {
+        for tile in tiles {
+            SlotChoices.set(.standard, designID: manifest.designID, tileID: tile.id)
+            SlotChoices.setIcon(nil, designID: manifest.designID, tileID: tile.id)
+            SlotChoices.setLink(nil, designID: manifest.designID, tileID: tile.id)
         }
-    }
-
-    private func iconChoice(_ skin: String?, for tile: PlacedTile) -> some View {
-        let chosen = SlotChoices.icon(designID: manifest.designID, tileID: tile.id)
-        let isSelected = chosen == skin || (skin == nil && chosen == nil)
-        return Button {
-            SlotChoices.setIcon(skin, designID: manifest.designID, tileID: tile.id)
-            push()
-        } label: {
-            Group {
-                if let skin,
-                   let image = PrebuiltDesign.skinURL(designID: manifest.designID, skin: skin)
-                       .flatMap({ ImageLoader.load(at: $0, maxPixelSize: 120) }) {
-                    Image(decorative: image, scale: 1).resizable().scaledToFit()
-                } else {
-                    Image(systemName: "arrow.uturn.backward")
-                        .font(.system(size: 15))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 44, height: 44)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2)
-            }
+        for addition in SlotChoices.additions(designID: manifest.designID) {
+            SlotChoices.setAddition(nil, designID: manifest.designID, cell: addition.cell)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(skin ?? "The design's own icon")
-    }
-
-    /// Writes through and pushes, so the Home Screen follows immediately.
-    private func push() {
         choices = SlotChoices.stored(designID: manifest.designID)
         WidgetCenterBridge.reloadAll()
         onChange()

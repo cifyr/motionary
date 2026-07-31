@@ -18,6 +18,10 @@ struct HomeView: View {
     /// Bumped by the slots sheet so the composition re-reads the choices; the
     /// store itself is UserDefaults, which SwiftUI does not observe.
     @State private var slotsEdition = 0
+    /// Taps change a spot rather than open an app, and the empty cells of the
+    /// grid become targets of their own.
+    @State private var isEditing = false
+    @State private var editingSpot: SlotEditorView.Spot?
 
     /// Whatever there is to say right now, from either source.
     private var message: String? { note ?? router.lastFailure }
@@ -38,13 +42,18 @@ struct HomeView: View {
                 EmptyDesignView()
             }
 
-            if entries.count > 1 { PageDots(count: entries.count, index: index) }
+            if entries.count > 1, !isEditing { PageDots(count: entries.count, index: index) }
 
-            SaveButton(saving: saving) { save() }
-            // Anything to choose at all: slot occupants, or a clip variant.
-            if let manifest = entry?.manifest,
-               !manifest.placedTiles.isEmpty || !manifest.builtVariants.isEmpty {
-                SlotsButton { choosingSlots = true }
+            if isEditing {
+                EditingBar(onOptions: { choosingSlots = true }, onDone: { isEditing = false })
+            } else {
+                SaveButton(saving: saving) { save() }
+                // Anything to change at all: a spot to fill, or a clip variant.
+                if let manifest = entry?.manifest,
+                   !manifest.placedTiles.isEmpty || !manifest.builtVariants.isEmpty
+                    || manifest.grid != nil {
+                    SlotsButton { isEditing = true }
+                }
             }
             // A tap that opens nothing has to say why. Rewriting this view
             // dropped the alert that used to report it, so a tile with no
@@ -67,11 +76,19 @@ struct HomeView: View {
                 SlotSettingsView(manifest: manifest) { slotsEdition += 1 }
             }
         }
+        .sheet(item: $editingSpot) { spot in
+            if let manifest = entry?.manifest {
+                SlotEditorView(manifest: manifest, spot: spot) { slotsEdition += 1 }
+            }
+        }
         // A swipe rather than any chrome: the whole point of this screen is to
         // be the Home Screen, and a switcher on top of it would spoil that.
+        // Off while editing, where a drag across the spots would otherwise
+        // swap the design out from under whatever is being changed.
         .gesture(
             DragGesture(minimumDistance: 40)
                 .onEnded { value in
+                    guard !isEditing else { return }
                     guard abs(value.translation.width) > abs(value.translation.height) else { return }
                     switchDesign(by: value.translation.width < 0 ? 1 : -1)
                 }
@@ -109,10 +126,13 @@ struct HomeView: View {
         // the variant's own - lengths need not match across variants.
         let variant = VariantChoice.resolved(in: manifest)
         let loop = variant?.loopFrameCount ?? manifest.loopFrameCount
+        // Editing adds a target for every cell nothing sits in, so a spot can
+        // be filled rather than only changed.
+        let empties = isEditing ? emptySpots(manifest: manifest) : [:]
         return LoopingCompositionView(
             screenSize: manifest.screenSize,
             viewport: CGRect(origin: .zero, size: manifest.screenSize),
-            tiles: SlotChoices.apply(to: manifest.placedTiles, designID: manifest.designID),
+            tiles: SlotChoices.effectiveTiles(manifest: manifest) + empties.values.map(\.tile),
             videoURL: variant.flatMap { entry.previewURL(variant: $0.id) } ?? entry.previewURL,
             // The tile-free variant when the build has one: the live tiles
             // drawn over it are the occupants the phone chose, and a swapped
@@ -137,24 +157,58 @@ struct HomeView: View {
                     .map { Image(decorative: $0, scale: 1) }
             }
         ) { tile, side in
-            Button {
-                router.launch(tile: tile)
-            } label: {
-                TileView(
-                    tile: tile,
-                    side: side,
-                    iconImage: SlotArtwork.image(
-                        for: tile,
-                        designID: manifest.designID,
-                        authoredAppID: authored[tile.id] ?? tile.appID,
-                        side: side
-                    ) ?? icons.image(for: tile)
-                )
+            if let empty = empties[tile.id] {
+                EmptySpotTarget(side: side) { editingSpot = .cell(empty.cell) }
+                    .accessibilityLabel("Fill the empty spot \(empty.cell.label)")
+            } else {
+                Button {
+                    guard !isEditing else {
+                        // The authored tile, not the effective one: the editor
+                        // offers the slot's own set and its own default, both
+                        // of which the phone's choice has already written over.
+                        editingSpot = .tile(manifest.placedTiles.first { $0.id == tile.id } ?? tile)
+                        return
+                    }
+                    router.launch(tile: tile)
+                } label: {
+                    TileView(
+                        tile: tile,
+                        side: side,
+                        isSelected: isEditing,
+                        iconImage: SlotArtwork.image(
+                            for: tile,
+                            designID: manifest.designID,
+                            authoredAppID: authored[tile.id] ?? tile.appID,
+                            side: side
+                        ) ?? icons.image(for: tile)
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isEditing ? "Change \(tile.displayName)" : "Open \(tile.displayName)")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open \(tile.displayName)")
         }
         .ignoresSafeArea()
+    }
+
+    /// A tappable stand-in for every cell nothing occupies, keyed by the id its
+    /// tile would take so the composition can lay them out like any other.
+    private func emptySpots(manifest: BuildManifest) -> [UUID: (cell: GridCell, tile: PlacedTile)] {
+        guard let grid = manifest.grid else { return [:] }
+        let sibling = manifest.placedTiles.first
+        return SlotChoices.freeCells(manifest: manifest).reduce(into: [:]) { result, cell in
+            let id = SlotChoices.addedTileID(designID: manifest.designID, cell: cell)
+            result[id] = (
+                cell,
+                PlacedTile(
+                    id: id,
+                    appID: "",
+                    center: grid.cellCenter(cell, in: manifest.widgetRect),
+                    size: sibling?.size ?? grid.tileSide(in: manifest.widgetRect),
+                    showsLabel: false,
+                    cell: cell
+                )
+            )
+        }
     }
 
     private func save() {
@@ -207,17 +261,22 @@ struct HomeView: View {
         )
         let composed = await WallpaperComposer.compose(
             frame: base,
-            tiles: SlotChoices.apply(to: manifest.placedTiles, designID: manifest.designID),
+            tiles: SlotChoices.effectiveTiles(manifest: manifest),
             // Already baked into the plain wallpaper; they are not slot-dependent.
             assets: [],
             screenSize: manifest.screenSize,
+            // The skin the phone chose first, exactly as the widget resolves
+            // it: a wallpaper baked from the authored icon would continue the
+            // wrong artwork past the widget's edge, which is the one thing
+            // baking the tiles into it is for.
             artwork: { tile in
-                PrebuiltDesign.iconURL(
-                    tileID: tile.id,
-                    appID: tile.appID,
-                    authoredAppID: authored[tile.id] ?? tile.appID
-                )
-                .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(tile.size)) }
+                let url = tile.skin.flatMap { PrebuiltDesign.skinURL(designID: manifest.designID, skin: $0) }
+                    ?? PrebuiltDesign.iconURL(
+                        tileID: tile.id,
+                        appID: tile.appID,
+                        authoredAppID: authored[tile.id] ?? tile.appID
+                    )
+                return url.flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(tile.size)) }
             }
         )
         try await WallpaperExporter.saveToPhotos(image: composed)
@@ -281,6 +340,68 @@ private struct SaveButton: View {
     }
 }
 
+/// A cell of the grid with nothing in it, offered as a target while editing.
+///
+/// Drawn as an outline rather than a plate: it has to read as a hole in the
+/// layout that can be filled, not as a tile that is already there.
+private struct EmptySpotTarget: View {
+    let side: CGFloat
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            RoundedRectangle(cornerRadius: side * 0.22, style: .continuous)
+                .strokeBorder(
+                    .white.opacity(0.7),
+                    style: StrokeStyle(lineWidth: max(1.5, side * 0.02), dash: [side * 0.1, side * 0.07])
+                )
+                .background {
+                    RoundedRectangle(cornerRadius: side * 0.22, style: .continuous)
+                        .fill(.black.opacity(0.25))
+                }
+                .overlay {
+                    Image(systemName: "plus")
+                        .font(.system(size: side * 0.34, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+                .frame(width: side, height: side)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// What edit mode replaces the corner buttons with: what tapping does now, a
+/// way to the settings that are not per spot, and a way out.
+private struct EditingBar: View {
+    let onOptions: () -> Void
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 10) {
+                Button("Options", systemImage: "slider.horizontal.3", action: onOptions)
+                    .labelStyle(.titleAndIcon)
+                Spacer()
+                Text("Tap a spot to change it")
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.85))
+                Spacer()
+                Button("Done", action: onDone)
+                    .fontWeight(.semibold)
+            }
+            .font(.callout)
+            .tint(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
+            .padding(.horizontal, 16)
+            .padding(.bottom, 34)
+        }
+    }
+}
+
 /// Opens the slot settings, mirroring the save button on the other corner.
 private struct SlotsButton: View {
     let action: () -> Void
@@ -298,7 +419,7 @@ private struct SlotsButton: View {
                         .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
                         .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
                 }
-                .accessibilityLabel("Design options: choose the animation and which apps fill the slots")
+                .accessibilityLabel("Edit the spots: change an icon, fill an empty one, choose what it opens")
                 Spacer()
             }
         }
