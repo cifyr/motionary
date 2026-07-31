@@ -96,7 +96,6 @@ struct HomeView: View {
 
     private func composition(entry: PrebuiltDesign.Entry, manifest: BuildManifest) -> some View {
         let spec = TimerFontSpec(laneCount: manifest.laneCount, framesPerSecond: manifest.framesPerSecond)
-        let loop = manifest.loopFrameCount
         // The same slot choices the widget applies, so the app never shows a
         // different set of apps than the Home Screen it imitates. slotsEdition
         // is what makes this line re-run after the sheet writes a choice.
@@ -106,8 +105,10 @@ struct HomeView: View {
             uniquingKeysWith: { first, _ in first }
         )
         // The chosen clip variant's preview; the wallpaper stays the design's,
-        // because variants only differ inside the widget frame.
+        // because variants only differ inside the widget frame. The loop is
+        // the variant's own - lengths need not match across variants.
         let variant = VariantChoice.resolved(in: manifest)
+        let loop = variant?.loopFrameCount ?? manifest.loopFrameCount
         return LoopingCompositionView(
             screenSize: manifest.screenSize,
             viewport: CGRect(origin: .zero, size: manifest.screenSize),

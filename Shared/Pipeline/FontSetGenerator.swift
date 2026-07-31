@@ -161,7 +161,8 @@ struct FontSetGenerator {
                     id: variant.id,
                     name: variant.name,
                     fontFamilyBase: design.fontFamilyBase(for: variant),
-                    totalFontBytes: result.totalBytes
+                    totalFontBytes: result.totalBytes,
+                    loopFrameCount: result.loopFrameCount
                 ))
             } catch {
                 // Named, because five clips build in one run and "payload too
@@ -200,7 +201,22 @@ struct FontSetGenerator {
 
     private struct ClipBuild {
         let totalBytes: Int
+        let loopFrameCount: Int
         let bakedBackdrop: CGRect?
+    }
+
+    /// A variant's loop, sized to its own clip - capped at the natural length,
+    /// never past it, because video sampling does not wrap: overshooting would
+    /// end the decode early and fail the whole build.
+    static func variantLoopLength(
+        duration: TimeInterval,
+        spec: TimerFontSpec,
+        playbackSpeed: Double
+    ) -> Int {
+        let natural = max(1, Int((
+            duration * Double(spec.framesPerSecond) / max(playbackSpeed, 0.01)
+        ).rounded(.down)))
+        return spec.seamlessLoopLength(nearest: natural, maximum: min(96, natural))
     }
 
     /// One clip's full output: fonts, backdrop, preview - and for the primary
@@ -229,9 +245,24 @@ struct FontSetGenerator {
             clipRect: design.backgroundName == nil ? nil : design.widgetRect,
             clipCornerRadius: design.effectiveCornerRadius
         )
+
+        // A variant keeps its own length. The clips need not match: each loop
+        // is sized to its own clip the way `retuneLoop` sizes the primary's.
+        let loopFrameCount: Int
+        if variantID == nil {
+            loopFrameCount = design.loopFrameCount
+        } else {
+            let summary = try await extractor.summary()
+            loopFrameCount = Self.variantLoopLength(
+                duration: summary.duration,
+                spec: spec,
+                playbackSpeed: design.playbackSpeed
+            )
+        }
+
         let frames = try await extractor.composedFrames(
-            startFrame: design.loopStartFrame,
-            count: design.loopFrameCount,
+            startFrame: variantID == nil ? design.loopStartFrame : 0,
+            count: loopFrameCount,
             frameRate: spec.framesPerSecond,
             speed: design.playbackSpeed,
             progress: { onStage(.decoding(progress: $0)) }
@@ -383,8 +414,8 @@ struct FontSetGenerator {
 
         Self.logger.info("""
         clip done family=\(familyBase, privacy: .public) \
-        bytes=\(totalBytes) estimated=\(budget.estimatedTotalBytes)
+        loop=\(loopFrameCount) bytes=\(totalBytes) estimated=\(budget.estimatedTotalBytes)
         """)
-        return ClipBuild(totalBytes: totalBytes, bakedBackdrop: bakedBackdrop)
+        return ClipBuild(totalBytes: totalBytes, loopFrameCount: loopFrameCount, bakedBackdrop: bakedBackdrop)
     }
 }

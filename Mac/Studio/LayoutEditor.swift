@@ -32,6 +32,9 @@ struct LayoutEditor: View {
     @State private var skinSets: [SkinSet] = []
     /// The set collecting a new entry from the catalogue popover.
     @State private var addingEntryTo: UUID?
+    /// The variant whose clip is standing in for the primary on the canvas.
+    @State private var previewedVariantID: UUID?
+    @State private var variantPoster: CGImage?
     /// The asset whose key colour is being picked by clicking it.
     @State private var pickingKeyFor: UUID?
 
@@ -49,11 +52,18 @@ struct LayoutEditor: View {
     /// a drag moves the same distance on the phone as under the cursor.
     private var unit: CGFloat { canvas.width / model.screenPixelSize.width }
 
+    /// The clip standing on the canvas: a previewed variant's frame, or the
+    /// primary's. One shared transform positions them all - placement centres
+    /// every source at the same point - so switching only switches the picture.
+    private var activePoster: CGImage? {
+        previewedVariantID == nil ? poster : (variantPoster ?? poster)
+    }
+
     /// The clip's own pixel size, taken from the frame rather than stored: the
     /// poster is a frame of the source, so it is the source's size by
     /// definition and cannot drift from it.
     private var sourceSize: CGSize {
-        guard let poster else { return model.screenPixelSize }
+        guard let poster = activePoster else { return model.screenPixelSize }
         return CGSize(width: poster.width, height: poster.height)
     }
 
@@ -102,6 +112,18 @@ struct LayoutEditor: View {
             reloadSkins()
             reloadBackground()
             reloadSkinSets()
+        }
+        .task(id: previewedVariantID) {
+            guard let previewedVariantID, let store,
+                  let variant = design.variants.first(where: { $0.id == previewedVariantID })
+            else {
+                variantPoster = nil
+                return
+            }
+            variantPoster = try? await MediaFrameExtractor(
+                url: store.variantClipURL(for: design.id, name: variant.sourceVideoName),
+                screenSize: model.screenPixelSize
+            ).posterFrame()
         }
     }
 
@@ -312,7 +334,7 @@ struct LayoutEditor: View {
                     .frame(width: canvas.width, height: canvas.height)
                     .clipped()
             }
-            if let poster {
+            if let poster = activePoster {
                 // The generator fills whatever the clip does not cover with a
                 // dimmed blow-up of the same frame rather than black. Drawing
                 // black here instead - which this did - meant the wallpaper
@@ -935,11 +957,12 @@ struct LayoutEditor: View {
 
             ForEach(design.variants) { variant in
                 HStack(spacing: 6) {
-                    Image(systemName: "film")
+                    Image(systemName: previewedVariantID == variant.id ? "eye.fill" : "film")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(previewedVariantID == variant.id ? Color.accentColor : .secondary)
                     Text(variant.name)
                         .font(.caption)
+                        .foregroundStyle(previewedVariantID == variant.id ? Color.accentColor : .primary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
@@ -951,10 +974,18 @@ struct LayoutEditor: View {
                     .buttonStyle(.plain)
                     .help("Remove \(variant.name) and its clip")
                 }
+                .contentShape(Rectangle())
+                // Click to stand this clip on the canvas; click again for the
+                // primary. One shared transform positions every clip at the
+                // same centre, so this only switches which picture shows.
+                .onTapGesture {
+                    previewedVariantID = previewedVariantID == variant.id ? nil : variant.id
+                }
+                .help("Show \(variant.name) on the canvas")
             }
 
             if !design.variants.isEmpty {
-                Text("Variants should match the primary clip's length and framing: the loop, the crop and the layout are shared.")
+                Text("Click a variant to see it on the canvas. Position and crop are shared - every clip centres on the same point - and each variant loops at its own length.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -990,6 +1021,7 @@ struct LayoutEditor: View {
     /// Takes the clip with it, like removing an asset does: the file lives in
     /// the design, and a swapped-out variant should not keep growing it.
     private func removeVariant(_ variant: ClipVariant) {
+        if previewedVariantID == variant.id { previewedVariantID = nil }
         design.variants.removeAll { $0.id == variant.id }
         store?.removeVariantClip(named: variant.sourceVideoName, for: design.id)
     }
