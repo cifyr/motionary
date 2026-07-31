@@ -25,6 +25,7 @@ struct SpriteSheetImporter: View {
     @State private var setName = ""
     @State private var failure: String?
     @State private var busy = false
+    @State private var choosingFile = false
 
     private var layout: SpriteSheet.Layout? { SpriteSheet.parseNames(namesText) }
 
@@ -151,7 +152,22 @@ struct SpriteSheetImporter: View {
                 }
             }
             .contentShape(Rectangle())
-            .onTapGesture { chooseSheet() }
+            .onTapGesture { choosingFile = true }
+            // SwiftUI's importer rather than `NSOpenPanel.runModal()`: this
+            // view is already inside a sheet, and running a second modal
+            // session from within one deadlocks the app - the click froze the
+            // studio with no panel ever appearing.
+            .fileImporter(
+                isPresented: $choosingFile,
+                allowedContentTypes: [.png, .jpeg, .image]
+            ) { result in
+                switch result {
+                case .success(let url):
+                    load(url)
+                case .failure(let error):
+                    failure = "Could not open that file: \(error.localizedDescription)"
+                }
+            }
             .onDrop(of: [.fileURL], isTargeted: nil) { providers in
                 guard let provider = providers.first else { return false }
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -162,16 +178,12 @@ struct SpriteSheetImporter: View {
             }
     }
 
-    private func chooseSheet() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.png, .jpeg, .image]
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        load(url)
-    }
-
     private func load(_ url: URL) {
+        // The importer hands back a scoped URL; reading it without asking
+        // fails silently on a build that is sandboxed later.
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else {
