@@ -138,7 +138,7 @@ struct HomeView: View {
             }
         ) { tile, side in
             Button {
-                router.launch(appID: tile.appID)
+                router.launch(tile: tile)
             } label: {
                 TileView(
                     tile: tile,
@@ -154,7 +154,7 @@ struct HomeView: View {
                 )
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Open \(AppCatalog.app(id: tile.appID)?.name ?? tile.appID)")
+            .accessibilityLabel("Open \(tile.displayName)")
         }
         .ignoresSafeArea()
     }

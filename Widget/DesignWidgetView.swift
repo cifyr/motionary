@@ -81,7 +81,7 @@ struct DesignWidgetView: View {
                 // Through the app rather than straight to the destination: a
                 // Link from an extension to a third-party scheme is
                 // unreliable, so the app takes the tap and forwards it.
-                Link(destination: LaunchLink.url(for: tile.appID)) {
+                Link(destination: LaunchLink.url(for: tile)) {
                     TileView(
                         tile: tile,
                         side: side,

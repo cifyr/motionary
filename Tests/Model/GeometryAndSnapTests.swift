@@ -443,7 +443,11 @@ final class GeometryAndSnapTests: XCTestCase {
     /// tested against an entry that admitted it. The rule that does hold is
     /// narrower: an entry is launchable unless it is one of the few known not
     /// to be, and a new entry arriving with no scheme still fails here.
-    private static let knownUnlaunchable: Set<String> = ["clock"]
+    /// Weather and Calculator joined Clock when an icon pack needed them
+    /// drawn: Apple publishes no scheme for any of the three, and claiming one
+    /// turns a tap into "could not be opened, it may not be installed", which
+    /// sends you looking for a problem on the phone.
+    private static let knownUnlaunchable: Set<String> = ["clock", "weather", "calculator"]
 
     func testCatalogEntriesAreUniqueAndLaunchable() {
         let ids = AppCatalog.all.map(\.id)

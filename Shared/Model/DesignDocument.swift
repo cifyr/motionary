@@ -79,6 +79,42 @@ private extension CGPoint {
     }
 }
 
+/// An app the catalogue does not know, named and addressed by hand.
+///
+/// The catalogue covers the common Home Screen, but a person's own phone has
+/// apps nobody can enumerate ahead of time. A tile carrying one of these opens
+/// it the same way every other tile does: the widget hands the tap to the app,
+/// and the app opens the URL. What is authored here is only the URL.
+struct CustomTarget: Codable, Equatable, Sendable {
+    /// What the tile is called, since there is no catalogue entry to ask.
+    var name: String
+    /// The app's URL scheme, e.g. `things:` or `bear://`. A bare word is
+    /// taken as a scheme, because that is what people type.
+    var scheme: String
+    /// Opened when the scheme does not, which is what happens when the app is
+    /// not installed.
+    var webFallback: String?
+
+    init(name: String, scheme: String, webFallback: String? = nil) {
+        self.name = name
+        self.scheme = scheme
+        self.webFallback = webFallback
+    }
+
+    /// The URLs to try, in order. A scheme typed without punctuation still has
+    /// to become one, or `UIApplication.open` refuses it outright.
+    var launchCandidates: [URL] {
+        let trimmed = scheme.trimmingCharacters(in: .whitespaces)
+        var primary = trimmed
+        if !primary.isEmpty, !primary.contains(":") {
+            primary += "://"
+        }
+        return [primary, webFallback ?? ""]
+            .filter { !$0.isEmpty }
+            .compactMap(URL.init(string:))
+    }
+}
+
 /// An app the phone may put in a tile's slot instead of the authored one.
 ///
 /// The authored `appID` on the tile is the default occupant - the first of the
@@ -89,14 +125,17 @@ struct TileAlternate: Codable, Equatable, Identifiable, Sendable {
     var appID: String
     /// Artwork by filename in the skin library, like `PlacedTile.skin`.
     var skin: String?
+    /// An app outside the catalogue, when this alternate opens one.
+    var custom: CustomTarget?
 
     /// The appID: one slot offering the same app twice would make the phone's
     /// stored choice ambiguous, so the editor refuses duplicates instead.
     var id: String { appID }
 
-    init(appID: String, skin: String? = nil) {
+    init(appID: String, skin: String? = nil, custom: CustomTarget? = nil) {
         self.appID = appID
         self.skin = skin
+        self.custom = custom
     }
 }
 
@@ -130,6 +169,9 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
     /// list. Which one occupies the slot is the phone's choice, stored in the
     /// app group - the one part of a design that is not frozen at install time.
     var alternates: [TileAlternate] = []
+    /// An app outside the catalogue, when this tile opens one. It wins over
+    /// `appID`, which stays as the fallback so a tile always has a name.
+    var custom: CustomTarget?
     /// The grid cell this tile sits in, or nil for a tile placed off grid.
     /// Dragging with snapping off is what puts a tile off grid; the editor
     /// says which it is rather than leaving it to be guessed from position.
@@ -137,6 +179,18 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
 
     var rect: CGRect {
         CGRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size)
+    }
+
+    /// What this tile is called - the custom name when it carries one, the
+    /// catalogue's otherwise, and the raw id when neither knows it.
+    var displayName: String {
+        custom?.name ?? AppCatalog.app(id: appID)?.name ?? appID
+    }
+
+    /// Whether a tap on this tile can open anything at all.
+    var canLaunch: Bool {
+        if let custom { return !custom.launchCandidates.isEmpty }
+        return AppCatalog.app(id: appID)?.canLaunch ?? false
     }
 
     /// Width of the tile's axis-aligned bounding box once rotated. A tile at
@@ -160,6 +214,7 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         tintHex: String? = nil,
         rotation: Double = 0,
         alternates: [TileAlternate] = [],
+        custom: CustomTarget? = nil,
         cell: GridCell? = nil
     ) {
         self.id = id
@@ -174,6 +229,7 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         self.tintHex = tintHex
         self.rotation = rotation
         self.alternates = alternates
+        self.custom = custom
         self.cell = cell
     }
 
@@ -197,6 +253,7 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         tintHex = try container.decodeIfPresent(String.self, forKey: .tintHex)
         rotation = try container.decodeIfPresent(Double.self, forKey: .rotation) ?? 0
         alternates = try container.decodeIfPresent([TileAlternate].self, forKey: .alternates) ?? []
+        custom = try container.decodeIfPresent(CustomTarget.self, forKey: .custom)
         cell = try container.decodeIfPresent(GridCell.self, forKey: .cell)
     }
 }

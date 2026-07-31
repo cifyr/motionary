@@ -149,6 +149,32 @@ enum AppCatalog {
                    scheme: "minecraft://", webFallback: "https://www.minecraft.net/", category: .games),
         CatalogApp(id: "steam", name: "Steam", symbol: "gamecontroller", tint: .indigo,
                    scheme: "steam://", webFallback: "https://store.steampowered.com/", category: .games),
+
+        // The rest of a typical Home Screen. Added because an icon pack draws
+        // these and a tile that cannot name its app cannot launch it - the
+        // artwork imports either way, but only a catalogue entry opens.
+        //
+        // Weather and Calculator publish no scheme, like Clock: Apple has
+        // never shipped one, and claiming a route that cannot work turns a tap
+        // into "could not be opened", which sends you looking for a problem on
+        // the phone.
+        CatalogApp(id: "weather", name: "Weather", symbol: "cloud.sun.fill", tint: .blue,
+                   scheme: nil, webFallback: nil, category: .system),
+        CatalogApp(id: "calculator", name: "Calculator", symbol: "plusminus", tint: .gray,
+                   scheme: nil, webFallback: nil, category: .system),
+        CatalogApp(id: "messenger", name: "Messenger", symbol: "message.circle.fill", tint: .blue,
+                   scheme: "fb-messenger://", webFallback: "https://www.messenger.com/", category: .social),
+        CatalogApp(id: "telegram", name: "Telegram", symbol: "paperplane.fill", tint: .cyan,
+                   scheme: "tg://", webFallback: "https://web.telegram.org/", category: .social),
+        CatalogApp(id: "outlook", name: "Outlook", symbol: "envelope.fill", tint: .blue,
+                   scheme: "ms-outlook://", webFallback: "https://outlook.office.com/", category: .productivity),
+        CatalogApp(id: "teams", name: "Microsoft Teams", symbol: "person.2.badge.gearshape.fill", tint: .indigo,
+                   scheme: "msteams://", webFallback: "https://teams.microsoft.com/", category: .productivity),
+        CatalogApp(id: "zoom", name: "Zoom", symbol: "video.fill", tint: .blue,
+                   scheme: "zoomus://", webFallback: "https://zoom.us/", category: .productivity),
+        CatalogApp(id: "amazon", name: "Amazon", symbol: "cart.fill", tint: .orange,
+                   scheme: "com.amazon.mobile.shopping://",
+                   webFallback: "https://www.amazon.com/", category: .productivity),
     ]
 
     private static let index: [String: CatalogApp] = Dictionary(
