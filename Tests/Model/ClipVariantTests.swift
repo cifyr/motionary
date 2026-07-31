@@ -90,6 +90,59 @@ final class ClipVariantTests: XCTestCase {
         XCTAssertEqual(decoded.builtVariants.first?.fontFamilyBase, "MFontabcvdefL")
     }
 
+    /// Variant lengths need not match: each loop is sized to its own clip,
+    /// never past its natural length - video sampling does not wrap, so an
+    /// overshoot would end the decode early and fail the build.
+    func testVariantLoopFitsItsOwnClip() {
+        let spec = TimerFontSpec(smoothness: .light)  // 16fps, cycle divides by 480
+
+        // A 6.9s clip caps at the 96-frame ceiling.
+        XCTAssertEqual(FontSetGenerator.variantLoopLength(duration: 6.9, spec: spec, playbackSpeed: 1), 96)
+        // A 0.5s clip loops all 8 of its frames.
+        XCTAssertEqual(FontSetGenerator.variantLoopLength(duration: 0.5, spec: spec, playbackSpeed: 1), 8)
+        // 7 natural frames: 7 does not divide the cycle, and rounding UP to 8
+        // would outrun the clip - so 6, the nearest length that fits.
+        XCTAssertEqual(FontSetGenerator.variantLoopLength(duration: 0.4375, spec: spec, playbackSpeed: 1), 6)
+        // Speed halves the source the loop can cover.
+        XCTAssertEqual(FontSetGenerator.variantLoopLength(duration: 0.5, spec: spec, playbackSpeed: 2), 4)
+        // Degenerate duration still yields a drawable loop.
+        XCTAssertEqual(FontSetGenerator.variantLoopLength(duration: 0, spec: spec, playbackSpeed: 1), 1)
+    }
+
+    /// A manifest carrying no per-variant loop - written before lengths could
+    /// differ - falls back to the design's own.
+    func testAVariantWithoutItsOwnLoopStillDecodes() throws {
+        var manifest = BuildManifest(
+            designID: UUID(),
+            buildGeneration: 1,
+            fontFamilyBase: "MFontabcL",
+            laneCount: 32,
+            framesPerSecond: 16,
+            loopFrameCount: 20,
+            animationCrop: .zero,
+            widgetRect: DeviceGeometry.widgetRect,
+            screenSize: DeviceGeometry.screenPixelSize,
+            wallpaperName: "wallpaper.png",
+            totalFontBytes: 1,
+            builtAt: Date()
+        )
+        manifest.clipVariants = [
+            .init(id: UUID(), name: "Sunset", fontFamilyBase: "MFontabcvdefL", totalFontBytes: 2),
+        ]
+        var json = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: try JSONEncoder().encode(manifest)) as? [String: Any]
+        )
+        var variants = try XCTUnwrap(json["clipVariants"] as? [[String: Any]])
+        variants[0].removeValue(forKey: "loopFrameCount")
+        json["clipVariants"] = variants
+
+        let decoded = try JSONDecoder().decode(
+            BuildManifest.self,
+            from: try JSONSerialization.data(withJSONObject: json)
+        )
+        XCTAssertNil(decoded.builtVariants.first?.loopFrameCount)
+    }
+
     /// A manifest written before variants existed has no such key.
     func testAManifestWithoutVariantsStillDecodes() throws {
         let manifest = BuildManifest(

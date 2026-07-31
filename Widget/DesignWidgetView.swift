@@ -144,6 +144,9 @@ struct DesignWidgetView: View {
            PrebuiltDesign.fontsAreBundled(familyBase: variant.fontFamilyBase) {
             manifest.fontFamilyBase = variant.fontFamilyBase
             manifest.totalFontBytes = variant.totalFontBytes
+            // Variants keep their own lengths; a manifest from before that
+            // carries nil and the design's loop stands in.
+            manifest.loopFrameCount = variant.loopFrameCount ?? manifest.loopFrameCount
             backdropURL = entry.backdropURL(variant: variant.id) ?? backdropURL
             name = "\(entry.name) (\(variant.name))"
         }

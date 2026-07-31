@@ -441,12 +441,16 @@ struct BuildManifest: Codable, Equatable, Sendable {
     var placedTiles: [PlacedTile] { tiles ?? [] }
 
     /// What one built variant amounts to at render time. Everything else -
-    /// crop, lanes, frame rate, loop, tiles - is the design's, shared.
+    /// crop, lanes, frame rate, tiles - is the design's, shared.
     struct VariantBuild: Codable, Equatable, Identifiable, Sendable {
         var id: UUID
         var name: String
         var fontFamilyBase: String
         var totalFontBytes: Int
+        /// The variant's own loop, sized to its own clip - lengths need not
+        /// match across variants. Optional because manifests written before it
+        /// existed must still decode; nil falls back to the design's loop.
+        var loopFrameCount: Int?
     }
 
     /// The built alternative clips, in the order they were authored. Optional
