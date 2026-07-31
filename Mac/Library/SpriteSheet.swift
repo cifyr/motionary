@@ -99,6 +99,98 @@ enum SpriteSheet {
         return cells
     }
 
+    /// Finds each icon in the sheet and cuts tightly around it.
+    ///
+    /// Equal division assumes the margins are exactly half a gutter, and they
+    /// are not: on the sheet this was built for the icons sit at 44-181,
+    /// 215-351 and so on, while an even seventh cuts at 0, 179, 358. By the
+    /// last column the cut starts ten pixels after its icon begins, which is
+    /// what clipped Google Maps and Roblox down one side.
+    ///
+    /// So the backdrop is what gets measured. Everything that is not backdrop
+    /// is grouped into pieces, each piece is an icon, and each is cut to its
+    /// own bounds - which also centres it, since the bounds are what get
+    /// squared up. Cells with nothing in them come back nil, so a name still
+    /// lines up with the picture it belongs to.
+    static func icons(in sheet: CGImage, rows: Int, columns: Int) -> [CGImage?] {
+        guard rows > 0, columns > 0 else { return [] }
+        let width = sheet.width
+        let height = sheet.height
+        guard width > 2, height > 2 else { return [] }
+
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drew = pixels.withUnsafeMutableBytes { raw -> Bool in
+            guard let context = CGContext(
+                data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            context.draw(sheet, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drew else { return [] }
+
+        let keyR = Int(pixels[0]), keyG = Int(pixels[1]), keyB = Int(pixels[2])
+        let reach = 0.30 * 255 * 1.75
+        func isBackdrop(_ point: Int) -> Bool {
+            let index = point * 4
+            let dr = Double(Int(pixels[index]) - keyR)
+            let dg = Double(Int(pixels[index + 1]) - keyG)
+            let db = Double(Int(pixels[index + 2]) - keyB)
+            return (dr * dr + dg * dg + db * db).squareRoot() <= reach
+        }
+
+        // Every run of touching non-backdrop pixels is one icon: the sheet
+        // keeps them a good gutter apart, so nothing joins up.
+        var seen = [Bool](repeating: false, count: width * height)
+        var found: [(rect: CGRect, centre: CGPoint)] = []
+        let smallest = (width / columns) * (height / rows) / 12
+
+        for start in 0 ..< width * height where !seen[start] && !isBackdrop(start) {
+            var minX = width, maxX = 0, minY = height, maxY = 0
+            var area = 0
+            var stack = [start]
+            seen[start] = true
+            while let point = stack.popLast() {
+                area += 1
+                let x = point % width
+                let y = point / width
+                minX = min(minX, x); maxX = max(maxX, x)
+                minY = min(minY, y); maxY = max(maxY, y)
+                for neighbour in [
+                    x > 0 ? point - 1 : -1,
+                    x < width - 1 ? point + 1 : -1,
+                    y > 0 ? point - width : -1,
+                    y < height - 1 ? point + width : -1,
+                ] where neighbour >= 0 && !seen[neighbour] && !isBackdrop(neighbour) {
+                    seen[neighbour] = true
+                    stack.append(neighbour)
+                }
+            }
+            guard area >= smallest else { continue }
+            let rect = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
+            found.append((rect, CGPoint(x: rect.midX, y: rect.midY)))
+        }
+
+        // Each icon belongs to the cell its middle falls in, which is what
+        // keeps a name against the right picture even though the cut does not.
+        var result = [CGImage?](repeating: nil, count: rows * columns)
+        let cellWidth = Double(width) / Double(columns)
+        let cellHeight = Double(height) / Double(rows)
+        for icon in found {
+            let column = min(columns - 1, max(0, Int(icon.centre.x / cellWidth)))
+            let row = min(rows - 1, max(0, Int(icon.centre.y / cellHeight)))
+            let slot = row * columns + column
+            // Two pieces in one cell means the bigger one is the icon.
+            if let existing = result[slot],
+               existing.width * existing.height >= Int(icon.rect.width * icon.rect.height) {
+                continue
+            }
+            result[slot] = sheet.cropping(to: icon.rect)
+        }
+        return result
+    }
+
     /// Clears the backdrop from around a cell without touching the artwork.
     ///
     /// Keying by colour alone removes every matching pixel wherever it is,
@@ -315,6 +407,8 @@ enum SpriteSheet {
         /// Labels whose artwork was imported but that name no app the
         /// catalogue knows - they are usable as a tile's skin by hand.
         var unmatched: [String] = []
+        /// Named cells the sheet had no icon in.
+        var missing: [String] = []
         var skippedBlanks = 0
 
         var importedCount: Int { entries.count + unmatched.count }
@@ -331,7 +425,15 @@ enum SpriteSheet {
         prefix: String,
         into library: SkinLibrary
     ) throws -> Report {
-        let cells = slice(image, rows: layout.rows, columns: layout.columns)
+        // Measured rather than divided: an even seventh of a sheet is not
+        // where its icons are, and the last column paid for it.
+        var cells = icons(in: image, rows: layout.rows, columns: layout.columns)
+        if cells.compactMap({ $0 }).count < layout.cellCount / 2 {
+            // Not a sheet of separated icons after all - fall back to cutting
+            // it evenly rather than importing almost nothing.
+            logger.error("only \(cells.compactMap { $0 }.count) icons found; falling back to an even cut")
+            cells = slice(image, rows: layout.rows, columns: layout.columns).map { Optional($0) }
+        }
         let labels = layout.flattened
         var report = Report()
 
@@ -341,11 +443,18 @@ enum SpriteSheet {
                 continue
             }
             guard index < cells.count else { break }
+            guard let cut = cells[index] else {
+                // Named, because a silently missing icon reads as a bad cut
+                // rather than as a cell with nothing in it.
+                logger.error("no icon found for \(label, privacy: .public)")
+                report.missing.append(label)
+                continue
+            }
 
             let name = skinName(for: label, prefix: prefix)
             // Surround only: the icons on these sheets are frequently green
             // themselves, and a colour key would hollow them out.
-            let cell = removingSurround(cells[index]) ?? cells[index]
+            let cell = removingSurround(cut) ?? cut
             try library.importing(cell, named: name, alreadyKeyed: true)
 
             if let app = app(named: label) {

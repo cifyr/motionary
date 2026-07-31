@@ -100,6 +100,36 @@ final class SpriteSheetTests: XCTestCase {
         XCTAssertEqual(pixels.alpha(x: 50, y: 50), 255, "the icon itself was discarded")
     }
 
+    /// Equal division assumes the sheet's outer margin is half a gutter. On a
+    /// real sheet it is not, and by the last column the cut starts after its
+    /// icon begins - which is what clipped Google Maps and Roblox.
+    func testIconsAreFoundWhereTheyActuallyAreNotWhereAnEvenCutFalls() throws {
+        // A wide left margin and a narrow right one, so an even cut lands
+        // through the icons rather than between them.
+        let sheet = try Self.offsetGrid()
+        let found = SpriteSheet.icons(in: sheet, rows: 1, columns: 3)
+
+        XCTAssertEqual(found.count, 3)
+        XCTAssertEqual(found.compactMap { $0 }.count, 3, "an icon was missed")
+        for icon in found.compactMap({ $0 }) {
+            // Each plate is 40 wide; a clipped one comes back narrower.
+            XCTAssertEqual(icon.width, 40, "an icon was cut short")
+            XCTAssertEqual(icon.height, 40)
+        }
+    }
+
+    /// Cut to its own bounds, which is what centres it once squared up: a
+    /// tight crop is the difference between an icon and an icon adrift in its
+    /// own tile.
+    func testAnIconIsCutTightlyAroundItself() throws {
+        let sheet = try Self.offsetGrid()
+        let icon = try XCTUnwrap(SpriteSheet.icons(in: sheet, rows: 1, columns: 3).first ?? nil)
+        let pixels = try Pixels(icon)
+        // Every edge is the plate, with no backdrop left around it.
+        XCTAssertFalse(pixels.isGreenish(x: 0, y: 0))
+        XCTAssertFalse(pixels.isGreenish(x: icon.width - 1, y: icon.height - 1))
+    }
+
     func testASheetWithNoRowsSlicesToNothing() throws {
         let sheet = try Self.solid(width: 100, height: 100)
         XCTAssertTrue(SpriteSheet.slice(sheet, rows: 0, columns: 4).isEmpty)
@@ -242,6 +272,23 @@ final class SpriteSheetTests: XCTestCase {
         // The neighbour's edge, cut into this cell and touching it.
         context.setFillColor(CGColor(red: 0.1, green: 0.1, blue: 0.5, alpha: 1))
         context.fill(CGRect(x: 0, y: 20, width: 4, height: 60))
+        return try XCTUnwrap(context.makeImage())
+    }
+
+    /// Three 40px plates on green, with a 30px left margin and a 10px right
+    /// one - the uneven margins a generated sheet actually arrives with.
+    private static func offsetGrid() throws -> CGImage {
+        let width = 210, height = 60
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(red: 0.24, green: 0.94, blue: 0.20, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.setFillColor(CGColor(red: 0.05, green: 0.05, blue: 0.07, alpha: 1))
+        for column in 0 ..< 3 {
+            context.fill(CGRect(x: 30 + column * 60, y: 10, width: 40, height: 40))
+        }
         return try XCTUnwrap(context.makeImage())
     }
 
