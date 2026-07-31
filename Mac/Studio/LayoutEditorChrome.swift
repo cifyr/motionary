@@ -3,37 +3,37 @@ import SwiftUI
 /// The editor's frame: the toolbar over the canvas, the layer list beside it,
 /// and the status bar under it.
 ///
-/// Split from `LayoutEditor` for size alone - these are the same view, and the
-/// state they read lives there.
+/// Styled from the design mockup - see `StudioTheme` for where the colours and
+/// type come from. Split from `LayoutEditor` for size alone; these are the same
+/// view, and the state they read lives there.
 extension LayoutEditor {
     // MARK: - Toolbar
 
     /// Not `toolbar`: that name is `View.toolbar(content:)`, and the compiler
     /// resolves the modifier rather than this property.
     var editorToolbar: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(documentName)
-                    .font(.headline)
+                    .font(StudioTheme.title)
+                    .tracking(-0.13)
+                    .foregroundStyle(StudioTheme.textBright)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                if !savedNote.isEmpty {
-                    Text(savedNote)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                }
+                Text(savedNote.isEmpty ? "unsaved" : savedNote)
+                    .font(StudioTheme.monoSmall)
+                    .foregroundStyle(StudioTheme.textDim)
             }
-            .frame(minWidth: 120, alignment: .leading)
+            .frame(minWidth: 158, alignment: .leading)
 
-            Divider().frame(height: 20)
-
-            // Aligning is a button, not a steady hand. Disabled with nothing
-            // selected rather than hidden, so the row does not move about.
-            HStack(spacing: 2) {
+            // Aligning is a button, not a steady hand. Dimmed rather than
+            // hidden with nothing selected, so the row never moves about.
+            HStack(spacing: 3) {
                 alignButton("align.horizontal.left", "Align left", .left)
                 alignButton("align.horizontal.center", "Align horizontal centres", .centerX)
                 alignButton("align.horizontal.right", "Align right", .right)
-                Divider().frame(height: 14)
+                Rectangle().fill(StudioTheme.divider).frame(width: 1, height: 16)
+                    .padding(.horizontal, 3)
                 alignButton("align.vertical.top", "Align top", .top)
                 alignButton("align.vertical.center", "Align vertical centres", .centerY)
                 alignButton("align.vertical.bottom", "Align bottom", .bottom)
@@ -43,6 +43,7 @@ extension LayoutEditor {
             Button("Space evenly") {
                 design.tiles = LayoutActions.spacedEvenly(design.tiles, selection: selection)
             }
+            .buttonStyle(.studio)
             .disabled(alignmentTargets.count < 3)
             .help("Equal gaps between the selected tiles")
 
@@ -53,18 +54,30 @@ extension LayoutEditor {
                     gap: design.grid.gap
                 )
             }
+            .buttonStyle(.studio)
             .disabled(alignmentTargets.count < 2)
             .help("Tops aligned, equal gaps, in the order they already sit")
 
             Spacer()
 
             Button("Preview", action: onPreview)
+                .buttonStyle(.studio)
             Button("Build to Home Screen", action: onBuild)
+                .buttonStyle(.studioProminent)
                 .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .frame(height: 46)
+        .background(
+            LinearGradient(
+                colors: [StudioTheme.toolbarTop, StudioTheme.toolbarBottom],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(StudioTheme.toolbarEdge).frame(height: 1)
+        }
     }
 
     /// Which tiles an align button would move. Alignment is a tile idea here:
@@ -82,10 +95,9 @@ extension LayoutEditor {
                 widgetRect: design.widgetRect
             )
         } label: {
-            Image(systemName: symbol).frame(width: 22, height: 18)
+            Image(systemName: symbol).font(.system(size: 11))
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
+        .buttonStyle(.studioCompact)
         .help(alignmentTargets.count > 1 ? help : "\(help) in the widget frame")
     }
 
@@ -97,76 +109,95 @@ extension LayoutEditor {
     /// - so this list is for finding and selecting things, not for restacking
     /// them. It is also the only place a tile's cell is visible at a glance.
     var layersPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            layerHeading("Layers")
+        VStack(alignment: .leading, spacing: 0) {
+            StudioTheme.eyebrow("Layers")
+                .foregroundStyle(StudioTheme.textTertiary)
+                .padding(.horizontal, 13)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
 
-            layerRow(
-                title: "Scene",
-                detail: "wallpaper, frame",
-                isSelected: selection.isEmpty
-            ) { selection = [] }
-
-            if !design.tiles.isEmpty {
-                layerHeading("Tiles")
-                ForEach(design.tiles) { tile in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 1) {
                     layerRow(
-                        title: AppCatalog.app(id: tile.appID)?.name ?? tile.appID,
-                        detail: tile.cell?.label ?? "off grid",
-                        isSelected: selection.contains(tile.id)
-                    ) { select(tile.id) }
-                }
-            }
+                        title: "Scene",
+                        detail: "wallpaper, frame",
+                        isSelected: selection.isEmpty
+                    ) { selection = [] }
 
-            if !design.assets.isEmpty {
-                layerHeading("Pictures")
-                ForEach(design.assets.sorted { $0.zIndex < $1.zIndex }) { asset in
+                    if !design.tiles.isEmpty {
+                        layerGroup("Tiles")
+                        ForEach(design.tiles) { tile in
+                            layerRow(
+                                title: AppCatalog.app(id: tile.appID)?.name ?? tile.appID,
+                                detail: tile.cell?.label ?? "off grid",
+                                isSelected: selection.contains(tile.id)
+                            ) { select(tile.id) }
+                        }
+                    }
+
+                    if !design.assets.isEmpty {
+                        layerGroup("Pictures")
+                        ForEach(design.assets.sorted { $0.zIndex < $1.zIndex }) { asset in
+                            layerRow(
+                                title: asset.fileName,
+                                detail: nil,
+                                isSelected: selection.contains(asset.id)
+                            ) { select(asset.id) }
+                        }
+                    }
+
+                    layerGroup("Clip")
                     layerRow(
-                        title: asset.fileName,
-                        detail: nil,
-                        isSelected: selection.contains(asset.id)
-                    ) { select(asset.id) }
+                        title: design.sourceVideoName,
+                        detail: previewedVariantID == nil ? "shown" : nil,
+                        isSelected: false
+                    ) { previewedVariantID = nil }
+
+                    ForEach(design.variants) { variant in
+                        layerRow(
+                            title: variant.name,
+                            detail: previewedVariantID == variant.id ? "shown" : nil,
+                            isSelected: false,
+                            indented: true
+                        ) {
+                            previewedVariantID = previewedVariantID == variant.id ? nil : variant.id
+                        }
+                    }
+
+                    if !design.variants.isEmpty {
+                        Text("All variants share the clip's position.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(StudioTheme.textDim)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 6)
+                            .padding(.top, 6)
+                    }
                 }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 8)
             }
 
-            layerHeading("Clip")
-            layerRow(
-                title: design.sourceVideoName,
-                detail: previewedVariantID == nil ? "shown" : nil,
-                isSelected: false
-            ) { previewedVariantID = nil }
-
-            ForEach(design.variants) { variant in
-                layerRow(
-                    title: variant.name,
-                    detail: previewedVariantID == variant.id ? "shown" : nil,
-                    isSelected: false,
-                    indented: true
-                ) {
-                    previewedVariantID = previewedVariantID == variant.id ? nil : variant.id
-                }
-            }
-
-            if !design.variants.isEmpty {
-                Text("All variants share the clip's position.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 12)
+            Spacer(minLength: 0)
 
             Text("Order is fixed: wallpaper, clip, pictures, tiles.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 10))
+                .foregroundStyle(StudioTheme.textDim)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(13)
+        }
+        .frame(width: Self.layersWidth, alignment: .leading)
+        .background(StudioTheme.panel)
+        .overlay(alignment: .trailing) {
+            Rectangle().fill(StudioTheme.panelEdge).frame(width: 1)
         }
     }
 
-    private func layerHeading(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(.system(size: 9, weight: .semibold).monospaced())
-            .foregroundStyle(.tertiary)
-            .padding(.top, 2)
+    private func layerGroup(_ text: String) -> some View {
+        StudioTheme.eyebrow(text)
+            .foregroundStyle(StudioTheme.textDim)
+            .padding(.horizontal, 6)
+            .padding(.top, 10)
+            .padding(.bottom, 3)
     }
 
     private func layerRow(
@@ -177,23 +208,28 @@ extension LayoutEditor {
         action: @escaping () -> Void
     ) -> some View {
         HStack(spacing: 6) {
-            if indented { Spacer().frame(width: 10) }
+            if indented {
+                Text("+")
+                    .font(StudioTheme.monoSmall)
+                    .foregroundStyle(isSelected ? StudioTheme.onAccent : StudioTheme.textDim)
+            }
             Text(title)
-                .font(.caption)
+                .font(StudioTheme.small)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 4)
             if let detail {
                 Text(detail)
-                    .font(.system(size: 9).monospaced())
-                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .font(StudioTheme.monoSmall)
+                    .foregroundStyle(isSelected ? StudioTheme.onAccent.opacity(0.75) : StudioTheme.textDim)
             }
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
+        .foregroundStyle(isSelected ? StudioTheme.onAccent : StudioTheme.text)
+        .padding(.horizontal, 7)
+        .frame(height: 22)
         .background(
-            isSelected ? Color.accentColor.opacity(0.25) : .clear,
-            in: RoundedRectangle(cornerRadius: 4, style: .continuous)
+            isSelected ? StudioTheme.accent : .clear,
+            in: RoundedRectangle(cornerRadius: StudioTheme.radius, style: .continuous)
         )
         .contentShape(Rectangle())
         .onTapGesture(perform: action)
@@ -202,29 +238,39 @@ extension LayoutEditor {
     // MARK: - Status bar
 
     var statusBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 11) {
             Text("\(model.name) · \(Int(model.screenPointSize.width)) × \(Int(model.screenPointSize.height)) pt")
-                .foregroundStyle(.secondary)
+                .font(StudioTheme.mono)
+                .tracking(0.3)
+            Text("zoom locked")
+                .foregroundStyle(StudioTheme.textDim)
 
-            Divider().frame(height: 12)
+            Rectangle().fill(StudioTheme.divider).frame(width: 1, height: 16)
 
             Text(selectionSummary)
-                .foregroundStyle(.primary)
+                .font(StudioTheme.mono)
+                .foregroundStyle(StudioTheme.accent)
 
             Spacer()
 
-            Text("Arrows nudge 1 px · ⇧ arrows 10 px · ⌥ drag duplicates · ⌘ click adds to the selection")
-                .foregroundStyle(.secondary)
+            Text("Arrows nudge 1 px · ⇧ arrows 10 px · ⌥ drag duplicates · ⌘ click adds")
+                .foregroundStyle(StudioTheme.textDim)
                 .lineLimit(1)
                 .truncationMode(.tail)
 
             Toggle("Snap to grid", isOn: $design.snapEnabled)
                 .toggleStyle(.checkbox)
                 .controlSize(.small)
+                .foregroundStyle(StudioTheme.textSecondary)
         }
-        .font(.caption.monospaced())
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
+        .font(StudioTheme.body)
+        .foregroundStyle(StudioTheme.textSecondary)
+        .padding(.horizontal, 15)
+        .frame(height: 30)
+        .background(StudioTheme.statusFill)
+        .overlay(alignment: .top) {
+            Rectangle().fill(StudioTheme.statusEdge).frame(height: 1)
+        }
     }
 
     /// What is selected, in the terms the inspector uses for it.
