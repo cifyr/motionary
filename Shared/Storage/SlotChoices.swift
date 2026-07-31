@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import os
 
@@ -74,6 +75,123 @@ enum SlotChoices {
         values[tileID.uuidString] = target.flatMap { try? JSONEncoder().encode($0) }
         defaults?.set(values, forKey: key)
         logger.info("slot link set on \(tileID.uuidString, privacy: .public)")
+    }
+
+    // MARK: - Spots the design left empty
+
+    /// A tile the phone put in a grid cell the design placed nothing in.
+    ///
+    /// It carries everything a synthesised tile needs, because there is no
+    /// authored tile underneath to fall back to: the artwork, what it opens,
+    /// and what it is called.
+    struct Addition: Codable, Equatable, Sendable {
+        var cell: GridCell
+        /// A skin that shipped with the design. Nil draws the catalogue plate.
+        var skin: String?
+        var target: CustomTarget?
+        var name: String = ""
+    }
+
+    private static func additionsKey(_ designID: UUID) -> String {
+        "slotAdditions-\(designID.uuidString)"
+    }
+
+    static func additions(designID: UUID) -> [Addition] {
+        guard let raw = defaults?.data(forKey: additionsKey(designID)) else { return [] }
+        do {
+            return try JSONDecoder().decode([Addition].self, from: raw)
+        } catch {
+            // Loudly: a spot the phone filled silently disappearing reads as
+            // the app forgetting, which is indistinguishable from never
+            // having saved it.
+            logger.error("""
+            could not read the added spots of \(designID.uuidString, privacy: .public): \
+            \(String(describing: error), privacy: .public)
+            """)
+            return []
+        }
+    }
+
+    static func addition(designID: UUID, cell: GridCell) -> Addition? {
+        additions(designID: designID).first { $0.cell == cell }
+    }
+
+    /// Adds or replaces what fills a cell. Nil empties it again.
+    static func setAddition(_ addition: Addition?, designID: UUID, cell: GridCell) {
+        var all = additions(designID: designID).filter { $0.cell != cell }
+        if let addition { all.append(addition) }
+        guard let data = try? JSONEncoder().encode(all) else {
+            logger.error("could not write the added spots of \(designID.uuidString, privacy: .public)")
+            return
+        }
+        defaults?.set(data, forKey: additionsKey(designID))
+        logger.info("""
+        spot \(cell.label, privacy: .public) of \(designID.uuidString, privacy: .public) \
+        -> \(addition == nil ? "empty" : "filled", privacy: .public)
+        """)
+    }
+
+    /// The id an added tile draws under.
+    ///
+    /// Derived from the design and the cell rather than generated, so the tile
+    /// is the same one across renders - the widget and the app both rebuild it
+    /// from storage, and a fresh UUID each time would break every per-tile
+    /// lookup. The marker byte keeps it out of the authored tiles' space.
+    static func addedTileID(designID: UUID, cell: GridCell) -> UUID {
+        var bytes = withUnsafeBytes(of: designID.uuid) { Array($0) }
+        bytes[13] = 0xAD
+        bytes[14] = UInt8(truncatingIfNeeded: cell.row)
+        bytes[15] = UInt8(truncatingIfNeeded: cell.column)
+        return NSUUID(uuidBytes: bytes) as UUID
+    }
+
+    /// Every tile the phone wants drawn: the design's own, as chosen, plus the
+    /// ones it added to empty cells.
+    static func effectiveTiles(manifest: BuildManifest) -> [PlacedTile] {
+        let authored = apply(to: manifest.placedTiles, designID: manifest.designID)
+        guard let grid = manifest.grid else { return authored }
+        let taken = occupiedCells(grid: grid, frame: manifest.widgetRect, tiles: authored)
+        let added = additions(designID: manifest.designID)
+            .filter { !taken.contains($0.cell) }
+            .map { tile(for: $0, manifest: manifest, grid: grid) }
+        return authored + added
+    }
+
+    /// The cells with nothing in them, which are the spots the phone can fill.
+    static func freeCells(manifest: BuildManifest) -> [GridCell] {
+        guard let grid = manifest.grid else { return [] }
+        let taken = occupiedCells(
+            grid: grid,
+            frame: manifest.widgetRect,
+            tiles: effectiveTiles(manifest: manifest)
+        )
+        return grid.allCells.filter { !taken.contains($0) }
+    }
+
+    /// By where tiles actually are rather than by the cell they were tagged
+    /// with: a tile dragged off grid still covers a cell, and offering that
+    /// cell as empty would stack a second icon on top of it.
+    private static func occupiedCells(grid: WidgetGrid, frame: CGRect, tiles: [PlacedTile]) -> Set<GridCell> {
+        Set(tiles.compactMap { tile in
+            grid.allCells.first { grid.cellRect($0, in: frame).contains(tile.center) }
+        })
+    }
+
+    private static func tile(for addition: Addition, manifest: BuildManifest, grid: WidgetGrid) -> PlacedTile {
+        // Shaped like the design's own tiles, so a filled spot does not read as
+        // a foreign object next to them.
+        let sibling = manifest.placedTiles.first
+        return PlacedTile(
+            id: addedTileID(designID: manifest.designID, cell: addition.cell),
+            appID: addition.target?.name ?? addition.name,
+            center: grid.cellCenter(addition.cell, in: manifest.widgetRect),
+            size: sibling?.size ?? grid.tileSide(in: manifest.widgetRect),
+            cornerRadius: sibling?.cornerRadius ?? 0.22,
+            showsLabel: sibling?.showsLabel ?? true,
+            skin: addition.skin,
+            custom: addition.target,
+            cell: addition.cell
+        )
     }
 
     static func choice(designID: UUID, tileID: UUID) -> Choice {

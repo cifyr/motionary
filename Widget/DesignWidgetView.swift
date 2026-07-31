@@ -58,7 +58,10 @@ struct DesignWidgetView: View {
             )
             CompositionView(
                 manifest: source.manifest,
-                tiles: SlotChoices.apply(to: source.manifest.placedTiles, designID: source.manifest.designID),
+                // Spots the phone filled included: an added tile is live
+                // SwiftUI over the frozen animation exactly like an authored
+                // one, so the widget draws both without a rebuild.
+                tiles: SlotChoices.effectiveTiles(manifest: source.manifest),
                 // The rendered rect, not the cut frame: only the viewport's
                 // origin positions content, and the system's origin is 2px left
                 // of the frame a design is cut to.

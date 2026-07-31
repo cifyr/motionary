@@ -193,7 +193,8 @@ struct FontSetGenerator {
             backdropRect: primary.bakedBackdrop,
             tiles: design.tiles,
             assets: design.assets.isEmpty ? nil : design.assets,
-            clipVariants: builtVariants.isEmpty ? nil : builtVariants
+            clipVariants: builtVariants.isEmpty ? nil : builtVariants,
+            grid: design.grid
         )
         try store.save(manifest)
 

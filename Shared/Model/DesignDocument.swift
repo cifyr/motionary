@@ -198,6 +198,19 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         return alternates.filter { seen.insert($0.appID).inserted }
     }
 
+    /// The artwork this slot's set offers: its own and its alternates'.
+    ///
+    /// Applying a skin set is what fills a slot's alternates, so the set is
+    /// already on the tile - the phone's icon picker shows exactly this rather
+    /// than every skin that shipped, because a slot styled for one pack should
+    /// not offer another pack's drawing of the same app.
+    var setSkins: [String] {
+        var seen = Set<String>()
+        return ([skin] + alternates.map(\.skin))
+            .compactMap { $0 }
+            .filter { seen.insert($0).inserted }
+    }
+
     /// Whether a tap on this tile can open anything at all.
     var canLaunch: Bool {
         if let custom { return !custom.launchCandidates.isEmpty }
@@ -624,6 +637,20 @@ struct BuildManifest: Codable, Equatable, Sendable {
     var clipVariants: [VariantBuild]?
 
     var builtVariants: [VariantBuild] { clipVariants ?? [] }
+
+    /// The grid the design was laid out on.
+    ///
+    /// It travels so the phone can offer the cells nothing was placed in: an
+    /// empty spot is only addressable if its rect can be worked out, and the
+    /// widget frame alone does not say where the cells fall. Optional for the
+    /// same decoding reason `tiles` is - a manifest built before this existed
+    /// simply offers no empty spots.
+    var grid: WidgetGrid?
+
+    /// Where a slot sits on screen, in the same pixel space as `tiles`.
+    func cellRect(_ cell: GridCell) -> CGRect? {
+        grid.map { $0.cellRect(cell, in: widgetRect) }
+    }
 
     var spec: TimerFontSpec {
         TimerFontSpec(laneCount: laneCount, framesPerSecond: framesPerSecond)
