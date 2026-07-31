@@ -29,6 +29,9 @@ struct LayoutEditor: View {
     @State private var skins: [SkinLibrary.Skin] = []
     @State private var background: CGImage?
     @State private var skinNote: String?
+    @State private var skinSets: [SkinSet] = []
+    /// The set collecting a new entry from the catalogue popover.
+    @State private var addingEntryTo: UUID?
     /// The asset whose key colour is being picked by clicking it.
     @State private var pickingKeyFor: UUID?
 
@@ -98,6 +101,23 @@ struct LayoutEditor: View {
         .task {
             reloadSkins()
             reloadBackground()
+            reloadSkinSets()
+        }
+    }
+
+    private func reloadSkinSets() {
+        do {
+            skinSets = try SkinSetStore().all()
+        } catch {
+            skinNote = "Could not read the skin sets: \(error)"
+        }
+    }
+
+    private func saveSkinSets() {
+        do {
+            try SkinSetStore().save(skinSets)
+        } catch {
+            skinNote = "Could not save the skin sets: \(error)"
         }
     }
 
@@ -745,6 +765,153 @@ struct LayoutEditor: View {
         store?.removeAsset(named: asset.fileName, for: design.id)
     }
 
+    // MARK: - Skin sets
+
+    /// Themed icon packs: one picture per app, drawn in one style. Applying a
+    /// set fills a tile's artwork and its swap list in one step, so "the neon
+    /// icons" is authored once and reused on every design.
+    @ViewBuilder
+    private var skinSetsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Skin sets").font(.caption.weight(.semibold))
+                Spacer()
+                Button("New set") {
+                    skinSets.append(SkinSet(name: "Set \(skinSets.count + 1)"))
+                    saveSkinSets()
+                }
+                .buttonStyle(.link)
+            }
+
+            if skinSets.isEmpty {
+                Text("A set pairs each app with a picture in one style - like an icon pack. Apply it to a tile and the phone can swap that slot to any other app in the set, artwork and link together.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ForEach($skinSets) { $set in
+                DisclosureGroup {
+                    skinSetBody($set)
+                } label: {
+                    TextField("Name", text: Binding(
+                        get: { set.name },
+                        set: { set.name = $0; saveSkinSets() }
+                    ))
+                    .textFieldStyle(.plain)
+                    .font(.caption.weight(.medium))
+                }
+            }
+        }
+        .disabled(store == nil)
+    }
+
+    @ViewBuilder
+    private func skinSetBody(_ set: Binding<SkinSet>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(set.wrappedValue.entries) { entry in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(AppCatalog.app(id: entry.appID)?.tint ?? .gray)
+                        .frame(width: 8, height: 8)
+                    Text(AppCatalog.app(id: entry.appID)?.name ?? entry.appID)
+                        .font(.caption)
+                    AsyncSkinThumbnail(url: (try? SkinLibrary())?.url(for: entry.skin))
+                        .frame(width: 18, height: 18)
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    Spacer()
+                    Button {
+                        set.wrappedValue.entries.removeAll { $0.appID == entry.appID }
+                        saveSkinSets()
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove \(AppCatalog.app(id: entry.appID)?.name ?? entry.appID) from the set")
+                }
+            }
+
+            HStack {
+                Button("Add app...") { addingEntryTo = set.wrappedValue.id }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                    .popover(isPresented: Binding(
+                        get: { addingEntryTo == set.wrappedValue.id },
+                        set: { if !$0 { addingEntryTo = nil } }
+                    )) {
+                        CataloguePicker { appID in
+                            addingEntryTo = nil
+                            addEntry(appID: appID, to: set)
+                        }
+                    }
+                Spacer()
+                Button("Delete set", role: .destructive) {
+                    skinSets.removeAll { $0.id == set.wrappedValue.id }
+                    saveSkinSets()
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
+
+            if !set.wrappedValue.entries.isEmpty {
+                HStack {
+                    if let selection, design.tiles.contains(where: { $0.id == selection }) {
+                        Button("Apply to selected tile") {
+                            apply(set.wrappedValue, onlyTo: selection)
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    }
+                    Button("Apply to all tiles") {
+                        apply(set.wrappedValue, onlyTo: nil)
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                }
+                Text("Adding an app the set already has replaces its picture. Applying rewrites the tile's swap list to this set.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.leading, 4)
+    }
+
+    /// Picks the picture for a newly added app, imported through the library
+    /// so it is keyed, trimmed and squared like every other skin.
+    private func addEntry(appID: String, to set: Binding<SkinSet>) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .image]
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose the \(AppCatalog.app(id: appID)?.name ?? appID) picture for this set"
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        guard panel.runModal() == .OK, let source = panel.url else { return }
+        do {
+            guard let imported = try SkinLibrary().importing([source]).first else {
+                skinNote = "Could not read \(source.lastPathComponent) as an image."
+                return
+            }
+            set.wrappedValue.setEntry(appID: appID, skin: imported)
+            saveSkinSets()
+            reloadSkins()
+        } catch {
+            skinNote = "Could not import \(source.lastPathComponent): \(error)"
+        }
+    }
+
+    /// `onlyTo: nil` applies to every tile: each keeps its own app as the
+    /// default and gets the rest of the set to swap to - four defaults of one
+    /// set is just four tiles this ran across.
+    private func apply(_ set: SkinSet, onlyTo tileID: UUID?) {
+        var touched = 0
+        for index in design.tiles.indices
+        where tileID == nil || design.tiles[index].id == tileID {
+            design.tiles[index] = set.applied(to: design.tiles[index])
+            touched += 1
+        }
+        skinNote = "Applied \(set.name) to \(touched) tile\(touched == 1 ? "" : "s")."
+    }
+
     // MARK: - Variants
 
     /// Alternative clips for the animated area - same layout, same crop, and
@@ -931,6 +1098,8 @@ struct LayoutEditor: View {
             }
 
             skinPicker
+
+            skinSetsSection
 
             Toggle("Snap to grid", isOn: $design.snapEnabled)
 
@@ -1171,7 +1340,7 @@ private struct CataloguePicker: View {
 
 /// A skin thumbnail, decoded once per appearance.
 private struct AsyncSkinThumbnail: View {
-    let url: URL
+    let url: URL?
 
     @State private var image: Image?
 
@@ -1184,7 +1353,9 @@ private struct AsyncSkinThumbnail: View {
             }
         }
         .task(id: url) {
-            image = ImageLoader.load(at: url, maxPixelSize: 132).map { Image(decorative: $0, scale: 1) }
+            image = url
+                .flatMap { ImageLoader.load(at: $0, maxPixelSize: 132) }
+                .map { Image(decorative: $0, scale: 1) }
         }
     }
 }
