@@ -74,6 +74,14 @@ struct LayoutEditor: View {
         design.tiles.filter { selection.contains($0.id) }
     }
 
+    /// This design's own icon library. Skins used to sit in one folder shared
+    /// by every design, so a pack imported for one turned up in the picker of
+    /// all of them; they live with the design that uses them now.
+    var skinLibrary: SkinLibrary? {
+        guard let store else { return nil }
+        return try? SkinLibrary(root: store.skinsFolder(for: design.id))
+    }
+
     /// One snap engine for the whole editor, carrying the design's real grid.
     ///
     /// The threshold is divided by the zoom so it stays the same distance
@@ -223,7 +231,7 @@ struct LayoutEditor: View {
         }
         .background(StudioTheme.canvasWell)
         .sheet(isPresented: $importingSheet) {
-            SpriteSheetImporter { imported in
+            SpriteSheetImporter(library: skinLibrary) { imported in
                 skinSets.append(imported)
                 saveSkinSets()
                 reloadSkins()
@@ -236,6 +244,7 @@ struct LayoutEditor: View {
         .environment(\.colorScheme, .dark)
         .tint(StudioTheme.accent)
         .task {
+            migrateSkins()
             reloadSkins()
             reloadBackground()
             reloadSkinSets()
@@ -251,6 +260,19 @@ struct LayoutEditor: View {
                 url: store.variantClipURL(for: design.id, name: variant.sourceVideoName),
                 screenSize: model.screenPixelSize
             ).posterFrame()
+        }
+    }
+
+    /// Brings whatever this design references over from the old shared
+    /// library, so moving skins into the design does not empty its tiles.
+    private func migrateSkins() {
+        guard let library = skinLibrary else { return }
+        var wanted = Set(design.tiles.compactMap(\.skin))
+        wanted.formUnion(design.tiles.flatMap { $0.alternates.compactMap(\.skin) })
+        wanted.formUnion(((try? SkinSetStore().all()) ?? []).flatMap { $0.entries.map(\.skin) })
+        let carried = SkinLibrary.migrateIfNeeded(wanted, into: library)
+        if carried > 0 {
+            skinNote = "Brought \(carried) skin\(carried == 1 ? "" : "s") into this design."
         }
     }
 
@@ -307,7 +329,7 @@ struct LayoutEditor: View {
     }
 
     private func reloadSkins() {
-        skins = (try? SkinLibrary().all()) ?? []
+        skins = skinLibrary?.all() ?? []
     }
 
     private func importSkins() {
@@ -320,7 +342,8 @@ struct LayoutEditor: View {
             // Counted and reported. Swallowing this with `try?` made a failed
             // import look exactly like a successful one, which is how an
             // import that worked came to look like an import that did nothing.
-            let added = try SkinLibrary().importing(panel.urls)
+            guard let library = skinLibrary else { return }
+            let added = try library.importing(panel.urls)
             reloadSkins()
             let failed = panel.urls.count - added.count
             skinNote = failed == 0
@@ -348,29 +371,33 @@ struct LayoutEditor: View {
                 Text(skinNote).font(.caption2).foregroundStyle(.secondary)
             }
             if skins.isEmpty {
-                Text("No skins yet. Import icon artwork - a green screen is removed automatically - and it stays available for every design.")
+                Text("No skins yet. Import icon artwork - the backdrop around it is removed automatically. Skins belong to this design.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            } else if index == nil {
-                Text("\(skins.count) skin\(skins.count == 1 ? "" : "s") ready. Select a tile to put one on it.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if let index {
+            } else {
+                if index == nil {
+                    Text("\(skins.count) skin\(skins.count == 1 ? "" : "s") in this design. Select a tile to put one on it; right-click a skin to delete it.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 LazyVGrid(columns: Array(repeating: GridItem(.fixed(44), spacing: 6), count: 4), spacing: 6) {
-                    Button {
-                        design.tiles[index].skin = nil
-                    } label: {
-                        Image(systemName: "nosign")
-                            .frame(width: 44, height: 44)
-                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                    if let index {
+                        Button {
+                            design.tiles[index].skin = nil
+                        } label: {
+                            Image(systemName: "nosign")
+                                .frame(width: 44, height: 44)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .help("No skin - use the tinted plate")
                     }
-                    .buttonStyle(.plain)
-                    .help("No skin - use the tinted plate")
 
                     ForEach(skins) { skin in
                         Button {
+                            guard let index else { return }
                             design.tiles[index].skin = skin.id
                         } label: {
                             AsyncSkinThumbnail(url: skin.url)
@@ -379,7 +406,7 @@ struct LayoutEditor: View {
                                 .overlay {
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                                         .strokeBorder(
-                                            design.tiles[index].skin == skin.id
+                                            index.map { design.tiles[$0].skin == skin.id } == true
                                                 ? Color.accentColor : .clear,
                                             lineWidth: 2
                                         )
@@ -387,11 +414,43 @@ struct LayoutEditor: View {
                         }
                         .buttonStyle(.plain)
                         .help(skin.id)
+                        .contextMenu {
+                            Button("Delete \(skin.id)", role: .destructive) { deleteSkin(skin.id) }
+                        }
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
+
+                Button("Delete all skins", role: .destructive) { deleteAllSkins() }
+                    .buttonStyle(.link)
+                    .font(.caption2)
             }
         }
+    }
+
+    /// Removes a skin's file and every reference to it, so no tile is left
+    /// pointing at artwork that is gone.
+    private func deleteSkin(_ name: String) {
+        skinLibrary?.remove(name)
+        for index in design.tiles.indices {
+            if design.tiles[index].skin == name { design.tiles[index].skin = nil }
+            for position in design.tiles[index].alternates.indices
+            where design.tiles[index].alternates[position].skin == name {
+                design.tiles[index].alternates[position].skin = nil
+            }
+        }
+        for index in skinSets.indices {
+            skinSets[index].entries.removeAll { $0.skin == name }
+        }
+        saveSkinSets()
+        reloadSkins()
+        skinNote = "Deleted \(name)."
+    }
+
+    private func deleteAllSkins() {
+        let count = skins.count
+        for skin in skins { deleteSkin(skin.id) }
+        skinNote = "Deleted \(count) skin\(count == 1 ? "" : "s") from this design."
     }
 
     /// Everything is layered as an overlay on a fixed-size black rectangle
@@ -589,7 +648,7 @@ struct LayoutEditor: View {
             side: side,
             isSelected: selection.contains(tile.id),
             iconImage: tile.skin
-                .flatMap { try? SkinLibrary().url(for: $0) }
+                .flatMap { skinLibrary?.url(for: $0) }
                 .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(side * 3)) }
                 .map { Image(decorative: $0, scale: 1) }
         )
@@ -1084,12 +1143,20 @@ struct LayoutEditor: View {
                         .frame(width: 8, height: 8)
                     Text(AppCatalog.app(id: entry.appID)?.name ?? entry.appID)
                         .font(.caption)
-                    AsyncSkinThumbnail(url: (try? SkinLibrary())?.url(for: entry.skin))
+                    AsyncSkinThumbnail(url: skinLibrary?.url(for: entry.skin))
                         .frame(width: 18, height: 18)
                         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    if set.wrappedValue.defaultAppID == entry.appID {
+                        Text("default")
+                            .font(.system(size: 9).monospaced())
+                            .foregroundStyle(StudioTheme.accent)
+                    }
                     Spacer()
                     Button {
                         set.wrappedValue.entries.removeAll { $0.appID == entry.appID }
+                        if set.wrappedValue.defaultAppID == entry.appID {
+                            set.wrappedValue.defaultAppID = nil
+                        }
                         saveSkinSets()
                     } label: {
                         Image(systemName: "xmark.circle")
@@ -1097,6 +1164,18 @@ struct LayoutEditor: View {
                     .buttonStyle(.plain)
                     .help("Remove \(AppCatalog.app(id: entry.appID)?.name ?? entry.appID) from the set")
                 }
+                .contentShape(Rectangle())
+                // Clicking an entry connects it to whatever is selected: this
+                // icon, and the app it stands for, on that tile.
+                .onTapGesture { use(entry, from: set.wrappedValue) }
+                .contextMenu {
+                    Button("Put on the selected tile") { use(entry, from: set.wrappedValue) }
+                    Button("Make this the set's default") {
+                        set.wrappedValue.defaultAppID = entry.appID
+                        saveSkinSets()
+                    }
+                }
+                .help("Put \(AppCatalog.app(id: entry.appID)?.name ?? entry.appID) on the selected tile")
             }
 
             HStack {
@@ -1145,6 +1224,30 @@ struct LayoutEditor: View {
         .padding(.leading, 4)
     }
 
+    /// Puts one entry of a set on the selected tile: its artwork, and the app
+    /// it stands for.
+    ///
+    /// Both at once, because that is what an entry is - a picture of an app.
+    /// Either half can still be changed on its own afterwards, from the Opens
+    /// picker or the Skins grid.
+    private func use(_ entry: SkinSet.Entry, from set: SkinSet) {
+        guard let singleSelection,
+              let index = design.tiles.firstIndex(where: { $0.id == singleSelection })
+        else {
+            skinNote = "Select a tile first, then click an app in the set to put it there."
+            return
+        }
+        design.tiles[index].appID = entry.appID
+        design.tiles[index].custom = nil
+        design.tiles[index].skin = entry.skin
+        design.tiles[index].icon = nil
+        // The rest of the set becomes what the phone can swap this slot to.
+        design.tiles[index].alternates = set.entries
+            .filter { $0.appID != entry.appID }
+            .map { TileAlternate(appID: $0.appID, skin: $0.skin) }
+        skinNote = "\(AppCatalog.app(id: entry.appID)?.name ?? entry.appID) from \(set.name)."
+    }
+
     /// Picks the picture for a newly added app, imported through the library
     /// so it is keyed, trimmed and squared like every other skin.
     private func addEntry(appID: String, to set: Binding<SkinSet>) {
@@ -1155,7 +1258,8 @@ struct LayoutEditor: View {
         panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
         guard panel.runModal() == .OK, let source = panel.url else { return }
         do {
-            guard let imported = try SkinLibrary().importing([source]).first else {
+            guard let library = skinLibrary,
+                  let imported = try library.importing([source]).first else {
                 skinNote = "Could not read \(source.lastPathComponent) as an image."
                 return
             }

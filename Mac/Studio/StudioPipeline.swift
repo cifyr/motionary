@@ -280,7 +280,10 @@ struct StudioPipeline: Sendable {
 
         // The same artwork the bundling step installs, so the icons baked into
         // the wallpaper line up with the live ones the widget draws over them.
-        let artwork = TileArtwork(iconsFolder: Self.iconsFolder(for: store))
+        let artwork = TileArtwork(
+            iconsFolder: Self.iconsFolder(for: store),
+            skinsFolder: store.skinsFolder(for: design.id)
+        )
         // Keyed on the way into the bake, from the design's own Assets folder,
         // so what ships is what the editor showed.
         let designID = design.id

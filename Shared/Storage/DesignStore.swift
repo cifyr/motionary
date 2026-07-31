@@ -133,6 +133,16 @@ struct DesignStore {
         folder(for: id).appendingPathComponent(name)
     }
 
+    /// Icon artwork, kept with the design that uses it.
+    ///
+    /// It used to live in one library shared by every design, which meant a
+    /// pack imported for one turned up in the picker of all of them and
+    /// deleting it from one deleted it everywhere. A skin belongs to the
+    /// design it was imported for, and travels and dies with it.
+    func skinsFolder(for id: UUID) -> URL {
+        folder(for: id).appendingPathComponent("Skins", isDirectory: true)
+    }
+
     /// Placed decoration lives with the design rather than in the shared skin
     /// library, so exporting or deleting a design takes its pictures with it.
     /// The library stays the right home for artwork reused across designs.
@@ -352,11 +362,10 @@ struct DesignStore {
             try FileManager.default.copyItem(at: from, to: destination.appendingPathComponent(name))
         }
 
-        if FileManager.default.fileExists(atPath: assetsFolder(for: design.id).path) {
-            try FileManager.default.copyItem(
-                at: assetsFolder(for: design.id),
-                to: assetsFolder(for: copy.id)
-            )
+        for folder in [assetsFolder, skinsFolder] {
+            let source = folder(design.id)
+            guard FileManager.default.fileExists(atPath: source.path) else { continue }
+            try FileManager.default.copyItem(at: source, to: folder(copy.id))
         }
 
         try save(copy)
