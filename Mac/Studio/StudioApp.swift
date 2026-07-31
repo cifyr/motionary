@@ -790,9 +790,11 @@ struct StudioView: View {
     }
 
     private func install(_ edited: StudioPipeline.Prepared) {
-        // Building is the step that genuinely needs the project, so this is the
-        // one place the missing folder is worth refusing over - and it says so
-        // rather than doing nothing.
+        // Building is the step that genuinely needs the project folder, so a
+        // missing one is asked for right here - the chooser button lives on
+        // the front page, and this press usually comes from the editor, where
+        // there was nothing to do about the refusal.
+        if projectRoot == nil { chooseProject() }
         guard let projectRoot else {
             failure = String(describing: StudioPipelineError.noProjectFolder)
             return
@@ -844,6 +846,11 @@ private struct EditorWindow: View {
     let onCancel: (StudioPipeline.Prepared) -> Void
     let onBuild: (StudioPipeline.Prepared) -> Void
 
+    @Environment(\.undoManager) private var windowUndoManager
+    @State private var undo = UndoCoordinator()
+    /// What the autosave last wrote, so opening a design does not restamp it.
+    @State private var lastSaved: DesignDocument?
+
     var body: some View {
         VStack(spacing: 0) {
             // Scrolled rather than sized to fit. As a sheet this could demand
@@ -871,6 +878,23 @@ private struct EditorWindow: View {
                     .keyboardShortcut(.defaultAction)
             }
             .padding(16)
+        }
+        .onAppear {
+            lastSaved = prepared.design
+            undo.apply = { prepared.design = $0 }
+            undo.current = { prepared.design }
+        }
+        .onChange(of: prepared.design) { old, _ in
+            undo.designChanged(from: old, undoManager: windowUndoManager)
+        }
+        // Autosave, debounced: the id restarts this on every change, so only a
+        // pause in editing writes. An afternoon's placement should not depend
+        // on remembering to press Done.
+        .task(id: prepared.design) {
+            guard prepared.design != lastSaved else { return }
+            guard (try? await Task.sleep(for: .milliseconds(800))) != nil else { return }
+            try? prepared.store.save(prepared.design)
+            lastSaved = prepared.design
         }
     }
 }
