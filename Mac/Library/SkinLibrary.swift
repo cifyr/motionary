@@ -80,8 +80,12 @@ struct SkinLibrary {
     /// The same keying, trimming, squaring and scaling a file import gets, so
     /// a cell cut out of a sprite sheet ends up indistinguishable from the
     /// same icon imported on its own.
-    func importing(_ image: CGImage, named name: String) throws {
-        let keyed = Self.keyingOut(image) ?? image
+    /// `alreadyKeyed` skips the colour key, for artwork whose backdrop has
+    /// been cleared some other way - a sheet's cell has its surround filled
+    /// out from the border, which keying by colour would undo by taking the
+    /// green out of the icon as well.
+    func importing(_ image: CGImage, named name: String, alreadyKeyed: Bool = false) throws {
+        let keyed = alreadyKeyed ? image : (Self.keyingOut(image) ?? image)
         let trimmed = Self.trimmed(keyed) ?? keyed
         let squared = Self.squared(trimmed) ?? trimmed
         guard let scaled = Self.scaled(squared, to: Self.renderedSide) else {
