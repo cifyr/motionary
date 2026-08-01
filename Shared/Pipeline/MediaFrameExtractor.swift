@@ -75,6 +75,21 @@ struct MediaTransform: Codable, Equatable, Sendable {
 
     var isIdentity: Bool { self == .identity }
 
+    /// The same placement against a screen of a different size.
+    ///
+    /// `scale` is a multiplier on the aspect-fill baseline, so it means the
+    /// same thing at any size and does not move. `offset` is screen pixels, and
+    /// does: rendering a preview at a fifth of the screen with the offset left
+    /// alone puts the clip five times too far from centre - which is a picture
+    /// standing somewhere the built one will not.
+    func scaled(by factor: Double) -> MediaTransform {
+        MediaTransform(
+            scale: scale,
+            offset: CGPoint(x: offset.x * factor, y: offset.y * factor),
+            fillsBackground: fillsBackground
+        )
+    }
+
     /// Fraction of the source that aspect-filling would crop away.
     static func croppedFraction(sourceSize: CGSize, screenSize: CGSize) -> Double {
         guard sourceSize.width > 0, sourceSize.height > 0 else { return 0 }

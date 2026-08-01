@@ -1,4 +1,5 @@
 import CoreGraphics
+import os
 import SwiftUI
 
 /// Positions the clip and places app tiles on it, before anything is built.
@@ -9,6 +10,8 @@ import SwiftUI
 /// the widget's frame drawn on it, because that frame is the only part that
 /// ends up animated - anything outside it is wallpaper.
 struct LayoutEditor: View {
+    private static let logger = Logger(subsystem: "com.caden.Motionary", category: "LayoutEditor")
+
     @Binding var design: DesignDocument
     let model: DeviceModel
     let poster: CGImage?
@@ -58,6 +61,7 @@ struct LayoutEditor: View {
     /// small and a full-size loop is hundreds of megabytes.
     @State private var playbackFrames: [CGImage] = []
     @State private var isPlaying = false
+    @State private var isLoadingPlayback = false
     /// The asset whose key colour is being picked by clicking it.
     @State private var pickingKeyFor: UUID?
     /// Set while an option-drag is making a copy, so the drag moves the copy
@@ -302,6 +306,7 @@ struct LayoutEditor: View {
 
     private func stopPlayback() {
         isPlaying = false
+        isLoadingPlayback = false
         playbackFrames = []
     }
 
@@ -319,16 +324,20 @@ struct LayoutEditor: View {
         let extractor = MediaFrameExtractor(
             url: source,
             screenSize: reduced,
-            transform: design.mediaTransform,
+            // Against the reduced screen, or the offset - which is screen
+            // pixels - places the clip five times too far from centre.
+            transform: design.mediaTransform.scaled(by: scale),
             background: design.backgroundName.flatMap {
                 ImageLoader.load(
                     at: store.backgroundURL(for: design.id, name: $0),
                     maxPixelSize: Int(max(reduced.width, reduced.height))
                 )
             },
-            clipRect: design.backgroundName == nil ? nil : scaled(design.widgetRect, by: scale),
+            clipRect: design.backgroundName == nil ? nil : scaledRect(design.widgetRect, by: scale),
             clipCornerRadius: design.effectiveCornerRadius * scale
         )
+        isLoadingPlayback = true
+        defer { isLoadingPlayback = false }
         do {
             // A variant is its own length, measured the way the build measures
             // it, so what plays here wraps where the built one wraps.
@@ -352,11 +361,17 @@ struct LayoutEditor: View {
             // Named: a play button that does nothing is indistinguishable from
             // a clip that is all one frame.
             isPlaying = false
+            // Logged as well as shown: the note is cleared by the next thing
+            // that happens, and this is the only record of why a clip refused.
+            Self.logger.error("""
+            could not play \(source.lastPathComponent, privacy: .public): \
+            \(String(describing: error), privacy: .public)
+            """)
             skinNote = "Could not play \(source.lastPathComponent): \(error)"
         }
     }
 
-    private func scaled(_ rect: CGRect, by scale: CGFloat) -> CGRect {
+    private func scaledRect(_ rect: CGRect, by scale: CGFloat) -> CGRect {
         CGRect(x: rect.minX * scale, y: rect.minY * scale, width: rect.width * scale, height: rect.height * scale)
     }
 
@@ -1423,6 +1438,7 @@ struct LayoutEditor: View {
                 onDefault: { design.defaultVariantID = nil },
                 onPlay: { togglePlayback(of: nil) },
                 isPlaying: isPlaying && previewedVariantID == nil,
+                isLoading: isLoadingPlayback && previewedVariantID == nil,
                 // A scene is its clip, so the last one cannot go. With others
                 // to take over it can: one of them becomes the design's own.
                 onRemove: design.variants.isEmpty ? nil : { removePrimaryClip() }
@@ -1446,6 +1462,7 @@ struct LayoutEditor: View {
                     onDefault: { design.defaultVariantID = variant.id },
                     onPlay: { togglePlayback(of: variant.id) },
                     isPlaying: isPlaying && previewedVariantID == variant.id,
+                    isLoading: isLoadingPlayback && previewedVariantID == variant.id,
                     onRemove: { removeVariant(variant) }
                 )
             }
@@ -1472,6 +1489,7 @@ struct LayoutEditor: View {
         onDefault: @escaping () -> Void,
         onPlay: @escaping () -> Void,
         isPlaying: Bool,
+        isLoading: Bool,
         onRemove: (() -> Void)?
     ) -> some View {
         HStack(spacing: 6) {
@@ -1484,9 +1502,16 @@ struct LayoutEditor: View {
             .help("Show this clip on the canvas")
 
             Button(action: onPlay) {
-                Image(systemName: isPlaying ? "stop.fill" : "play.fill")
-                    .font(.caption2)
-                    .foregroundStyle(isPlaying ? Color.accentColor : .secondary)
+                // A six-second clip takes a couple of seconds to decode, and
+                // silence for that long is indistinguishable from a play
+                // button that does not work.
+                if isLoading {
+                    ProgressView().controlSize(.mini).scaleEffect(0.6).frame(width: 11, height: 11)
+                } else {
+                    Image(systemName: isPlaying ? "stop.fill" : "play.fill")
+                        .font(.caption2)
+                        .foregroundStyle(isPlaying ? Color.accentColor : .secondary)
+                }
             }
             .buttonStyle(.plain)
             .help(isPlaying ? "Stop" : "Play this clip on the canvas")
