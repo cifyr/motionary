@@ -41,15 +41,24 @@ struct MotionaryApp: App {
     }
 
     @StateObject private var router = ExternalAppRouter()
+    @StateObject private var importer = DesignImporter()
 
     var body: some Scene {
         WindowGroup {
             HomeView()
                 .environmentObject(router)
+                .environmentObject(importer)
                 .preferredColorScheme(.dark)
-                // A tile tapped on the widget opens the app with a launch URL,
-                // and the app forwards it to the destination.
-                .onOpenURL { router.handle($0) }
+                // Two different things come through this one door: a design
+                // file from Files, AirDrop or Mail, and a tile tapped on the
+                // widget, which arrives as a launch URL to forward on.
+                .onOpenURL { url in
+                    if importer.claims(url) {
+                        importer.receive(url)
+                    } else {
+                        router.handle(url)
+                    }
+                }
         }
     }
 }

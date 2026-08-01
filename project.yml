@@ -117,6 +117,10 @@ targets:
       # drift maths here, and the two only disagree after minutes of playing -
       # which is exactly what nobody notices by watching.
       - path: App/LoopingCompositionView.swift
+      # A design arriving from Files or AirDrop is the only thing the phone
+      # takes in from outside, and what it says about a file it could not read
+      # is the whole account anybody gets of why nothing appeared.
+      - path: App/DesignImporter.swift
       - path: Resources
         buildPhase: resources
     settings:
@@ -157,6 +161,11 @@ targets:
       - Shared/SFNT
       - path: Shared/Model/DesignDocument.swift
       - path: Shared/Storage/DesignStore.swift
+      # Packing a design into one file is the studio's job, but the phone has to
+      # be able to open what it packs, so both the archive and the zip container
+      # under it are shared rather than living here.
+      - path: Shared/Storage/DesignArchive.swift
+      - path: Shared/Storage/ZipArchive.swift
       - path: Shared/Model/DeviceGeometry.swift
       - path: Shared/Model/TimerFontSpec.swift
       - path: Shared/Model/WidgetFamilyCompatibility.swift

@@ -8,6 +8,7 @@ import SwiftUI
 /// behind it.
 struct HomeView: View {
     @EnvironmentObject private var router: ExternalAppRouter
+    @EnvironmentObject private var importer: DesignImporter
 
     @State private var saving = false
     @State private var note: String?
@@ -24,8 +25,8 @@ struct HomeView: View {
     @State private var editingTile: PlacedTile?
     @Environment(\.displayScale) private var displayScale
 
-    /// Whatever there is to say right now, from either source.
-    private var message: String? { note ?? router.lastFailure }
+    /// Whatever there is to say right now, from any of the sources.
+    private var message: String? { note ?? router.lastFailure ?? importer.lastMessage }
 
     private var entries: [PrebuiltDesign.Entry] { PrebuiltDesign.entries }
     private var entry: PrebuiltDesign.Entry? { PrebuiltDesign.selected(id: selection) }
@@ -71,9 +72,12 @@ struct HomeView: View {
         // message and becomes part of the picture.
         .task(id: message) {
             guard message != nil else { return }
-            try? await Task.sleep(for: .seconds(4))
+            // An import says more than a failed tap does, so it is given longer
+            // to be read before it goes.
+            try? await Task.sleep(for: .seconds(importer.lastMessage == nil ? 4 : 7))
             note = nil
             router.lastFailure = nil
+            importer.lastMessage = nil
         }
         .ignoresSafeArea()
         .statusBarHidden(entry != nil)

@@ -53,9 +53,9 @@ enum HeadlessBuild {
 
     /// Exports the newest design and imports it back, printing what survived.
     ///
-    /// `DesignArchive` shells out to `ditto`, and `Process` does not exist on
-    /// iOS - so the unit suite, which runs on the simulator, cannot cover this.
-    /// A real round trip can, and does.
+    /// The container is Swift now rather than `ditto`, so the unit suite covers
+    /// the round trip on made-up designs. This is the one that runs it over a
+    /// real design with a real clip in the store it was authored in.
     static func roundTrip() -> Never {
         guard let store = try? StudioPipeline.openStore(),
               let design = StudioPipeline.saved().first
@@ -530,11 +530,16 @@ struct StudioView: View {
         saved = StudioPipeline.saved()
     }
 
+    /// The extension the phone claims. A design is a zip inside, but a file
+    /// named `.zip` is one the phone cannot be offered without Motionary
+    /// volunteering to open every zip on it, so the wrapper gets its own name.
+    private static let designType = UTType(filenameExtension: "motionary", conformingTo: .zip) ?? .zip
+
     private func exportDesign(_ design: DesignDocument) {
         guard let store = try? StudioPipeline.openStore() else { return }
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.zip]
-        panel.nameFieldStringValue = "\(design.name).motionary.zip"
+        panel.allowedContentTypes = [Self.designType]
+        panel.nameFieldStringValue = "\(design.name).motionary"
         panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
         guard panel.runModal() == .OK, let target = panel.url else { return }
         do {
@@ -549,7 +554,9 @@ struct StudioView: View {
     private func importDesign() {
         guard let store = try? StudioPipeline.openStore() else { return }
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.zip]
+        // The old extension too, so designs exported before the rename still
+        // open rather than being greyed out with nothing said about why.
+        panel.allowedContentTypes = [Self.designType, .zip]
         panel.allowsMultipleSelection = false
         panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
         guard panel.runModal() == .OK, let source = panel.url else { return }

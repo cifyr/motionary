@@ -1,14 +1,11 @@
 import Foundation
 
 enum DesignArchiveError: Error, CustomStringConvertible {
-    case toolFailed(tool: String, status: Int32, output: String)
     case noDesignInside(path: String)
     case unsupportedVersion(Int)
 
     var description: String {
         switch self {
-        case .toolFailed(let tool, let status, let output):
-            return "\(tool) exited \(status): \(output.split(separator: "\n").suffix(4).joined(separator: " "))"
         case .noDesignInside(let path):
             return "\(path) has no design.json inside it; it may not be a Motionary design"
         case .unsupportedVersion(let version):
@@ -27,6 +24,11 @@ enum DesignArchiveError: Error, CustomStringConvertible {
 /// Skins matter especially, because they live in a library outside any design -
 /// so a package without them would import as a layout with its icons missing
 /// and nothing to say why.
+///
+/// This lived under `Mac/` while `ditto` did the packing, because `Process` is
+/// not an iOS API and half of this file could not compile there. The container
+/// is `ZipArchive` now, so the whole of it moves to `Shared/` rather than the
+/// phone growing a second unarchiver that has to agree with this one.
 struct DesignArchive {
     /// Bumped if the layout inside the package ever changes shape.
     static let formatVersion = 1
@@ -35,25 +37,6 @@ struct DesignArchive {
         var version: Int
         var designID: UUID
         var skins: [String]
-    }
-
-    private static func run(_ launchPath: String, _ arguments: [String]) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: launchPath)
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        try process.run()
-        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw DesignArchiveError.toolFailed(
-                tool: (arguments.first ?? launchPath),
-                status: process.terminationStatus,
-                output: output
-            )
-        }
     }
 
     private static func staging() throws -> URL {
@@ -93,7 +76,8 @@ struct DesignArchive {
         }
 
         var packaged: [String] = []
-        if let library = try? SkinLibrary(root: store.skinsFolder(for: design.id)) {
+        let library = store.skinsFolder(for: design.id)
+        if manager.fileExists(atPath: library.path) {
             let skinsFolder = stage.appendingPathComponent("Skins", isDirectory: true)
             try manager.createDirectory(at: skinsFolder, withIntermediateDirectories: true)
             // Alternates' skins as well as the authored tiles': a slot's
@@ -101,7 +85,7 @@ struct DesignArchive {
             let used = design.tiles.compactMap(\.skin)
                 + design.tiles.flatMap { $0.alternates.compactMap(\.skin) }
             for name in Set(used) {
-                let skin = library.url(for: name)
+                let skin = library.appendingPathComponent(name)
                 guard manager.fileExists(atPath: skin.path) else { continue }
                 try manager.copyItem(at: skin, to: skinsFolder.appendingPathComponent(name))
                 packaged.append(name)
@@ -114,9 +98,7 @@ struct DesignArchive {
         if manager.fileExists(atPath: destination.path) {
             try manager.removeItem(at: destination)
         }
-        // `ditto` rather than `zip`, because it writes an archive Finder and
-        // Archive Utility both open without complaint.
-        try run("/usr/bin/ditto", ["-c", "-k", "--sequesterRsrc", stage.path, destination.path])
+        try ZipArchive.write(directory: stage, to: destination)
     }
 
     // MARK: - Import
@@ -131,7 +113,7 @@ struct DesignArchive {
         let stage = try staging()
         defer { try? manager.removeItem(at: stage) }
 
-        try run("/usr/bin/ditto", ["-x", "-k", archive.path, stage.path])
+        try ZipArchive.extract(archive, into: stage)
 
         guard let designURL = try locateDesign(in: stage) else {
             throw DesignArchiveError.noDesignInside(path: archive.lastPathComponent)
@@ -182,11 +164,13 @@ struct DesignArchive {
             }
         }
 
-        if let library = try? SkinLibrary(root: store.skinsFolder(for: design.id)) {
-            let skinsFolder = folder.appendingPathComponent("Skins", isDirectory: true)
-            let skins = (try? manager.contentsOfDirectory(at: skinsFolder, includingPropertiesForKeys: nil)) ?? []
+        let skinsFolder = folder.appendingPathComponent("Skins", isDirectory: true)
+        let skins = (try? manager.contentsOfDirectory(at: skinsFolder, includingPropertiesForKeys: nil)) ?? []
+        if !skins.isEmpty {
+            let library = store.skinsFolder(for: design.id)
+            try manager.createDirectory(at: library, withIntermediateDirectories: true)
             for skin in skins where skin.pathExtension == "png" {
-                let destination = library.url(for: skin.lastPathComponent)
+                let destination = library.appendingPathComponent(skin.lastPathComponent)
                 guard !manager.fileExists(atPath: destination.path) else { continue }
                 try manager.copyItem(at: skin, to: destination)
             }
@@ -196,8 +180,8 @@ struct DesignArchive {
         return design
     }
 
-    /// `ditto` may or may not nest the contents in a folder depending on how
-    /// the archive was made, so the design is searched for rather than assumed.
+    /// An archive may or may not nest its contents in a folder depending on
+    /// what made it, so the design is searched for rather than assumed.
     private static func locateDesign(in root: URL) throws -> URL? {
         let manager = FileManager.default
         let direct = root.appendingPathComponent("design.json")

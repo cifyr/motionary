@@ -101,6 +101,27 @@ enum Gzip {
         return inflated
     }
 
+    /// Raw DEFLATE, without the gzip header and trailer around it.
+    ///
+    /// Exactly what a zip entry stores, which is why one implementation serves
+    /// both: Apple's `COMPRESSION_ZLIB` is RFC1951 with no zlib wrapper.
+    static func deflate(_ input: Data) throws -> Data {
+        guard !input.isEmpty else { return Data([0x03, 0x00]) }
+        let output = try transform(input, operation: COMPRESSION_STREAM_ENCODE) {
+            GzipError.compressionFailed(inputBytes: input.count)
+        }
+        guard !output.isEmpty else {
+            throw GzipError.compressionFailed(inputBytes: input.count)
+        }
+        return output
+    }
+
+    static func inflate(_ input: Data) throws -> Data {
+        try transform(input, operation: COMPRESSION_STREAM_DECODE) {
+            GzipError.decompressionFailed(inputBytes: input.count)
+        }
+    }
+
     private static func header() -> Data {
         // No mtime, no extra fields: keeps generated fonts byte-reproducible so
         // an unchanged design regenerates to an identical file.

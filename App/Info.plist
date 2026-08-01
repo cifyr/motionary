@@ -33,6 +33,27 @@
     <key>CFBundleURLName</key><string>com.caden.Motionary.launch</string>
     <key>CFBundleURLSchemes</key><array><string>motionary</string></array>
   </dict></array>
+  <!-- A design travels as a zip, but claiming public.zip-archive outright would
+       make Motionary an opener for every zip on the phone, so it gets an
+       extension and a type of its own that conforms to one. Both keys are
+       needed: the declaration alone names the type and nothing opens it. -->
+  <key>UTExportedTypeDeclarations</key>
+  <array><dict>
+    <key>UTTypeIdentifier</key><string>com.caden.motionary.design</string>
+    <key>UTTypeDescription</key><string>Motionary Design</string>
+    <key>UTTypeConformsTo</key><array><string>public.zip-archive</string></array>
+    <key>UTTypeTagSpecification</key>
+    <dict>
+      <key>public.filename-extension</key><array><string>motionary</string></array>
+    </dict>
+  </dict></array>
+  <key>CFBundleDocumentTypes</key>
+  <array><dict>
+    <key>CFBundleTypeName</key><string>Motionary Design</string>
+    <key>CFBundleTypeRole</key><string>Viewer</string>
+    <key>LSHandlerRank</key><string>Owner</string>
+    <key>LSItemContentTypes</key><array><string>com.caden.motionary.design</string></array>
+  </dict></array>
   <key>UIAppFonts</key>
   <array>
     <string>Custom-Regular.otf</string>
