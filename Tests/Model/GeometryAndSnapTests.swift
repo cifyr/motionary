@@ -438,30 +438,56 @@ final class GeometryAndSnapTests: XCTestCase {
         XCTAssertNil(LaunchLink.appID(from: URL(string: "https://example.com/launch/spotify")!))
     }
 
-    /// Apple does not publish a URL scheme for every one of its apps, so
-    /// "everything is launchable" was never true - it had simply never been
-    /// tested against an entry that admitted it. The rule that does hold is
-    /// narrower: an entry is launchable unless it is one of the few known not
-    /// to be, and a new entry arriving with no scheme still fails here.
-    /// Weather and Calculator joined Clock when an icon pack needed them
-    /// drawn: Apple publishes no scheme for any of the three, and claiming one
-    /// turns a tap into "could not be opened, it may not be installed", which
-    /// sends you looking for a problem on the phone.
-    private static let knownUnlaunchable: Set<String> = ["clock", "weather", "calculator"]
-
+    /// Every entry has to be able to open something, which was not true until
+    /// the routes were researched one by one: Clock, Weather, Calculator,
+    /// Safari and Claude sat in the list as decoration, and a tap on one did
+    /// nothing at all.
     func testCatalogEntriesAreUniqueAndLaunchable() {
         let ids = AppCatalog.all.map(\.id)
         XCTAssertEqual(Set(ids).count, ids.count, "catalog ids must be unique")
-        for app in AppCatalog.all where !Self.knownUnlaunchable.contains(app.id) {
+        for app in AppCatalog.all {
             XCTAssertTrue(app.canLaunch, "\(app.name) has no launch route")
         }
     }
 
-    func testUnlaunchableEntriesAdmitIt() {
-        for id in Self.knownUnlaunchable {
+    /// Apple publishes no list of the schemes its own apps answer, and the
+    /// community ones disagree and go stale - `calc://` is documented
+    /// everywhere and stopped working around iOS 16. Where the sources
+    /// disagree the entry carries every spelling, and the router walks them.
+    func testTheUndocumentedAppleAppsCarryMoreThanOneRoute() {
+        for id in ["clock", "weather", "calculator"] {
             let app = AppCatalog.app(id: id)
-            XCTAssertNotNil(app, "\(id) is listed as unlaunchable but is not in the catalogue")
-            XCTAssertEqual(app?.canLaunch, false, "\(id) gained a launch route; take it off the list")
+            XCTAssertNotNil(app, "\(id) is not in the catalogue")
+            XCTAssertGreaterThan(
+                app?.launchCandidates.count ?? 0, 1,
+                "\(id) has one route, and Apple documents none of them"
+            )
+        }
+    }
+
+    /// The web address opens something whatever is installed, so a candidate
+    /// after it would never be tried.
+    func testTheWebAddressComesLast() {
+        for app in AppCatalog.all {
+            guard let web = app.webFallback else { continue }
+            XCTAssertEqual(
+                app.launchCandidates.last?.absoluteString, web,
+                "\(app.name) has a route the web address would swallow"
+            )
+        }
+    }
+
+    /// A scheme that cannot be turned into a URL is a candidate that silently
+    /// disappears, which is how an app comes to have fewer routes than it looks
+    /// like it has.
+    func testEveryWrittenRouteSurvivesBecomingAURL() {
+        for app in AppCatalog.all {
+            let written = ([app.scheme] + app.alternates.map { Optional($0) } + [app.webFallback])
+                .compactMap { $0 }
+            XCTAssertEqual(
+                app.launchCandidates.count, written.count,
+                "\(app.name) has a route that is not a valid URL"
+            )
         }
     }
 }

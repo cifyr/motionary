@@ -201,10 +201,10 @@ final class SpriteSheetTests: XCTestCase {
                      "Outlook", "Microsoft Teams", "Zoom", "Amazon"] {
             XCTAssertNotNil(SpriteSheet.app(named: name), "\(name) is not in the catalogue")
         }
-        // Apple publishes no scheme for these two, so they draw but cannot be
-        // opened - claimed otherwise, a tap would report a phantom failure.
-        XCTAssertEqual(SpriteSheet.app(named: "Weather")?.canLaunch, false)
-        XCTAssertEqual(SpriteSheet.app(named: "Calculator")?.canLaunch, false)
+        // These two drew but could not be opened until their routes were
+        // researched; Apple documents none of them, so they carry several.
+        XCTAssertEqual(SpriteSheet.app(named: "Weather")?.canLaunch, true)
+        XCTAssertEqual(SpriteSheet.app(named: "Calculator")?.canLaunch, true)
         XCTAssertEqual(SpriteSheet.app(named: "Zoom")?.canLaunch, true)
     }
 
