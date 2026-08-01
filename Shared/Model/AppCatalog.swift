@@ -13,6 +13,15 @@ struct CatalogApp: Identifiable, Equatable, Sendable {
     let scheme: String?
     /// Used when the app is not installed, or when no scheme exists.
     let webFallback: String?
+    /// Schemes to try when the first one does not open.
+    ///
+    /// Apple publishes no list of the schemes its own apps answer, and the
+    /// community ones disagree and go stale between releases - `calc://` is
+    /// documented everywhere and stopped working around iOS 16. The router
+    /// tries every candidate in turn and only reports failure when all of them
+    /// refuse, so a second spelling costs nothing and is the difference
+    /// between a tile that works and one that does nothing.
+    var alternates: [String] = []
     let category: Category
 
     enum Category: String, CaseIterable, Identifiable, Sendable {
@@ -27,7 +36,11 @@ struct CatalogApp: Identifiable, Equatable, Sendable {
     }
 
     var launchCandidates: [URL] {
-        [scheme, webFallback].compactMap { $0 }.compactMap(URL.init(string:))
+        // The web address last: it always opens something, so anything after
+        // it would never be reached.
+        ([scheme] + alternates.map { Optional($0) } + [webFallback])
+            .compactMap { $0 }
+            .compactMap(URL.init(string:))
     }
 
     /// Whether tapping this tile can open anything. Some Apple apps expose no
@@ -44,43 +57,54 @@ enum AppCatalog {
                    scheme: "app-settings:", webFallback: nil, category: .system),
         CatalogApp(id: "calendar", name: "Calendar", symbol: "calendar", tint: .red,
                    scheme: "calshow://", webFallback: nil, category: .system),
-        // No scheme, deliberately. Apple publishes none for Clock, and
-        // clock-alarm:// - which this used - is not one of theirs and does not
-        // open on current iOS. Claiming a route that cannot work turns a tap
-        // into "Clock could not be opened, it may not be installed", which
-        // sends you looking for a problem on the phone.
+        // Four spellings, because Apple publishes none of them and which one
+        // answers has moved between releases. This carried no scheme at all
+        // for a while, on the grounds that claiming a route that cannot work
+        // turns a tap into "Clock could not be opened" - but the router tries
+        // every candidate and only says that once all of them have refused, so
+        // listing four is strictly better than listing none.
         CatalogApp(id: "clock", name: "Clock", symbol: "clock.fill", tint: .orange,
-                   scheme: nil, webFallback: nil, category: .system),
+                   scheme: "clock-alarm://", webFallback: nil,
+                   alternates: ["clock-worldclock://", "clock-timer://", "clock-sleep-alarm://"], category: .system),
         CatalogApp(id: "camera", name: "Camera", symbol: "camera.fill", tint: .gray,
                    scheme: "camera://", webFallback: nil, category: .system),
         CatalogApp(id: "photos", name: "Photos", symbol: "photo.on.rectangle.angled", tint: .pink,
                    scheme: "photos-redirect://", webFallback: nil, category: .system),
         CatalogApp(id: "mail", name: "Mail", symbol: "envelope.fill", tint: .blue,
-                   scheme: "message://", webFallback: nil, category: .system),
+                   scheme: "message://", webFallback: nil,
+                   alternates: ["mailto:"], category: .system),
         CatalogApp(id: "messages", name: "Messages", symbol: "message.fill", tint: .green,
-                   scheme: "sms:", webFallback: nil, category: .system),
+                   scheme: "messages://", webFallback: nil,
+                   alternates: ["sms:"], category: .system),
         CatalogApp(id: "phone", name: "Phone", symbol: "phone.fill", tint: .green,
-                   scheme: "tel:", webFallback: nil, category: .system),
+                   scheme: "mobilephone://", webFallback: nil,
+                   alternates: ["tel:"], category: .system),
         CatalogApp(id: "facetime", name: "FaceTime", symbol: "video.fill", tint: .green,
-                   scheme: "facetime://", webFallback: nil, category: .system),
+                   scheme: "facetime://", webFallback: nil,
+                   alternates: ["facetime-prompt://"], category: .system),
         CatalogApp(id: "notes", name: "Notes", symbol: "note.text", tint: .yellow,
                    scheme: "mobilenotes://", webFallback: nil, category: .system),
         CatalogApp(id: "reminders", name: "Reminders", symbol: "checklist", tint: .orange,
-                   scheme: "x-apple-reminderkit://", webFallback: nil, category: .system),
+                   scheme: "x-apple-reminderkit://", webFallback: nil,
+                   alternates: ["x-apple-reminder://"], category: .system),
         CatalogApp(id: "health", name: "Health", symbol: "heart.fill", tint: .pink,
                    scheme: "x-apple-health://", webFallback: nil, category: .system),
         CatalogApp(id: "wallet", name: "Wallet", symbol: "creditcard.fill", tint: .black,
                    scheme: "shoebox://", webFallback: nil, category: .system),
         CatalogApp(id: "appstore", name: "App Store", symbol: "bag.fill", tint: .blue,
-                   scheme: "itms-apps://", webFallback: nil, category: .system),
+                   scheme: "itms-apps://", webFallback: "https://apps.apple.com/",
+                   alternates: ["itms-ui://"], category: .system),
         CatalogApp(id: "applemusic", name: "Apple Music", symbol: "music.note", tint: .red,
-                   scheme: "music://", webFallback: nil, category: .media),
+                   scheme: "music://", webFallback: "https://music.apple.com/",
+                   alternates: ["musics://"], category: .media),
         CatalogApp(id: "podcasts", name: "Podcasts", symbol: "mic.fill", tint: .purple,
-                   scheme: "podcasts://", webFallback: nil, category: .media),
+                   scheme: "podcasts://", webFallback: nil,
+                   alternates: ["pcast://"], category: .media),
         CatalogApp(id: "maps", name: "Apple Maps", symbol: "map.fill", tint: .green,
-                   scheme: "maps://", webFallback: nil, category: .travel),
+                   scheme: "maps://", webFallback: "https://maps.apple.com/",
+                   alternates: ["map://"], category: .travel),
         CatalogApp(id: "safari", name: "Safari", symbol: "safari.fill", tint: .blue,
-                   scheme: nil, webFallback: "https://www.apple.com/", category: .productivity),
+                   scheme: "x-web-search://", webFallback: "https://www.apple.com/", category: .productivity),
 
         // Third-party schemes. These are the public routes each vendor
         // documents or has registered for years; a web fallback covers the
@@ -88,7 +112,8 @@ enum AppCatalog {
         CatalogApp(id: "spotify", name: "Spotify", symbol: "waveform", tint: .green,
                    scheme: "spotify://", webFallback: "https://open.spotify.com/", category: .media),
         CatalogApp(id: "youtube", name: "YouTube", symbol: "play.rectangle.fill", tint: .red,
-                   scheme: "youtube://", webFallback: "https://www.youtube.com/", category: .media),
+                   scheme: "youtube://", webFallback: "https://www.youtube.com/",
+                   alternates: ["vnd.youtube://"], category: .media),
         CatalogApp(id: "netflix", name: "Netflix", symbol: "tv.fill", tint: .red,
                    scheme: "nflx://", webFallback: "https://www.netflix.com/", category: .media),
         CatalogApp(id: "twitch", name: "Twitch", symbol: "gamecontroller.fill", tint: .purple,
@@ -98,13 +123,15 @@ enum AppCatalog {
         CatalogApp(id: "instagram", name: "Instagram", symbol: "camera.circle.fill", tint: .purple,
                    scheme: "instagram://", webFallback: "https://www.instagram.com/", category: .social),
         CatalogApp(id: "tiktok", name: "TikTok", symbol: "music.note.tv.fill", tint: .black,
-                   scheme: "snssdk1233://", webFallback: "https://www.tiktok.com/", category: .social),
+                   scheme: "snssdk1233://", webFallback: "https://www.tiktok.com/",
+                   alternates: ["tiktok://", "musically://"], category: .social),
         CatalogApp(id: "x", name: "X", symbol: "at", tint: .black,
                    scheme: "twitter://", webFallback: "https://x.com/", category: .social),
         CatalogApp(id: "reddit", name: "Reddit", symbol: "bubble.left.and.bubble.right.fill", tint: .orange,
                    scheme: "reddit://", webFallback: "https://www.reddit.com/", category: .social),
         CatalogApp(id: "discord", name: "Discord", symbol: "bubble.left.fill", tint: .indigo,
-                   scheme: "discord://", webFallback: "https://discord.com/app", category: .social),
+                   scheme: "discord://", webFallback: "https://discord.com/app",
+                   alternates: ["com.hammerandchisel.discord://"], category: .social),
         CatalogApp(id: "snapchat", name: "Snapchat", symbol: "bolt.fill", tint: .yellow,
                    scheme: "snapchat://", webFallback: "https://www.snapchat.com/", category: .social),
         CatalogApp(id: "whatsapp", name: "WhatsApp", symbol: "phone.bubble.fill", tint: .green,
@@ -130,9 +157,10 @@ enum AppCatalog {
         CatalogApp(id: "chatgpt", name: "ChatGPT", symbol: "sparkles", tint: .teal,
                    scheme: "chatgpt://", webFallback: "https://chatgpt.com/", category: .productivity),
         CatalogApp(id: "claude", name: "Claude", symbol: "asterisk", tint: .orange,
-                   scheme: nil, webFallback: "https://claude.ai/", category: .productivity),
+                   scheme: "claude://", webFallback: "https://claude.ai/", category: .productivity),
         CatalogApp(id: "gmaps", name: "Google Maps", symbol: "location.fill", tint: .green,
-                   scheme: "comgooglemaps://", webFallback: "https://maps.google.com/", category: .travel),
+                   scheme: "comgooglemaps://", webFallback: "https://maps.google.com/",
+                   alternates: ["googlemaps://"], category: .travel),
         CatalogApp(id: "uber", name: "Uber", symbol: "car.fill", tint: .black,
                    scheme: "uber://", webFallback: "https://m.uber.com/", category: .travel),
         CatalogApp(id: "lyft", name: "Lyft", symbol: "car.circle.fill", tint: .pink,
@@ -148,7 +176,8 @@ enum AppCatalog {
         CatalogApp(id: "minecraft", name: "Minecraft", symbol: "square.grid.3x3.fill", tint: .green,
                    scheme: "minecraft://", webFallback: "https://www.minecraft.net/", category: .games),
         CatalogApp(id: "steam", name: "Steam", symbol: "gamecontroller", tint: .indigo,
-                   scheme: "steam://", webFallback: "https://store.steampowered.com/", category: .games),
+                   scheme: "steam://", webFallback: "https://store.steampowered.com/",
+                   alternates: ["steammobile://"], category: .games),
 
         // The rest of a typical Home Screen. Added because an icon pack draws
         // these and a tile that cannot name its app cannot launch it - the
@@ -159,9 +188,11 @@ enum AppCatalog {
         // into "could not be opened", which sends you looking for a problem on
         // the phone.
         CatalogApp(id: "weather", name: "Weather", symbol: "cloud.sun.fill", tint: .blue,
-                   scheme: nil, webFallback: nil, category: .system),
+                   scheme: "weather://", webFallback: "https://weather.apple.com/",
+                   alternates: ["x-apple-weather://"], category: .system),
         CatalogApp(id: "calculator", name: "Calculator", symbol: "plusminus", tint: .gray,
-                   scheme: nil, webFallback: nil, category: .system),
+                   scheme: "calc://", webFallback: nil,
+                   alternates: ["calculator://", "calculator-app://"], category: .system),
         CatalogApp(id: "messenger", name: "Messenger", symbol: "message.circle.fill", tint: .blue,
                    scheme: "fb-messenger://", webFallback: "https://www.messenger.com/", category: .social),
         CatalogApp(id: "telegram", name: "Telegram", symbol: "paperplane.fill", tint: .cyan,
