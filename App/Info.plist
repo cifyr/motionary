@@ -28,6 +28,8 @@
   <string>Motionary saves the generated Home Screen wallpaper to your photo library so you can set it as your background.</string>
   <key>NSPhotoLibraryUsageDescription</key>
   <string>Motionary reads the video you pick so it can turn it into an animated widget.</string>
+  <key>NSCalendarsUsageDescription</key>
+  <string>Motionary reads your next event so a widget can show it. It is only read, never changed.</string>
   <key>CFBundleURLTypes</key>
   <array><dict>
     <key>CFBundleURLName</key><string>com.caden.Motionary.launch</string>
