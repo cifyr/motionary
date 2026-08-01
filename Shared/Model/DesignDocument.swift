@@ -432,6 +432,8 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     var tiles: [PlacedTile] = []
     /// Decoration placed on the composition, drawn beneath the tiles.
     var assets: [PlacedAsset] = []
+    /// Live text placed on the composition, drawn over the assets.
+    var readouts: [PlacedReadout] = []
     /// Alternative clips for the animated part. The design's own clip is one of
     /// them; the phone chooses among all of them after install.
     var variants: [ClipVariant] = []
@@ -665,6 +667,13 @@ struct BuildManifest: Codable, Equatable, Sendable {
     var assets: [PlacedAsset]?
 
     var placedAssets: [PlacedAsset] { assets ?? [] }
+
+    /// Live text placed on the design. Optional for the same decoding reason
+    /// `tiles` is: a manifest written before readouts existed has no key here,
+    /// and a non-optional would fail the whole decode rather than default.
+    var readouts: [PlacedReadout]?
+
+    var placedReadouts: [PlacedReadout] { readouts ?? [] }
 
     /// What one built variant amounts to at render time. Everything else -
     /// crop, lanes, frame rate, tiles - is the design's, shared.

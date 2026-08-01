@@ -26,6 +26,11 @@ struct CompositionView<Tile: View>: View {
     /// font lab, which draws no decoration, does not have to say so.
     var assets: [PlacedAsset] = []
     var assetImage: (PlacedAsset) -> Image? = { _ in nil }
+    /// Live text, drawn over the pictures and under the tiles: a readout is
+    /// decoration that happens to change, and a tile still has to take its own
+    /// taps whatever is written near it.
+    var readouts: [PlacedReadout] = []
+    var readoutValues: ReadoutValues = .empty
     @ViewBuilder let tileContent: (PlacedTile, CGFloat) -> Tile
 
     var body: some View {
@@ -91,6 +96,19 @@ struct CompositionView<Tile: View>: View {
                                 y: originY + asset.rect.minY * scale
                             )
                     }
+                }
+
+                ForEach(readouts.sorted { $0.zIndex < $1.zIndex }) { readout in
+                    ReadoutView(readout: readout, scale: scale, values: readoutValues)
+                        // Positioned by its centre, not its corner: the text is
+                        // as wide as the value comes out, so a corner would
+                        // slide the whole readout every time the value's width
+                        // changed - "9" to "10" would move it.
+                        .frame(width: readout.rect.width * scale, alignment: .center)
+                        .offset(
+                            x: originX + readout.rect.minX * scale,
+                            y: originY + readout.rect.minY * scale
+                        )
                 }
 
                 ForEach(tiles) { tile in
