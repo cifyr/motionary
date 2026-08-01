@@ -21,6 +21,9 @@ struct CompositionView<Tile: View>: View {
     /// widget black.
     var wallpaperRect: CGRect?
     let isAnimated: Bool
+    /// Where a tap that misses every tile goes. Nil leaves the gaps dead,
+    /// which is what a Home Screen does and so what this does by default.
+    var background: URL?
     /// Placed pictures, drawn over the animation and under the tiles - the
     /// same stacking the editor and the wallpaper bake use. Defaulted so the
     /// font lab, which draws no decoration, does not have to say so.
@@ -47,6 +50,16 @@ struct CompositionView<Tile: View>: View {
 
             ZStack(alignment: .topLeading) {
                 Color.black
+
+                if let background {
+                    // Beneath the wallpaper's own frame but above nothing else,
+                    // and sized to the whole view: a Link cannot be an overlay
+                    // here or it would take the taps the tiles need.
+                    Link(destination: background) {
+                        Color.clear.frame(width: geometry.size.width, height: geometry.size.height)
+                    }
+                    .accessibilityLabel("Open \(background.host ?? background.absoluteString)")
+                }
 
                 if let wallpaper {
                     // Placed by the rect it actually covers, so a full-screen
