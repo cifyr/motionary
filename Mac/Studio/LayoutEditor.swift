@@ -444,125 +444,81 @@ struct LayoutEditor: View {
         skins = skinLibrary?.all() ?? []
     }
 
-    private func importSkins() {
+    /// One tile's own artwork, imported for it alone.
+    ///
+    /// There used to be a library browser here: every skin in the design, laid
+    /// out in a grid, with a tile selected to receive one. An iconset carries
+    /// both the artwork and the app each piece opens, so that grid was the long
+    /// way round to what a set does in one action. What it was still good for
+    /// is the single odd icon a set has no entry for, and that is what this is.
+    @ViewBuilder
+    private func customIconRow(index: Int) -> some View {
+        let tile = design.tiles[index]
+        HStack(spacing: 6) {
+            Text("Icon").font(.caption).foregroundStyle(.secondary)
+            if let skin = tile.skin {
+                AsyncSkinThumbnail(url: skinLibrary?.url(for: skin))
+                    .frame(width: 28, height: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .help(skin)
+                Text(fromSet(skin) ?? "its own")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                Button("Clear") { clearCustomIcon(at: index) }
+                    .buttonStyle(.studioCompact)
+            } else {
+                Text("the catalogue plate")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Custom...") { importCustomIcon(at: index) }
+                    .buttonStyle(.studioCompact)
+            }
+        }
+    }
+
+    /// The set an icon came from, so the inspector can say where it got it
+    /// rather than implying every icon was picked by hand.
+    private func fromSet(_ skin: String) -> String? {
+        skinSets.first { $0.entries.contains { $0.skin == skin } }?.name
+    }
+
+    /// Puts one imported picture on one tile.
+    private func importCustomIcon(at index: Int) {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.png, .jpeg, .image]
-        panel.allowsMultipleSelection = true
+        panel.allowsMultipleSelection = false
         panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        guard panel.runModal() == .OK, let source = panel.url else { return }
         do {
-            // Counted and reported. Swallowing this with `try?` made a failed
-            // import look exactly like a successful one, which is how an
-            // import that worked came to look like an import that did nothing.
+            // Reported rather than swallowed: an import that failed silently
+            // looks exactly like one that worked, which is how a working
+            // import once came to look broken.
             guard let library = skinLibrary else { return }
-            let added = try library.importing(panel.urls)
+            let added = try library.importing([source])
             reloadSkins()
-            let failed = panel.urls.count - added.count
-            skinNote = failed == 0
-                ? "Added \(added.count) skin\(added.count == 1 ? "" : "s")."
-                : "Added \(added.count), could not read \(failed)."
+            guard let name = added.first else {
+                skinNote = "Could not read \(source.lastPathComponent)."
+                return
+            }
+            design.tiles[index].skin = name
+            skinNote = nil
         } catch {
             skinNote = "Import failed: \(error.localizedDescription)"
         }
     }
 
-    /// The library, always reachable.
-    ///
-    /// It used to live inside the selected tile's section, which meant there was
-    /// nowhere to import a skin until a tile happened to be selected - and no
-    /// way to tell that was why nothing appeared to happen.
-    private var skinPicker: some View {
-        let index = singleSelection.flatMap { id in design.tiles.firstIndex { $0.id == id } }
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                StudioTheme.eyebrow("Skins").foregroundStyle(StudioTheme.textTertiary)
-                Spacer()
-                Button("Import...") { importSkins() }.buttonStyle(.link)
-            }
-            if let skinNote {
-                Text(skinNote).font(.caption2).foregroundStyle(.secondary)
-            }
-            if skins.isEmpty {
-                Text("No skins yet. Import icon artwork - the backdrop around it is removed automatically. Skins belong to this design.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                if index == nil {
-                    Text("\(skins.count) skin\(skins.count == 1 ? "" : "s") in this design. Select a tile to put one on it; right-click a skin to delete it.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                LazyVGrid(columns: Array(repeating: GridItem(.fixed(44), spacing: 6), count: 4), spacing: 6) {
-                    if let index {
-                        Button {
-                            design.tiles[index].skin = nil
-                        } label: {
-                            Image(systemName: "nosign")
-                                .frame(width: 44, height: 44)
-                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-                        }
-                        .buttonStyle(.plain)
-                        .help("No skin - use the tinted plate")
-                    }
-
-                    ForEach(skins) { skin in
-                        Button {
-                            guard let index else { return }
-                            design.tiles[index].skin = skin.id
-                        } label: {
-                            AsyncSkinThumbnail(url: skin.url)
-                                .frame(width: 44, height: 44)
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .strokeBorder(
-                                            index.map { design.tiles[$0].skin == skin.id } == true
-                                                ? Color.accentColor : .clear,
-                                            lineWidth: 2
-                                        )
-                                }
-                        }
-                        .buttonStyle(.plain)
-                        .help(skin.id)
-                        .contextMenu {
-                            Button("Delete \(skin.id)", role: .destructive) { deleteSkin(skin.id) }
-                        }
-                    }
-                }
-                .fixedSize(horizontal: false, vertical: true)
-
-                Button("Delete all skins", role: .destructive) { deleteAllSkins() }
-                    .buttonStyle(.link)
-                    .font(.caption2)
-            }
+    /// Takes the icon off a tile, and the file with it when it was that tile's
+    /// alone - there is no browser to find an orphan in any more.
+    private func clearCustomIcon(at index: Int) {
+        guard let name = design.tiles[index].skin else { return }
+        design.tiles[index].skin = nil
+        if SkinReferences.isUnused(name, tiles: design.tiles, sets: skinSets) {
+            skinLibrary?.remove(name)
+            reloadSkins()
         }
-    }
-
-    /// Removes a skin's file and every reference to it, so no tile is left
-    /// pointing at artwork that is gone.
-    private func deleteSkin(_ name: String) {
-        skinLibrary?.remove(name)
-        for index in design.tiles.indices {
-            if design.tiles[index].skin == name { design.tiles[index].skin = nil }
-            for position in design.tiles[index].alternates.indices
-            where design.tiles[index].alternates[position].skin == name {
-                design.tiles[index].alternates[position].skin = nil
-            }
-        }
-        for index in skinSets.indices {
-            skinSets[index].entries.removeAll { $0.skin == name }
-        }
-        saveSkinSets()
-        reloadSkins()
-        skinNote = "Deleted \(name)."
-    }
-
-    private func deleteAllSkins() {
-        let count = skins.count
-        for skin in skins { deleteSkin(skin.id) }
-        skinNote = "Deleted \(count) skin\(count == 1 ? "" : "s") from this design."
     }
 
     /// Everything is layered as an overlay on a fixed-size black rectangle
@@ -1662,7 +1618,6 @@ struct LayoutEditor: View {
                 catalogueSection
                 placedTilesSection
             case .looks:
-                skinPicker
                 skinSetsSection
             case .pictures:
                 assetsSection
@@ -2119,6 +2074,8 @@ struct LayoutEditor: View {
                 )
             }
             .controlSize(.small)
+
+            customIconRow(index: index)
 
             alternatesSection(index: index)
 
