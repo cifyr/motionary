@@ -158,7 +158,11 @@ struct LoopingVideoView: UIViewRepresentable {
             self.phase = phase
             guard currentURL != url else { return }
             guard FileManager.default.fileExists(atPath: url.path) else { return }
-            stop()
+            // The clip playing now is left alone. Tearing it down here blanked
+            // the layer for as long as the next one took to compose and seek,
+            // and what showed through the hole was the wallpaper - which is
+            // baked from the scene's own clip, so switching between two
+            // variants flashed a third picture on the way.
             currentURL = url
             generation += 1
             let token = generation
@@ -208,9 +212,13 @@ struct LoopingVideoView: UIViewRepresentable {
             return (composition, seconds)
         }
 
+        /// Builds the incoming clip and only shows it once it can draw.
+        ///
+        /// The swap is the last thing that happens: until then the outgoing
+        /// clip is still on the layer and still playing, so changing clip has
+        /// no gap in it rather than a flash of whatever is underneath.
         private func start(item: AVPlayerItem, loop: TimeInterval, token: Int) {
             guard token == generation else { return }
-            loopDuration = loop
 
             let player = AVQueuePlayer()
             // Belt only. The preview has no audio track to begin with, and mute
@@ -220,21 +228,40 @@ struct LoopingVideoView: UIViewRepresentable {
             player.isMuted = true
             // AVPlayerLooper repeats gaplessly; restarting on the
             // did-play-to-end notification visibly stutters at the wrap.
-            looper = AVPlayerLooper(player: player, templateItem: item)
-            playerLayer.player = player
-            playerLayer.videoGravity = .resize
-            queuePlayer = player
+            let looper = AVPlayerLooper(player: player, templateItem: item)
 
-            guard phase != nil else {
-                player.play()
-                return
-            }
-            // Seek once the item is ready, and read the phase at that moment so
-            // the wait for readiness does not put the app behind the widget.
             observe(player: player) { [weak self] in
-                self?.seekToPhase(player: player) { player.play() }
-                self?.watchForDrift(player: player)
+                guard let self, token == self.generation else { return }
+                // Seeked before it is shown, and the phase read at that moment,
+                // so the wait for readiness does not put the app behind the
+                // widget - and so the first frame drawn is the right one.
+                self.seekToPhase(player: player) { [weak self] in
+                    guard let self, token == self.generation else { return }
+                    player.play()
+                    self.show(player: player, looper: looper, loop: loop)
+                }
             }
+        }
+
+        /// Puts the prepared player on screen and retires the one it replaces.
+        private func show(player: AVQueuePlayer, looper: AVPlayerLooper, loop: TimeInterval) {
+            let outgoing = queuePlayer
+            let outgoingLooper = self.looper
+            if let driftObserver, let outgoing {
+                outgoing.removeTimeObserver(driftObserver)
+            }
+            self.driftObserver = nil
+
+            playerLayer.videoGravity = .resize
+            playerLayer.player = player
+            queuePlayer = player
+            self.looper = looper
+            loopDuration = loop
+
+            outgoing?.pause()
+            outgoingLooper?.disableLooping()
+
+            if phase != nil { watchForDrift(player: player) }
         }
 
         private func seekToPhase(player: AVQueuePlayer, then finished: @escaping () -> Void) {
@@ -283,14 +310,15 @@ struct LoopingVideoView: UIViewRepresentable {
 
         private var readinessObservation: NSKeyValueObservation?
 
-        private func observe(player: AVQueuePlayer, then start: @escaping () -> Void) {
+        private func observe(player: AVQueuePlayer, then start: @escaping @MainActor () -> Void) {
             if player.currentItem?.status == .readyToPlay {
                 start()
                 return
             }
+            readinessObservation?.invalidate()
             readinessObservation = player.observe(\.currentItem?.status, options: [.initial, .new]) { player, _ in
                 guard player.currentItem?.status == .readyToPlay else { return }
-                start()
+                Task { @MainActor in start() }
             }
         }
 
