@@ -14,6 +14,10 @@ struct SlotSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     /// nil is the primary clip, mirroring `VariantChoice`.
     @State private var variantID: UUID?
+    /// Working copies, so the rows follow the field rather than the store -
+    /// which is UserDefaults, and SwiftUI does not observe it.
+    @State private var tapsOpenAPage = false
+    @State private var address = BackgroundTap.defaultAddress
 
     var body: some View {
         NavigationStack {
@@ -41,6 +45,50 @@ struct SlotSettingsView: View {
                 }
 
                 Section {
+                    Toggle("Tapping the background opens a page", isOn: Binding(
+                        get: { tapsOpenAPage },
+                        set: { on in
+                            tapsOpenAPage = on
+                            BackgroundTap.isEnabled = on
+                            WidgetCenterBridge.reloadAll()
+                        }
+                    ))
+
+                    if tapsOpenAPage {
+                        TextField("google.com", text: Binding(
+                            get: { address },
+                            set: { typed in
+                                address = typed
+                                BackgroundTap.address = typed
+                                WidgetCenterBridge.reloadAll()
+                            }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+
+                        if let url = BackgroundTap.url(for: address) {
+                            Text("Opens \(url.absoluteString) in your browser.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("That is not a web address, so nothing will answer the tap.")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                } header: {
+                    Text("The space between the icons")
+                } footer: {
+                    Text("""
+                    A tap that misses every icon opens this page in your \
+                    default browser, straight from the Home Screen rather than \
+                    through Motionary. Off leaves the gaps doing nothing.
+                    """)
+                }
+
+                Section {
                     Button("Put everything back the way it was built", role: .destructive) {
                         reset()
                     }
@@ -61,6 +109,8 @@ struct SlotSettingsView: View {
             // Validated against this build, so a stale stored id shows as the
             // Standard row it will actually draw as.
             variantID = VariantChoice.resolved(in: manifest)?.id
+            tapsOpenAPage = BackgroundTap.isEnabled
+            address = BackgroundTap.address
         }
     }
 
