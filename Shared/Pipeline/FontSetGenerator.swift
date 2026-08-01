@@ -193,6 +193,7 @@ struct FontSetGenerator {
             backdropRect: primary.bakedBackdrop,
             tiles: design.tiles,
             assets: design.assets.isEmpty ? nil : design.assets,
+            readouts: design.readouts.isEmpty ? nil : design.readouts,
             clipVariants: builtVariants.isEmpty ? nil : builtVariants,
             // The resolved title, not the raw override: the phone has no
             // filename to fall back on, so an unnamed clip would arrive as
