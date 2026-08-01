@@ -36,6 +36,38 @@
   <key>UIAppFonts</key>
   <array>
     <string>Custom-Regular.otf</string>
+    <string>MFonteddfe0c5L0-Regular.ttf</string>
+    <string>MFonteddfe0c5L1-Regular.ttf</string>
+    <string>MFonteddfe0c5L2-Regular.ttf</string>
+    <string>MFonteddfe0c5L3-Regular.ttf</string>
+    <string>MFonteddfe0c5L4-Regular.ttf</string>
+    <string>MFonteddfe0c5L5-Regular.ttf</string>
+    <string>MFonteddfe0c5L6-Regular.ttf</string>
+    <string>MFonteddfe0c5L7-Regular.ttf</string>
+    <string>MFonteddfe0c5L8-Regular.ttf</string>
+    <string>MFonteddfe0c5L9-Regular.ttf</string>
+    <string>MFonteddfe0c5L10-Regular.ttf</string>
+    <string>MFonteddfe0c5L11-Regular.ttf</string>
+    <string>MFonteddfe0c5L12-Regular.ttf</string>
+    <string>MFonteddfe0c5L13-Regular.ttf</string>
+    <string>MFonteddfe0c5L14-Regular.ttf</string>
+    <string>MFonteddfe0c5L15-Regular.ttf</string>
+    <string>MFonteddfe0c5L16-Regular.ttf</string>
+    <string>MFonteddfe0c5L17-Regular.ttf</string>
+    <string>MFonteddfe0c5L18-Regular.ttf</string>
+    <string>MFonteddfe0c5L19-Regular.ttf</string>
+    <string>MFonteddfe0c5L20-Regular.ttf</string>
+    <string>MFonteddfe0c5L21-Regular.ttf</string>
+    <string>MFonteddfe0c5L22-Regular.ttf</string>
+    <string>MFonteddfe0c5L23-Regular.ttf</string>
+    <string>MFonteddfe0c5L24-Regular.ttf</string>
+    <string>MFonteddfe0c5L25-Regular.ttf</string>
+    <string>MFonteddfe0c5L26-Regular.ttf</string>
+    <string>MFonteddfe0c5L27-Regular.ttf</string>
+    <string>MFonteddfe0c5L28-Regular.ttf</string>
+    <string>MFonteddfe0c5L29-Regular.ttf</string>
+    <string>MFonteddfe0c5L30-Regular.ttf</string>
+    <string>MFonteddfe0c5L31-Regular.ttf</string>
     <string>MFont58737edbL0-Regular.ttf</string>
     <string>MFont58737edbv74b1be23L0-Regular.ttf</string>
     <string>MFont58737edbvd916eb85L0-Regular.ttf</string>
@@ -484,37 +516,5 @@
     <string>MFont58737edbv59fc4fd7L31-Regular.ttf</string>
     <string>MFont58737edbvd9c1ef6cL31-Regular.ttf</string>
     <string>MFont58737edbv58ab8dcdL31-Regular.ttf</string>
-    <string>MFonteddfe0c5L0-Regular.ttf</string>
-    <string>MFonteddfe0c5L1-Regular.ttf</string>
-    <string>MFonteddfe0c5L2-Regular.ttf</string>
-    <string>MFonteddfe0c5L3-Regular.ttf</string>
-    <string>MFonteddfe0c5L4-Regular.ttf</string>
-    <string>MFonteddfe0c5L5-Regular.ttf</string>
-    <string>MFonteddfe0c5L6-Regular.ttf</string>
-    <string>MFonteddfe0c5L7-Regular.ttf</string>
-    <string>MFonteddfe0c5L8-Regular.ttf</string>
-    <string>MFonteddfe0c5L9-Regular.ttf</string>
-    <string>MFonteddfe0c5L10-Regular.ttf</string>
-    <string>MFonteddfe0c5L11-Regular.ttf</string>
-    <string>MFonteddfe0c5L12-Regular.ttf</string>
-    <string>MFonteddfe0c5L13-Regular.ttf</string>
-    <string>MFonteddfe0c5L14-Regular.ttf</string>
-    <string>MFonteddfe0c5L15-Regular.ttf</string>
-    <string>MFonteddfe0c5L16-Regular.ttf</string>
-    <string>MFonteddfe0c5L17-Regular.ttf</string>
-    <string>MFonteddfe0c5L18-Regular.ttf</string>
-    <string>MFonteddfe0c5L19-Regular.ttf</string>
-    <string>MFonteddfe0c5L20-Regular.ttf</string>
-    <string>MFonteddfe0c5L21-Regular.ttf</string>
-    <string>MFonteddfe0c5L22-Regular.ttf</string>
-    <string>MFonteddfe0c5L23-Regular.ttf</string>
-    <string>MFonteddfe0c5L24-Regular.ttf</string>
-    <string>MFonteddfe0c5L25-Regular.ttf</string>
-    <string>MFonteddfe0c5L26-Regular.ttf</string>
-    <string>MFonteddfe0c5L27-Regular.ttf</string>
-    <string>MFonteddfe0c5L28-Regular.ttf</string>
-    <string>MFonteddfe0c5L29-Regular.ttf</string>
-    <string>MFonteddfe0c5L30-Regular.ttf</string>
-    <string>MFonteddfe0c5L31-Regular.ttf</string>
   </array>
 </dict></plist>
