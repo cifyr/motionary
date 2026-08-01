@@ -208,6 +208,37 @@ final class SpriteSheetTests: XCTestCase {
         XCTAssertEqual(SpriteSheet.app(named: "Zoom")?.canLaunch, true)
     }
 
+    /// A sheet's last row is usually categories - Games, Banking, Work - and
+    /// they were imported as artwork but left out of the set, so the phone's
+    /// picker never offered them: the one row of a sheet that could not be
+    /// chosen on the phone at all.
+    func testACategoryLabelStillJoinsTheSet() throws {
+        let sheet = try Self.offsetGrid()
+        let layout = try XCTUnwrap(SpriteSheet.parseNames("| Safari | Games | Banking |"))
+        let library = try SkinLibrary(root: Self.temporaryLibrary())
+        defer { try? FileManager.default.removeItem(at: library.root) }
+
+        let report = try SpriteSheet.importSheet(sheet, layout: layout, prefix: "sheet-x", into: library)
+
+        XCTAssertEqual(report.entries.count, 3, "a category was dropped from the set")
+        XCTAssertEqual(report.unmatched, ["Games", "Banking"], "they still count as unmatched")
+        XCTAssertEqual(
+            report.entries.map(\.appID).sorted(), ["banking", "games", "safari"],
+            "a category stands under its own name"
+        )
+    }
+
+    /// It must not shadow a catalogue app, or that app becomes impossible to
+    /// choose - though it cannot, since a label matching one never gets here.
+    func testACategoryIDIsNotACatalogueApp() {
+        for label in ["Games", "Banking", "Work", "Food", "Shopping"] {
+            XCTAssertNil(
+                AppCatalog.app(id: SpriteSheet.categoryID(for: label)),
+                "\(label) collides with a catalogue app"
+            )
+        }
+    }
+
     /// The sheet this was built for, so the catalogue keeps covering it.
     ///
     /// Every one of the 49 cells imports as artwork; what this counts is how
@@ -375,6 +406,11 @@ final class SpriteSheetTests: XCTestCase {
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             )!.makeImage()!
         }
+    }
+
+    private static func temporaryLibrary() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("motionary-sheet-\(UUID().uuidString)", isDirectory: true)
     }
 
     private static func solid(width: Int, height: Int) throws -> CGImage {

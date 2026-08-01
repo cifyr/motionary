@@ -512,6 +512,15 @@ enum SpriteSheet {
         }
     }
 
+    /// The id a label with no catalogue app behind it stands under.
+    ///
+    /// The label's own letters, which cannot collide with a catalogue id
+    /// because a collision would mean the label matched one - and then this is
+    /// not reached at all.
+    static func categoryID(for label: String) -> String {
+        normalised(label)
+    }
+
     private static func normalised(_ text: String) -> String {
         text.lowercased().filter { $0.isLetter || $0.isNumber }
     }
@@ -526,17 +535,19 @@ enum SpriteSheet {
     }
 
     struct Report {
-        /// Labels that became a skin and matched a catalogue app, so they can
-        /// be offered as a set.
+        /// Every label that became a skin, ready to be offered as a set. A
+        /// label the catalogue does not know is in here too, under its own
+        /// name, so a category is as choosable on the phone as an app is.
         var entries: [SkinSet.Entry] = []
-        /// Labels whose artwork was imported but that name no app the
-        /// catalogue knows - they are usable as a tile's skin by hand.
+        /// Labels that name no app the catalogue knows. They are in `entries`
+        /// as well; this is what the import report counts, because they are
+        /// the ones that will ask the phone what they open.
         var unmatched: [String] = []
         /// Named cells the sheet had no icon in.
         var missing: [String] = []
         var skippedBlanks = 0
 
-        var importedCount: Int { entries.count + unmatched.count }
+        var importedCount: Int { entries.count }
     }
 
     /// Cuts, keys and imports every named cell, returning what became what.
@@ -585,6 +596,14 @@ enum SpriteSheet {
             if let app = app(named: label) {
                 report.entries.append(SkinSet.Entry(appID: app.id, skin: name))
             } else {
+                // Still an entry. A sheet's last row is usually categories -
+                // Games, Banking, Work - and dropping them here left their
+                // artwork in the library but in no set, so the phone's picker
+                // never offered them and they could only be put on a tile by
+                // hand in the studio. Keyed by the label itself, which the
+                // catalogue does not know: the phone recognises that and asks
+                // what to call it and what it should open.
+                report.entries.append(SkinSet.Entry(appID: categoryID(for: label), skin: name))
                 report.unmatched.append(label)
             }
         }

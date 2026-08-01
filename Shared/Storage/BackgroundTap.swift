@@ -7,20 +7,45 @@ import os
 /// space. Off by default, because a Home Screen where the gaps do something
 /// unexpected is worse than one where they do nothing.
 ///
-/// The destination has to be a web address rather than an app's scheme. A
-/// widget's `Link` to `https://` is handed straight to the default browser,
-/// which is the point - an app's own scheme from an extension is unreliable,
-/// which is why every tile goes through Motionary first and why this cannot.
+/// Where it goes is a web address, and that is not a limitation so much as the
+/// whole mechanism: a widget hands `https` straight to whatever browser the
+/// phone is set to open links with. Arc, Chrome, Safari - it is the system's
+/// choice, not this app's, and the same tap gets it without going through
+/// Motionary first. An app's own scheme from an extension is unreliable, which
+/// is why every tile does go through Motionary and why this cannot.
 enum BackgroundTap {
     private static let logger = Logger(subsystem: "com.caden.Motionary", category: "BackgroundTap")
 
-    static let defaultAddress = "https://www.google.com"
+    /// A search engine to land on.
+    ///
+    /// iOS tells an app nothing about which engine the browser is set to, and
+    /// there is no address that means "wherever my browser opens a new tab" -
+    /// so it is asked once here rather than guessed at every tap.
+    struct Engine: Identifiable, Equatable, Sendable {
+        let id: String
+        let name: String
+        let address: String
+    }
+
+    static let engines: [Engine] = [
+        Engine(id: "google", name: "Google", address: "https://www.google.com"),
+        Engine(id: "duckduckgo", name: "DuckDuckGo", address: "https://duckduckgo.com"),
+        Engine(id: "bing", name: "Bing", address: "https://www.bing.com"),
+        Engine(id: "brave", name: "Brave Search", address: "https://search.brave.com"),
+        Engine(id: "ecosia", name: "Ecosia", address: "https://www.ecosia.org"),
+        Engine(id: "startpage", name: "Startpage", address: "https://www.startpage.com"),
+        Engine(id: "yahoo", name: "Yahoo", address: "https://search.yahoo.com"),
+    ]
+
+    /// Stored value meaning "the address typed by hand" rather than an engine.
+    static let customValue = "-custom-"
 
     private static var defaults: UserDefaults? {
         UserDefaults(suiteName: DesignStore.appGroupIdentifier)
     }
 
     private static let enabledKey = "backgroundTapEnabled"
+    private static let choiceKey = "backgroundTapChoice"
     private static let addressKey = "backgroundTapAddress"
 
     static var isEnabled: Bool {
@@ -31,11 +56,26 @@ enum BackgroundTap {
         }
     }
 
-    /// What was typed, as it was typed - so the field shows it back rather than
-    /// the tidied version, which is maddening to edit.
-    static var address: String {
-        get { defaults?.string(forKey: addressKey) ?? defaultAddress }
+    /// An engine's id, or `customValue`.
+    static var choice: String {
+        get { defaults?.string(forKey: choiceKey) ?? engines[0].id }
+        set { defaults?.set(newValue, forKey: choiceKey) }
+    }
+
+    /// What was typed, as it was typed - so the field shows it back rather
+    /// than the tidied version, which is maddening to edit.
+    static var customAddress: String {
+        get { defaults?.string(forKey: addressKey) ?? "" }
         set { defaults?.set(newValue, forKey: addressKey) }
+    }
+
+    static var engine: Engine? {
+        engines.first { $0.id == choice }
+    }
+
+    /// The address the current choice stands for, tidied or not.
+    static var address: String {
+        engine?.address ?? customAddress
     }
 
     /// Where a tap actually goes, or nil when nothing should answer it.
@@ -49,7 +89,8 @@ enum BackgroundTap {
     /// People type "bbc.co.uk", and a URL without a scheme is not one the
     /// system will open. Anything that is not http or https is refused rather
     /// than passed on: a widget cannot reliably open an app's own scheme, so
-    /// accepting one here would make a tile that silently does nothing.
+    /// accepting one here would make a tap that silently does nothing - which
+    /// looks exactly like a gap that was meant to be dead.
     static func url(for text: String) -> URL? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }

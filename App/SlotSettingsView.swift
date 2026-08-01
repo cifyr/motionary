@@ -17,7 +17,8 @@ struct SlotSettingsView: View {
     /// Working copies, so the rows follow the field rather than the store -
     /// which is UserDefaults, and SwiftUI does not observe it.
     @State private var tapsOpenAPage = false
-    @State private var address = BackgroundTap.defaultAddress
+    @State private var choice = BackgroundTap.engines[0].id
+    @State private var address = ""
 
     var body: some View {
         NavigationStack {
@@ -45,7 +46,7 @@ struct SlotSettingsView: View {
                 }
 
                 Section {
-                    Toggle("Tapping the background opens a page", isOn: Binding(
+                    Toggle("Tapping the background opens your browser", isOn: Binding(
                         get: { tapsOpenAPage },
                         set: { on in
                             tapsOpenAPage = on
@@ -55,36 +56,50 @@ struct SlotSettingsView: View {
                     ))
 
                     if tapsOpenAPage {
-                        TextField("google.com", text: Binding(
-                            get: { address },
-                            set: { typed in
-                                address = typed
-                                BackgroundTap.address = typed
+                        Picker("Opens", selection: Binding(
+                            get: { choice },
+                            set: { picked in
+                                choice = picked
+                                BackgroundTap.choice = picked
                                 WidgetCenterBridge.reloadAll()
                             }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.URL)
+                        )) {
+                            ForEach(BackgroundTap.engines) { engine in
+                                Text(engine.name).tag(engine.id)
+                            }
+                            Text("A page of my own").tag(BackgroundTap.customValue)
+                        }
 
-                        if let url = BackgroundTap.url(for: address) {
-                            Text("Opens \(url.absoluteString) in your browser.")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("That is not a web address, so nothing will answer the tap.")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
+                        if choice == BackgroundTap.customValue {
+                            TextField("example.com", text: Binding(
+                                get: { address },
+                                set: { typed in
+                                    address = typed
+                                    BackgroundTap.customAddress = typed
+                                    WidgetCenterBridge.reloadAll()
+                                }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.URL)
+
+                            if BackgroundTap.url(for: address) == nil {
+                                Text("That is not a web address, so nothing will answer the tap.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
                         }
                     }
                 } header: {
                     Text("The space between the icons")
                 } footer: {
                     Text("""
-                    A tap that misses every icon opens this page in your \
-                    default browser, straight from the Home Screen rather than \
-                    through Motionary. Off leaves the gaps doing nothing.
+                    A tap that misses every icon opens this in whichever \
+                    browser your phone is set to use - straight from the Home \
+                    Screen rather than through Motionary. iOS does not tell \
+                    apps which search engine that browser is set to, so pick \
+                    it here once. Off leaves the gaps doing nothing.
                     """)
                 }
 
@@ -110,7 +125,8 @@ struct SlotSettingsView: View {
             // Standard row it will actually draw as.
             variantID = VariantChoice.resolved(in: manifest)?.id
             tapsOpenAPage = BackgroundTap.isEnabled
-            address = BackgroundTap.address
+            choice = BackgroundTap.choice
+            address = BackgroundTap.customAddress
         }
     }
 
