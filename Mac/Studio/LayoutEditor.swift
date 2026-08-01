@@ -699,10 +699,60 @@ struct LayoutEditor: View {
             ForEach(design.assets.sorted { $0.zIndex < $1.zIndex }) { asset in
                 assetView(asset)
             }
+            ForEach(design.readouts.sorted { $0.zIndex < $1.zIndex }) { readout in
+                readoutView(readout)
+            }
             ForEach(design.tiles) { tile in
                 tileView(tile)
             }
         }
+    }
+
+    /// One readout on the canvas, drawn by the same view the widget uses so the
+    /// studio is not a second renderer. Fed sample values, because the real
+    /// ones are the phone's and there is nothing to read here.
+    private func readoutView(_ readout: PlacedReadout) -> some View {
+        ReadoutView(readout: readout, scale: unit, values: Self.sampleValues)
+            .frame(width: readout.rect.width * unit, alignment: .center)
+            .overlay {
+                if selection.contains(readout.id) {
+                    Rectangle().strokeBorder(.white.opacity(0.9), lineWidth: 1)
+                }
+            }
+            .offset(x: readout.rect.minX * unit, y: readout.rect.minY * unit)
+            .gesture(readoutDrag(readout))
+            .onTapGesture { select(readout.id) }
+    }
+
+    /// Stand-in values so the gathered sources show something concrete while
+    /// being placed, rather than the "--" the widget shows before a first read.
+    private static let sampleValues = ReadoutValues(
+        battery: "87%",
+        steps: "8,432",
+        weather: "72 Sunny",
+        calendar: "3:30 Standup",
+        gatheredAt: nil
+    )
+
+    private func readoutDrag(_ readout: PlacedReadout) -> some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard let index = design.readouts.firstIndex(where: { $0.id == readout.id })
+                else { return }
+                let base = tileBase ?? readout.center
+                if tileBase == nil { tileBase = base }
+                // Divided by `unit` so the readout moves by what the cursor
+                // covered on the phone, not on the canvas.
+                let moved = CGPoint(
+                    x: base.x + value.translation.width / unit,
+                    y: base.y + value.translation.height / unit
+                )
+                design.readouts[index].center = snapEngine.clamp(
+                    center: moved,
+                    tileSize: readout.rect.width
+                )
+            }
+            .onEnded { _ in tileBase = nil }
     }
 
     /// The animated region, drawn so the clip can be positioned against it
@@ -994,6 +1044,145 @@ struct LayoutEditor: View {
 
         }
         .disabled(store == nil)
+    }
+
+    private var readoutsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            StudioTheme.eyebrow("Live text").foregroundStyle(StudioTheme.textTertiary)
+
+            Text("Text that changes on the phone, drawn over the pictures and under the tiles. Time, date and a countdown cost nothing; battery, steps, weather and the calendar update when the app runs.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 2), spacing: 6) {
+                ForEach(PlacedReadout.Source.allCases) { source in
+                    Button(source.title) { addReadout(source) }
+                        .buttonStyle(.studioCompact)
+                }
+            }
+
+            if !design.readouts.isEmpty {
+                Divider()
+                ForEach(design.readouts.sorted { $0.zIndex < $1.zIndex }) { readout in
+                    HStack(spacing: 6) {
+                        Image(systemName: selection.contains(readout.id) ? "largecircle.fill.circle" : "circle")
+                            .foregroundStyle(.secondary)
+                        Text(readout.source.title).font(.caption)
+                        if readout.source.needsPermission {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.secondary)
+                                .help("Needs the phone's permission the first time")
+                        }
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { select(readout.id) }
+                    .contextMenu {
+                        Button("Remove", role: .destructive) { removeReadout(readout) }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The readout inspector: the fields that differ by source. A countdown
+    /// needs a date and a name; every source can take a prefix, a size and a
+    /// colour.
+    @ViewBuilder
+    private func readoutInspector(_ readout: PlacedReadout) -> some View {
+        Divider()
+        VStack(alignment: .leading, spacing: 6) {
+            Text(readout.source.title).font(.caption.weight(.semibold))
+
+            if let index = design.readouts.firstIndex(where: { $0.id == readout.id }) {
+                if readout.source == .countdown {
+                    DatePicker(
+                        "Until",
+                        selection: Binding(
+                            get: { design.readouts[index].targetDate ?? Date() },
+                            set: { design.readouts[index].targetDate = $0 }
+                        ),
+                        displayedComponents: [.date, .hourAndMinute]
+                    )
+                    .font(.caption2)
+                }
+
+                HStack(spacing: 4) {
+                    TextField("before", text: Binding(
+                        get: { design.readouts[index].prefix },
+                        set: { design.readouts[index].prefix = $0 }
+                    ))
+                    TextField("after", text: Binding(
+                        get: { design.readouts[index].suffix },
+                        set: { design.readouts[index].suffix = $0 }
+                    ))
+                }
+                .textFieldStyle(.roundedBorder)
+                .font(.caption2)
+
+                LabeledContent("Size") {
+                    Slider(
+                        value: Binding(
+                            get: { design.readouts[index].pointSize },
+                            set: { design.readouts[index].pointSize = $0 }
+                        ),
+                        in: 20 ... 300
+                    )
+                }
+                .font(.caption2)
+
+                Toggle("Bold", isOn: Binding(
+                    get: { design.readouts[index].isBold },
+                    set: { design.readouts[index].isBold = $0 }
+                ))
+                .font(.caption2)
+
+                TextField("#RRGGBB", text: Binding(
+                    get: { design.readouts[index].colorHex },
+                    set: { design.readouts[index].colorHex = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.caption2)
+
+                LabeledContent("Angle") {
+                    Slider(
+                        value: Binding(
+                            get: { design.readouts[index].rotation },
+                            set: { design.readouts[index].rotation = $0 }
+                        ),
+                        in: -45 ... 45
+                    )
+                }
+                .font(.caption2)
+
+                if readout.source.needsPermission {
+                    Text("The phone asks permission the first time, and the app has to have run at least once to fill this in.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Button("Remove", role: .destructive) { removeReadout(readout) }
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    private func addReadout(_ source: PlacedReadout.Source) {
+        let frame = design.widgetRect
+        var readout = PlacedReadout(
+            source: source,
+            center: CGPoint(x: frame.midX, y: frame.midY),
+            zIndex: (design.readouts.map(\.zIndex).max() ?? 0) + 1
+        )
+        if source == .countdown { readout.targetDate = Date().addingTimeInterval(60 * 60 * 24 * 7) }
+        design.readouts.append(readout)
+        select(readout.id)
+    }
+
+    private func removeReadout(_ readout: PlacedReadout) {
+        design.readouts.removeAll { $0.id == readout.id }
     }
 
     @ViewBuilder
@@ -1577,6 +1766,7 @@ struct LayoutEditor: View {
         case apps = "Apps"
         case looks = "Looks"
         case pictures = "Pictures"
+        case live = "Live"
         case clips = "Clips"
 
         var id: String { rawValue }
@@ -1621,6 +1811,8 @@ struct LayoutEditor: View {
                 skinSetsSection
             case .pictures:
                 assetsSection
+            case .live:
+                readoutsSection
             case .clips:
                 variantsSection
             }
@@ -1652,9 +1844,27 @@ struct LayoutEditor: View {
                 )
                 assetInspector(asset)
             }
+        } else if let readout = selectedReadout {
+            VStack(alignment: .leading, spacing: 10) {
+                inspectorHeading("Live text", detail: readout.source.title)
+                positionFields(
+                    center: readout.center,
+                    setCenter: { center in
+                        guard let index = design.readouts.firstIndex(where: { $0.id == readout.id })
+                        else { return }
+                        design.readouts[index].center = center
+                    }
+                )
+                readoutInspector(readout)
+            }
         } else {
             sceneInspector
         }
+    }
+
+    private var selectedReadout: PlacedReadout? {
+        guard let singleSelection else { return nil }
+        return design.readouts.first { $0.id == singleSelection }
     }
 
     /// "Editing / Tile — opens Music": what is selected, and the one fact
