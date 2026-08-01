@@ -46,7 +46,11 @@ struct HomeView: View {
             if entries.count > 1, !isEditing { PageDots(count: entries.count, index: index) }
 
             if isEditing {
-                EditingBar(onOptions: { choosingSlots = true }, onDone: { isEditing = false })
+                EditingBar(
+                    hasBackgrounds: !(entry?.manifest?.builtVariants.isEmpty ?? true),
+                    onOptions: { choosingSlots = true },
+                    onDone: { isEditing = false }
+                )
             } else {
                 SaveButton(saving: saving) { save() }
                 // Anything to change at all: a slot, or a clip variant.
@@ -83,16 +87,21 @@ struct HomeView: View {
         }
         // A swipe rather than any chrome: the whole point of this screen is to
         // be the Home Screen, and a switcher on top of it would spoil that.
-        // Across the background only, so a drag that starts on an icon is that
-        // icon's - sideways for the animation, up or down for the design.
+        //
+        // What it moves through is whatever is being worked on. Editing a
+        // scene, it steps through that scene's backgrounds; otherwise through
+        // the scenes themselves. Across the background only, so a drag that
+        // starts on an icon belongs to that icon.
         .gesture(
             DragGesture(minimumDistance: 40)
                 .onEnded { value in
+                    guard abs(value.translation.width) > abs(value.translation.height) else { return }
                     guard !isOnASlot(value.startLocation) else { return }
-                    if abs(value.translation.width) > abs(value.translation.height) {
-                        switchVariant(by: value.translation.width < 0 ? 1 : -1)
+                    let step = value.translation.width < 0 ? 1 : -1
+                    if isEditing {
+                        switchBackground(by: step)
                     } else {
-                        switchDesign(by: value.translation.height < 0 ? 1 : -1)
+                        switchDesign(by: step)
                     }
                 }
         )
@@ -214,14 +223,14 @@ struct HomeView: View {
             }
     }
 
-    /// Steps through the clip variants, the design's own clip included. Falls
-    /// through to the designs when this one has no alternatives, so a sideways
-    /// swipe always does something rather than nothing.
-    private func switchVariant(by step: Int) {
-        guard let manifest = entry?.manifest, !manifest.builtVariants.isEmpty else {
-            switchDesign(by: step)
-            return
-        }
+    /// Steps through this scene's backgrounds, its own clip included.
+    ///
+    /// Editing only. Out of edit mode the same swipe changes scene, so a scene
+    /// with one background simply does nothing here rather than quietly
+    /// changing something else - a swipe that means two things depending on
+    /// what this design happens to carry is worse than one that means nothing.
+    private func switchBackground(by step: Int) {
+        guard let manifest = entry?.manifest, !manifest.builtVariants.isEmpty else { return }
         let options: [UUID?] = [nil] + manifest.builtVariants.map { Optional($0.id) }
         let current = VariantChoice.resolved(in: manifest)?.id
         let position = options.firstIndex(of: current) ?? 0
@@ -384,6 +393,9 @@ private struct BlankSlot: View {
 /// What edit mode replaces the corner buttons with: what tapping does now, a
 /// way to the settings that are not per spot, and a way out.
 private struct EditingBar: View {
+    /// Whether this scene has more than one background, which is what the
+    /// swipe does here - saying so on a scene with one would be a lie.
+    let hasBackgrounds: Bool
     let onOptions: () -> Void
     let onDone: () -> Void
 
@@ -394,7 +406,7 @@ private struct EditingBar: View {
                 Button("Options", systemImage: "slider.horizontal.3", action: onOptions)
                     .labelStyle(.titleAndIcon)
                 Spacer()
-                Text("Tap a spot to change it")
+                Text(hasBackgrounds ? "Tap a spot, swipe for backgrounds" : "Tap a spot to change it")
                     .font(.footnote)
                     .foregroundStyle(.white.opacity(0.85))
                 Spacer()
