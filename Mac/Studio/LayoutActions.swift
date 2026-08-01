@@ -181,3 +181,25 @@ enum ClipPromotion {
         )
     }
 }
+
+/// Whether a piece of artwork is still spoken for.
+///
+/// A one-off icon belongs to the tile it was imported for, so clearing that
+/// tile should take the file with it. But the same file can be an iconset's
+/// entry or another tile's, and the library has no browser any more - a file
+/// nothing points at is a file nobody can reach again, and one deleted while
+/// still referenced is a tile drawing nothing. Pure, because "is anything
+/// still using this" is the whole question.
+enum SkinReferences {
+    static func isUnused(
+        _ name: String,
+        tiles: [PlacedTile],
+        sets: [SkinSet]
+    ) -> Bool {
+        let onTiles = tiles.contains { tile in
+            tile.skin == name || tile.alternates.contains { $0.skin == name }
+        }
+        let inSets = sets.contains { $0.entries.contains { $0.skin == name } }
+        return !onTiles && !inSets
+    }
+}

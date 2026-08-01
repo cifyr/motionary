@@ -299,3 +299,50 @@ final class ClipPromotionTests: XCTestCase {
         XCTAssertEqual(result.design.loopStartFrame, 7)
     }
 }
+
+/// Whether clearing a one-off icon should take its file away. The browser that
+/// used to make an orphan findable is gone, so both mistakes are permanent:
+/// a file kept is unreachable, a file removed while used is a blank tile.
+final class SkinReferenceTests: XCTestCase {
+    private func tile(skin: String?, alternates: [TileAlternate] = []) -> PlacedTile {
+        var subject = PlacedTile(appID: "spotify", center: .zero, size: 100)
+        subject.skin = skin
+        subject.alternates = alternates
+        return subject
+    }
+
+    func testArtworkNothingPointsAtIsUnused() {
+        XCTAssertTrue(SkinReferences.isUnused("lonely.png", tiles: [tile(skin: nil)], sets: []))
+    }
+
+    func testAnotherTileKeepsIt() {
+        XCTAssertFalse(
+            SkinReferences.isUnused(
+                "shared.png",
+                tiles: [tile(skin: nil), tile(skin: "shared.png")],
+                sets: []
+            )
+        )
+    }
+
+    func testAnAlternateKeepsIt() {
+        let alternate = TileAlternate(appID: "netflix", skin: "shared.png")
+        XCTAssertFalse(
+            SkinReferences.isUnused("shared.png", tiles: [tile(skin: nil, alternates: [alternate])], sets: [])
+        )
+    }
+
+    /// The case that matters most: an iconset's entry is the normal owner of a
+    /// file now, and deleting one would blank that entry on every design.
+    func testAnIconsetKeepsIt() {
+        var set = SkinSet(name: "GameIcons1")
+        set.entries = [SkinSet.Entry(appID: "spotify", skin: "shared.png")]
+        XCTAssertFalse(SkinReferences.isUnused("shared.png", tiles: [tile(skin: nil)], sets: [set]))
+    }
+
+    func testTheTileBeingClearedDoesNotCountItself() {
+        // The caller clears `skin` before asking, so the file it just let go of
+        // must not read as still in use.
+        XCTAssertTrue(SkinReferences.isUnused("mine.png", tiles: [tile(skin: nil)], sets: []))
+    }
+}
