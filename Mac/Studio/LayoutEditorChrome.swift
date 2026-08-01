@@ -148,17 +148,25 @@ extension LayoutEditor {
                         }
                     }
 
-                    layerGroup("Clip")
+                    layerGroup("Clips")
+                    // By name, and marked the same way, so this list and the
+                    // one in the sidebar cannot disagree about what a clip is
+                    // called or which one the scene leads with. This showed the
+                    // raw filename, so the scene's own clip appeared here under
+                    // one name and there under another.
                     layerRow(
-                        title: design.sourceVideoName,
-                        detail: previewedVariantID == nil ? "shown" : nil,
+                        title: design.primaryClipTitle,
+                        detail: clipDetail(isShown: previewedVariantID == nil, leads: design.defaultVariantID == nil),
                         isSelected: false
                     ) { previewedVariantID = nil }
 
                     ForEach(design.variants) { variant in
                         layerRow(
                             title: variant.name,
-                            detail: previewedVariantID == variant.id ? "shown" : nil,
+                            detail: clipDetail(
+                                isShown: previewedVariantID == variant.id,
+                                leads: design.defaultVariantID == variant.id
+                            ),
                             isSelected: false,
                             indented: true
                         ) {
@@ -167,7 +175,7 @@ extension LayoutEditor {
                     }
 
                     if !design.variants.isEmpty {
-                        Text("All variants share the clip's position.")
+                        Text("Every clip shares the scene's position.")
                             .font(.system(size: 10))
                             .foregroundStyle(StudioTheme.textDim)
                             .fixedSize(horizontal: false, vertical: true)
@@ -200,6 +208,19 @@ extension LayoutEditor {
             .padding(.horizontal, 6)
             .padding(.top, 10)
             .padding(.bottom, 3)
+    }
+
+    /// What a clip's row says on the right: whether the canvas is showing it,
+    /// and whether a phone opens on it. Both at once when both are true, since
+    /// they are different questions and the answer to one says nothing about
+    /// the other.
+    private func clipDetail(isShown: Bool, leads: Bool) -> String? {
+        switch (isShown, leads) {
+        case (true, true): "shown · leads"
+        case (true, false): "shown"
+        case (false, true): "leads"
+        case (false, false): nil
+        }
     }
 
     private func layerRow(
