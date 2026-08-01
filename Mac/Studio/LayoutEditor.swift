@@ -1429,7 +1429,7 @@ struct LayoutEditor: View {
             // exactly like the rest.
             clipRow(
                 name: Binding(
-                    get: { design.primaryClipName ?? "Standard" },
+                    get: { design.primaryClipTitle },
                     set: { design.primaryClipName = $0.isEmpty ? nil : $0 }
                 ),
                 isPreviewed: previewedVariantID == nil,

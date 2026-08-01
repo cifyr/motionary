@@ -194,7 +194,10 @@ struct FontSetGenerator {
             tiles: design.tiles,
             assets: design.assets.isEmpty ? nil : design.assets,
             clipVariants: builtVariants.isEmpty ? nil : builtVariants,
-            primaryClipName: design.primaryClipName,
+            // The resolved title, not the raw override: the phone has no
+            // filename to fall back on, so an unnamed clip would arrive as
+            // "Standard" there however it reads in the studio.
+            primaryClipName: design.primaryClipTitle,
             // Only when it actually built. A default naming a variant whose
             // fonts are not in the bundle is a black widget on first install,
             // which is the failure this project can least afford.

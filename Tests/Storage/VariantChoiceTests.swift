@@ -249,3 +249,42 @@ final class ClipSequenceTests: XCTestCase {
         XCTAssertNotNil(try XCTUnwrap(subject.clipSequence.first { $0.name == "Atari" }).variantID)
     }
 }
+
+/// The design's own clip is a clip, not a setting. Calling it "Standard" made
+/// it read as one: next to a variant called Mario, a primary that *is*
+/// Mario 1.mov looked like a second, separate thing to swipe past.
+final class PrimaryClipNameTests: XCTestCase {
+    private func design(source: String, named name: String? = nil) -> DesignDocument {
+        var subject = DesignDocument.new(name: "Scene", sourceVideoName: source)
+        subject.primaryClipName = name
+        return subject
+    }
+
+    func testTheClipTakesItsFilesName() {
+        XCTAssertEqual(design(source: "Mario 1.mov").primaryClipTitle, "Mario 1")
+    }
+
+    func testATypedNameWins() {
+        XCTAssertEqual(design(source: "Mario 1.mov", named: "Level one").primaryClipTitle, "Level one")
+    }
+
+    /// Clearing the field puts the file's name back rather than leaving the
+    /// clip with a blank label.
+    func testAnEmptyNameFallsBackToTheFile() {
+        XCTAssertEqual(design(source: "Mario 1.mov", named: "").primaryClipTitle, "Mario 1")
+    }
+
+    /// A digest of a filename says even less than the word does, so that is
+    /// the one case that keeps it.
+    func testADigestFilenameKeepsTheWord() {
+        XCTAssertEqual(
+            design(source: "8f3ab19c22d4e7f10b5c6a9d.mov").primaryClipTitle, "Standard"
+        )
+    }
+
+    func testTheClipThatStandsInTheListCarriesThatName() {
+        let subject = design(source: "Mario 1.mov")
+        XCTAssertEqual(subject.primaryClip.name, "Mario 1")
+        XCTAssertEqual(subject.primaryClip.sourceVideoName, "Mario 1.mov")
+    }
+}
