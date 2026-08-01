@@ -169,6 +169,8 @@ targets:
       - path: Shared/Model/AppCatalog.swift
       - path: Shared/Storage/ImageLoader.swift
       - path: Shared/Model/SnapEngine.swift
+      - path: Shared/Model/Readout.swift
+      - path: Shared/Rendering/ReadoutView.swift
       - path: Shared/Rendering/CompositionView.swift
       # The animation layer is shared so there is one renderer, not two. The
       # studio does not build runtime-frame designs - the phone does - but it
