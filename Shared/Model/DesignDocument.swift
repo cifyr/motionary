@@ -94,11 +94,35 @@ struct CustomTarget: Codable, Equatable, Sendable {
     /// Opened when the scheme does not, which is what happens when the app is
     /// not installed.
     var webFallback: String?
+    /// A Shortcut to run when the scheme does not open.
+    ///
+    /// The escape hatch for an app that publishes no working scheme at all: a
+    /// Shortcut can open one when nothing here can. It costs a second hop -
+    /// Motionary, then Shortcuts, then the app - so it goes after the scheme
+    /// rather than in front of it.
+    var shortcutName: String?
 
-    init(name: String, scheme: String, webFallback: String? = nil) {
+    init(name: String, scheme: String, webFallback: String? = nil, shortcutName: String? = nil) {
         self.name = name
         self.scheme = scheme
         self.webFallback = webFallback
+        self.shortcutName = shortcutName
+    }
+
+    /// The URL that runs a named Shortcut, or nil when there is no name.
+    ///
+    /// Built through `URLComponents` because the name is whatever somebody
+    /// called their Shortcut: spaces and punctuation are ordinary in one, and
+    /// pasted into a URL raw they make it unparseable, so Shortcuts opens to
+    /// its own list instead of running anything.
+    static func shortcutURL(named name: String) -> URL? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        var components = URLComponents()
+        components.scheme = "shortcuts"
+        components.host = "run-shortcut"
+        components.queryItems = [URLQueryItem(name: "name", value: trimmed)]
+        return components.url
     }
 
     /// The URLs to try, in order. A scheme typed without punctuation still has
@@ -109,9 +133,12 @@ struct CustomTarget: Codable, Equatable, Sendable {
         if !primary.isEmpty, !primary.contains(":") {
             primary += "://"
         }
-        return [primary, webFallback ?? ""]
-            .filter { !$0.isEmpty }
-            .compactMap(URL.init(string:))
+        // The Shortcut sits between the scheme and the web address: the web
+        // address always opens something, so anything after it is unreachable.
+        let routes = [primary].filter { !$0.isEmpty }.compactMap(URL.init(string:))
+            + [shortcutName.flatMap(Self.shortcutURL(named:))].compactMap { $0 }
+            + [webFallback ?? ""].filter { !$0.isEmpty }.compactMap(URL.init(string:))
+        return routes
     }
 }
 
