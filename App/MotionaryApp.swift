@@ -41,6 +41,7 @@ struct MotionaryApp: App {
     }
 
     @StateObject private var router = ExternalAppRouter()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -50,6 +51,13 @@ struct MotionaryApp: App {
                 // A tile tapped on the widget opens the app with a launch URL,
                 // and the app forwards it to the destination.
                 .onOpenURL { router.handle($0) }
+                // Battery and the other gathered values are only as fresh as
+                // the last time the app ran, so it reads them on every return
+                // to the foreground - the cheapest moment that is also the most
+                // likely to precede a look at the Home Screen.
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active { ReadoutGatherer.gatherAndPublish() }
+                }
         }
     }
 }

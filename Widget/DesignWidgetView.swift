@@ -87,7 +87,13 @@ struct DesignWidgetView: View {
                             )
                         }
                         .map { Image(decorative: $0, scale: 1) }
-                }
+                },
+                readouts: source.manifest.placedReadouts,
+                // What the app last gathered. The clock sources ignore it and
+                // draw themselves; the rest are only as fresh as the last
+                // reload, which is why the app writes here and the widget only
+                // reads.
+                readoutValues: ReadoutStore.current
             ) { tile, side in
                 // Through the app rather than straight to the destination: a
                 // Link from an extension to a third-party scheme is
