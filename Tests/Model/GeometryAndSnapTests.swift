@@ -465,6 +465,22 @@ final class GeometryAndSnapTests: XCTestCase {
         }
     }
 
+    /// Two entries answering to the same scheme means one of them was copied
+    /// and half-edited, and the wrong app opens - which looks like the scheme
+    /// being wrong rather than the entry being a duplicate. Cheap to state,
+    /// and the catalogue is now large enough that reading for it does not
+    /// work.
+    func testNoTwoAppsClaimTheSameScheme() {
+        var seen: [String: String] = [:]
+        for app in AppCatalog.all {
+            guard let scheme = app.scheme else { continue }
+            if let owner = seen[scheme] {
+                XCTFail("\(app.name) and \(owner) both claim \(scheme)")
+            }
+            seen[scheme] = app.name
+        }
+    }
+
     /// The web address opens something whatever is installed, so a candidate
     /// after it would never be tried.
     func testTheWebAddressComesLast() {
