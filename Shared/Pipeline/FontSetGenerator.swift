@@ -193,7 +193,14 @@ struct FontSetGenerator {
             backdropRect: primary.bakedBackdrop,
             tiles: design.tiles,
             assets: design.assets.isEmpty ? nil : design.assets,
-            clipVariants: builtVariants.isEmpty ? nil : builtVariants
+            clipVariants: builtVariants.isEmpty ? nil : builtVariants,
+            primaryClipName: design.primaryClipName,
+            // Only when it actually built. A default naming a variant whose
+            // fonts are not in the bundle is a black widget on first install,
+            // which is the failure this project can least afford.
+            defaultVariantID: builtVariants.contains { $0.id == design.defaultVariantID }
+                ? design.defaultVariantID
+                : nil
         )
         try store.save(manifest)
 
