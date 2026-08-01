@@ -35,10 +35,13 @@ struct HomeView: View {
             Color.black.ignoresSafeArea()
 
             if let entry, let manifest = entry.manifest {
-                // Identity includes the chosen variant so picking another one
-                // rebuilds the player rather than looping the old clip.
+                // Identity is the scene, not the clip within it. Including the
+                // clip tore the player down and built a new one on every
+                // change, which blanked the screen to the wallpaper - baked
+                // from the scene's own clip - for as long as the next one took
+                // to load. The player swaps its own clip in place instead.
                 composition(entry: entry, manifest: manifest)
-                    .id("\(entry.id.uuidString)-\(VariantChoice.resolved(in: manifest)?.id.uuidString ?? "primary")")
+                    .id(entry.id)
             } else {
                 EmptyDesignView()
             }
