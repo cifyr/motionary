@@ -11,7 +11,7 @@ enum InstallerError: Error, CustomStringConvertible {
             // The tail rather than the head: xcodebuild's first hundred lines
             // are settings, and the reason it stopped is always at the end.
             let tail = output.split(separator: "\n").suffix(12).joined(separator: "\n")
-            return "\(tool) exited \(status)\n\(tail)"
+            return "\(InstallerHint.forOutput(output) ?? "\(tool) exited \(status)")\n\(tail)"
         case .noDevice:
             return "no iPhone is connected and paired; plug it in and trust this Mac"
         case .toolMissing(let tool):

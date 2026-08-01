@@ -86,6 +86,10 @@ targets:
       # at all, and it is plain Foundation, so it is covered here rather than
       # needing a second test target.
       - path: Mac/Install/BundleWriter.swift
+      # A locked phone is reported as "exited 70" under a wall of build
+      # settings, and turning that into something actionable is plain string
+      # work - the installer around it shells out and cannot be tested.
+      - path: Mac/Install/InstallerHints.swift
       - path: Mac/Library/SkinLibrary.swift
       # Applying a set decides what a slot can show on the phone, so the pure
       # apply rules are covered with the rest of the tile logic.
