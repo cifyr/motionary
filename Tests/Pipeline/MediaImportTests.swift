@@ -626,3 +626,74 @@ final class QualityPlanTests: XCTestCase {
         }
     }
 }
+
+/// A preview renders the same composition against a smaller screen. The clip
+/// has to land in the same place proportionally, or what plays on the canvas
+/// stands somewhere the built one will not - which is exactly what a preview
+/// exists to rule out.
+final class ScaledTransformTests: XCTestCase {
+    private let source = CGSize(width: 1080, height: 1916)
+    private let screen = CGSize(width: 1290, height: 2796)
+    /// The design this came out of: shifted a long way up the screen.
+    private let transform = MediaTransform(
+        scale: 1.147911931818182,
+        offset: CGPoint(x: -1.0015828530907810, y: -165.35448267745141)
+    )
+
+    private func reduced(_ factor: Double) -> CGSize {
+        CGSize(width: (screen.width * factor).rounded(), height: (screen.height * factor).rounded())
+    }
+
+    /// The multiplier is on the aspect-fill baseline, which means the same
+    /// thing at any size, so it must not move.
+    func testTheScaleIsUntouched() {
+        XCTAssertEqual(transform.scaled(by: 0.2).scale, transform.scale)
+        XCTAssertEqual(transform.scaled(by: 5).scale, transform.scale)
+    }
+
+    func testTheOffsetFollowsTheScreen() {
+        let scaled = transform.scaled(by: 0.2)
+        XCTAssertEqual(scaled.offset.x, transform.offset.x * 0.2, accuracy: 1e-9)
+        XCTAssertEqual(scaled.offset.y, transform.offset.y * 0.2, accuracy: 1e-9)
+    }
+
+    func testFullSizeIsUnchanged() {
+        XCTAssertEqual(transform.scaled(by: 1), transform)
+    }
+
+    /// The point of the whole thing: the clip lands on the same fraction of
+    /// the picture whatever size the picture is rendered at.
+    func testAReducedRenderPlacesTheClipInTheSameFraction() {
+        let factor = 560.0 / max(screen.width, screen.height)
+        let full = MediaFrameExtractor.placement(
+            sourceSize: source, screenSize: screen, transform: transform
+        )
+        let small = MediaFrameExtractor.placement(
+            sourceSize: source, screenSize: reduced(factor), transform: transform.scaled(by: factor)
+        )
+
+        // Loose by a fraction of a percent because the reduced screen rounds
+        // its two dimensions independently, so its aspect - and the aspect-fill
+        // baseline with it - is a hair off the real screen's.
+        XCTAssertEqual(small.minX / reduced(factor).width, full.minX / screen.width, accuracy: 0.005)
+        XCTAssertEqual(small.minY / reduced(factor).height, full.minY / screen.height, accuracy: 0.005)
+        XCTAssertEqual(small.width / reduced(factor).width, full.width / screen.width, accuracy: 0.005)
+    }
+
+    /// And what it was before: the offset left alone pushes the clip five
+    /// times too far up, which is the picture jumping when you press play.
+    func testAnUnscaledOffsetLandsInTheWrongPlace() {
+        let factor = 560.0 / max(screen.width, screen.height)
+        let full = MediaFrameExtractor.placement(
+            sourceSize: source, screenSize: screen, transform: transform
+        )
+        let wrong = MediaFrameExtractor.placement(
+            sourceSize: source, screenSize: reduced(factor), transform: transform
+        )
+        XCTAssertGreaterThan(
+            abs(full.minY / screen.height - wrong.minY / reduced(factor).height),
+            0.2,
+            "the bug this guards against would have to be reintroduced to fail here"
+        )
+    }
+}
