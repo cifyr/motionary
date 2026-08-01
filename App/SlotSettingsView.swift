@@ -33,8 +33,8 @@ struct SlotSettingsView: View {
                     } footer: {
                         Text("""
                         The same design with a different clip in the animated \
-                        area. Swiping sideways anywhere but an icon steps \
-                        through these too.
+                        area. While editing, swiping sideways anywhere but an \
+                        icon steps through these too.
                         """)
                     }
                 }
