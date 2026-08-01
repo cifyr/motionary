@@ -36,15 +36,61 @@ final class BackgroundTapTests: XCTestCase {
         XCTAssertNil(BackgroundTap.url(for: "https://"))
     }
 
-    /// Every engine on offer has to be somewhere the browser can go, or the
-    /// picker has a row that quietly does nothing.
-    func testEveryEngineIsUsable() {
-        for engine in BackgroundTap.engines {
-            XCTAssertNotNil(BackgroundTap.url(for: engine.address), engine.name)
+    /// Every row on offer has to lead somewhere, or the picker has an entry
+    /// that quietly does nothing.
+    func testEveryDestinationIsUsable() {
+        for destination in BackgroundTap.allDestinations {
+            XCTAssertNotNil(BackgroundTap.url(for: destination.address), destination.name)
+            if let scheme = destination.scheme {
+                XCTAssertNotNil(URL(string: scheme), destination.name)
+            }
         }
-        let ids = BackgroundTap.engines.map(\.id)
-        XCTAssertEqual(Set(ids).count, ids.count, "two engines share an id")
-        XCTAssertFalse(ids.contains(BackgroundTap.customValue), "an engine shadows the custom row")
+        let ids = BackgroundTap.allDestinations.map(\.id)
+        XCTAssertEqual(Set(ids).count, ids.count, "two destinations share an id")
+        XCTAssertFalse(ids.contains(BackgroundTap.customValue), "a destination shadows the custom row")
+    }
+
+    // MARK: - Opening the browser itself
+
+    /// A widget cannot open a custom scheme, so a browser goes through
+    /// Motionary the same way every icon does - carrying its own scheme and
+    /// its page, so an uninstalled browser lands somewhere rather than nowhere.
+    func testABrowserTravelsThroughTheAppWithAFallback() throws {
+        BackgroundTap.isEnabled = true
+        BackgroundTap.choice = "arc"
+
+        let link = try XCTUnwrap(BackgroundTap.widgetDestination)
+        XCTAssertEqual(link.scheme, LaunchLink.scheme, "a widget cannot open arcmobile2:// itself")
+        XCTAssertEqual(
+            LaunchLink.candidates(from: link).map(\.absoluteString),
+            ["arcmobile2://", "https://arc.net/"]
+        )
+    }
+
+    /// A page needs no detour: https is the one thing a widget can hand
+    /// straight to the browser.
+    func testAPageGoesStraightOut() throws {
+        BackgroundTap.isEnabled = true
+        BackgroundTap.choice = "duckduckgo"
+        XCTAssertEqual(
+            try XCTUnwrap(BackgroundTap.widgetDestination).absoluteString,
+            "https://duckduckgo.com"
+        )
+    }
+
+    func testATypedPageGoesStraightOutToo() throws {
+        BackgroundTap.isEnabled = true
+        BackgroundTap.choice = BackgroundTap.customValue
+        BackgroundTap.customAddress = "example.com"
+        XCTAssertEqual(
+            try XCTUnwrap(BackgroundTap.widgetDestination).absoluteString,
+            "https://example.com"
+        )
+    }
+
+    func testNothingAnswersWhenItIsOff() {
+        BackgroundTap.choice = "arc"
+        XCTAssertNil(BackgroundTap.widgetDestination)
     }
 
     // MARK: - The stored setting
