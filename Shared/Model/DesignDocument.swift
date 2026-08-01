@@ -409,10 +409,8 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     /// them; the phone chooses among all of them after install.
     var variants: [ClipVariant] = []
 
-    /// What the design's own clip is called.
-    ///
-    /// It sits in the phone's list beside the variants, so leaving it unnamed
-    /// makes it the one entry that cannot say what it is. Nil is "Standard".
+    /// What the design's own clip is called, when it has been named by hand.
+    /// `primaryClipTitle` is what to show; this is only the override.
     var primaryClipName: String?
 
     /// The clip a phone shows before it has chosen one. Nil is the design's
@@ -422,10 +420,24 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     /// bundle, so which one leads is a name in the manifest, not a re-encode.
     var defaultVariantID: UUID?
 
+    /// What the design's own clip is called in a list of clips.
+    ///
+    /// Its own file's name when nothing has been typed, the same way an
+    /// imported variant takes one. Calling it "Standard" made the scene's own
+    /// clip read as a setting rather than as a clip - next to a variant called
+    /// Mario, a primary that *is* Mario 1 looked like a second, separate thing
+    /// to swipe past. A digest of a filename says even less than "Standard"
+    /// does, so that is the one case that keeps the word.
+    var primaryClipTitle: String {
+        if let primaryClipName, !primaryClipName.isEmpty { return primaryClipName }
+        let stem = (sourceVideoName as NSString).deletingPathExtension
+        return stem.isEmpty || DesignStore.looksLikeADigest(stem) ? "Standard" : stem
+    }
+
     /// The design's own clip as an entry in the same list as the variants, so
     /// naming and defaulting can treat all the clips alike.
     var primaryClip: ClipVariant {
-        ClipVariant(id: id, name: primaryClipName ?? "Standard", sourceVideoName: sourceVideoName)
+        ClipVariant(id: id, name: primaryClipTitle, sourceVideoName: sourceVideoName)
     }
     /// The grid tiles land on inside the widget frame.
     var grid: WidgetGrid = WidgetGrid()
