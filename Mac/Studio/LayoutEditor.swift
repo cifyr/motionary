@@ -50,6 +50,14 @@ struct LayoutEditor: View {
     /// The variant whose clip is standing in for the primary on the canvas.
     @State var previewedVariantID: UUID?
     @State private var variantPoster: CGImage?
+    /// The clip running on the canvas, decoded once and held as frames.
+    ///
+    /// Composed exactly as a build composes them - same transform, same
+    /// background, same crop - so what plays here is what the phone gets,
+    /// rather than a second opinion about it. Small, because the canvas is
+    /// small and a full-size loop is hundreds of megabytes.
+    @State private var playbackFrames: [CGImage] = []
+    @State private var isPlaying = false
     /// The asset whose key colour is being picked by clicking it.
     @State private var pickingKeyFor: UUID?
     /// Set while an option-drag is making a copy, so the drag moves the copy
@@ -261,6 +269,95 @@ struct LayoutEditor: View {
                 screenSize: model.screenPixelSize
             ).posterFrame()
         }
+        // Keyed on both, so switching clips while running reloads rather than
+        // leaving the last one's frames on the canvas.
+        .task(id: PlaybackRequest(clip: previewedVariantID, running: isPlaying)) {
+            await loadPlayback()
+        }
+    }
+
+    /// What a playback load is for, so the task restarts when either changes.
+    private struct PlaybackRequest: Equatable {
+        let clip: UUID?
+        let running: Bool
+    }
+
+    /// Longest side of a decoded playback frame, in pixels.
+    ///
+    /// The canvas is a few hundred points wide, so decoding the loop at screen
+    /// size would spend a hundred megabytes to draw the same picture. At this
+    /// size a 96-frame loop is about 40MB, and it is freed when playback stops.
+    private static let playbackLongestSide: CGFloat = 560
+
+    /// Plays a clip on the canvas, or stops the one already running.
+    private func togglePlayback(of variantID: UUID?) {
+        guard !(isPlaying && previewedVariantID == variantID) else {
+            stopPlayback()
+            return
+        }
+        stopPlayback()
+        previewedVariantID = variantID
+        isPlaying = true
+    }
+
+    private func stopPlayback() {
+        isPlaying = false
+        playbackFrames = []
+    }
+
+    /// Decodes the running clip's loop through the same path a build uses.
+    private func loadPlayback() async {
+        guard isPlaying, let store else { return }
+        let variant = design.variants.first { $0.id == previewedVariantID }
+        let source = variant.map { store.variantClipURL(for: design.id, name: $0.sourceVideoName) }
+            ?? store.sourceVideoURL(for: design)
+
+        let screen = model.screenPixelSize
+        let scale = Self.playbackLongestSide / max(screen.width, screen.height)
+        let reduced = CGSize(width: (screen.width * scale).rounded(), height: (screen.height * scale).rounded())
+
+        let extractor = MediaFrameExtractor(
+            url: source,
+            screenSize: reduced,
+            transform: design.mediaTransform,
+            background: design.backgroundName.flatMap {
+                ImageLoader.load(
+                    at: store.backgroundURL(for: design.id, name: $0),
+                    maxPixelSize: Int(max(reduced.width, reduced.height))
+                )
+            },
+            clipRect: design.backgroundName == nil ? nil : scaled(design.widgetRect, by: scale),
+            clipCornerRadius: design.effectiveCornerRadius * scale
+        )
+        do {
+            // A variant is its own length, measured the way the build measures
+            // it, so what plays here wraps where the built one wraps.
+            var count = design.loopFrameCount
+            if variant != nil {
+                count = FontSetGenerator.variantLoopLength(
+                    duration: try await extractor.summary().duration,
+                    spec: design.spec,
+                    playbackSpeed: design.playbackSpeed
+                )
+            }
+            let frames = try await extractor.composedFrames(
+                startFrame: variant == nil ? design.loopStartFrame : 0,
+                count: count,
+                frameRate: design.spec.framesPerSecond,
+                speed: design.playbackSpeed
+            )
+            guard isPlaying else { return }
+            playbackFrames = frames
+        } catch {
+            // Named: a play button that does nothing is indistinguishable from
+            // a clip that is all one frame.
+            isPlaying = false
+            skinNote = "Could not play \(source.lastPathComponent): \(error)"
+        }
+    }
+
+    private func scaled(_ rect: CGRect, by scale: CGFloat) -> CGRect {
+        CGRect(x: rect.minX * scale, y: rect.minY * scale, width: rect.width * scale, height: rect.height * scale)
     }
 
     /// Brings whatever this design references over from the old shared
@@ -598,7 +695,14 @@ struct LayoutEditor: View {
                     .frame(width: canvas.width, height: canvas.height)
                     .clipped()
             }
-            if let poster = activePoster {
+            if !playbackFrames.isEmpty {
+                // A composed frame already carries the placement, the fill and
+                // the background, so it stands in for both layers below rather
+                // than on top of them.
+                PlayingClip(frames: playbackFrames, framesPerSecond: design.spec.framesPerSecond)
+                    .frame(width: canvas.width, height: canvas.height)
+                    .clipped()
+            } else if let poster = activePoster {
                 // The generator fills whatever the clip does not cover with a
                 // dimmed blow-up of the same frame rather than black. Drawing
                 // black here instead - which this did - meant the wallpaper
@@ -1317,7 +1421,11 @@ struct LayoutEditor: View {
                 isDefault: design.defaultVariantID == nil,
                 onPreview: { previewedVariantID = nil },
                 onDefault: { design.defaultVariantID = nil },
-                onRemove: nil
+                onPlay: { togglePlayback(of: nil) },
+                isPlaying: isPlaying && previewedVariantID == nil,
+                // A scene is its clip, so the last one cannot go. With others
+                // to take over it can: one of them becomes the design's own.
+                onRemove: design.variants.isEmpty ? nil : { removePrimaryClip() }
             )
 
             ForEach(design.variants) { variant in
@@ -1336,6 +1444,8 @@ struct LayoutEditor: View {
                         previewedVariantID = previewedVariantID == variant.id ? nil : variant.id
                     },
                     onDefault: { design.defaultVariantID = variant.id },
+                    onPlay: { togglePlayback(of: variant.id) },
+                    isPlaying: isPlaying && previewedVariantID == variant.id,
                     onRemove: { removeVariant(variant) }
                 )
             }
@@ -1351,8 +1461,8 @@ struct LayoutEditor: View {
     }
 
     /// One clip in the list: what it is called, whether the canvas is showing
-    /// it, and whether the phone leads with it. `onRemove` is nil for the
-    /// design's own clip, which is the design and cannot be taken out of it.
+    /// it, whether the phone leads with it, and whether it is running.
+    /// `onRemove` is nil while this clip is the only one the scene has.
     @ViewBuilder
     private func clipRow(
         name: Binding<String>,
@@ -1360,6 +1470,8 @@ struct LayoutEditor: View {
         isDefault: Bool,
         onPreview: @escaping () -> Void,
         onDefault: @escaping () -> Void,
+        onPlay: @escaping () -> Void,
+        isPlaying: Bool,
         onRemove: (() -> Void)?
     ) -> some View {
         HStack(spacing: 6) {
@@ -1370,6 +1482,14 @@ struct LayoutEditor: View {
             }
             .buttonStyle(.plain)
             .help("Show this clip on the canvas")
+
+            Button(action: onPlay) {
+                Image(systemName: isPlaying ? "stop.fill" : "play.fill")
+                    .font(.caption2)
+                    .foregroundStyle(isPlaying ? Color.accentColor : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help(isPlaying ? "Stop" : "Play this clip on the canvas")
 
             // A field rather than a label: the name is what the phone's list
             // shows, and a clip called "Variant 3" says nothing there.
@@ -1422,8 +1542,43 @@ struct LayoutEditor: View {
         }
     }
 
+    /// Takes the design's own clip out by promoting another into its place.
+    ///
+    /// Everything positional is shared already, so nothing on the canvas moves;
+    /// only the loop has to be re-measured, because the successor is its own
+    /// length.
+    private func removePrimaryClip() {
+        guard let store, let promotion = ClipPromotion.promoting(in: design) else { return }
+
+        // The successor stops being a variant, so anything holding its id has
+        // to let go before the list changes under it.
+        if !promotion.design.variants.contains(where: { $0.id == previewedVariantID }) {
+            previewedVariantID = nil
+        }
+        stopPlayback()
+
+        design = promotion.design
+        store.removeVariantClip(named: promotion.retiredFileName, for: design.id)
+
+        // The loop was sized to the clip that just went. Left alone, a longer
+        // successor would be cut short and a shorter one sampled past its end.
+        Task {
+            guard let summary = try? await MediaFrameExtractor(
+                url: store.sourceVideoURL(for: design),
+                screenSize: model.screenPixelSize
+            ).summary() else {
+                skinNote = "\(promotion.promotedName) took over, but could not be measured - check the loop length."
+                return
+            }
+            design.sourceDuration = summary.duration
+            design.retuneLoop()
+            skinNote = "\(promotion.promotedName) is now this scene's own clip."
+        }
+    }
+
     /// Takes the clip with it, like removing an asset does: the file lives in
     /// the design, and a swapped-out variant should not keep growing it.
+
     private func removeVariant(_ variant: ClipVariant) {
         if previewedVariantID == variant.id { previewedVariantID = nil }
         // Otherwise the design leads with a clip that is no longer in it, and
@@ -2252,3 +2407,22 @@ private struct AsyncSkinThumbnail: View {
 }
 
 
+
+/// Steps through a decoded loop on the canvas.
+///
+/// Driven by the clock rather than by a timer that counts frames: the picture
+/// is a function of the time, which is how the widget's own animation works,
+/// so a slow redraw drops a frame instead of falling behind.
+private struct PlayingClip: View {
+    let frames: [CGImage]
+    let framesPerSecond: Int
+
+    var body: some View {
+        let rate = Double(max(framesPerSecond, 1))
+        TimelineView(.periodic(from: .now, by: 1 / rate)) { context in
+            let step = Int(context.date.timeIntervalSince1970 * rate)
+            Image(decorative: frames[((step % frames.count) + frames.count) % frames.count], scale: 1)
+                .resizable()
+        }
+    }
+}

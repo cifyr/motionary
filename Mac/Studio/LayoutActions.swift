@@ -140,3 +140,44 @@ enum LayoutActions {
         )
     }
 }
+
+/// Taking a scene's own clip out of it.
+///
+/// A scene is its clip, so this is a swap rather than a deletion: one of the
+/// variants steps into the place the retired clip leaves. Pure, because which
+/// clip succeeds and what the document becomes is the part worth being sure
+/// about - the file removal and the re-measure follow from it.
+enum ClipPromotion {
+    struct Result: Equatable {
+        var design: DesignDocument
+        /// The clip file the design no longer references.
+        var retiredFileName: String
+        var promotedName: String
+    }
+
+    /// The design with one of its variants as its own clip, or nil when there
+    /// is nothing to take over - the last clip cannot go.
+    ///
+    /// The successor is whichever clip the scene leads with, since that is
+    /// already the one a phone shows; a scene leading with itself hands over to
+    /// the first variant instead.
+    static func promoting(in design: DesignDocument) -> Result? {
+        guard !design.variants.isEmpty else { return nil }
+        let successor = design.variants.first { $0.id == design.defaultVariantID } ?? design.variants[0]
+
+        var updated = design
+        updated.sourceVideoName = successor.sourceVideoName
+        updated.primaryClipName = successor.name
+        updated.variants.removeAll { $0.id == successor.id }
+        // It is the design's own clip now, and the design's own clip is what
+        // nil means - leaving the id would name a variant that is gone, and
+        // the build would write no default at all.
+        if updated.defaultVariantID == successor.id { updated.defaultVariantID = nil }
+
+        return Result(
+            design: updated,
+            retiredFileName: design.sourceVideoName,
+            promotedName: successor.name
+        )
+    }
+}

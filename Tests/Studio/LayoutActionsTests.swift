@@ -219,3 +219,83 @@ final class WidgetGridTests: XCTestCase {
         XCTAssertEqual(decoded.cell?.label, "R2C4")
     }
 }
+
+/// A scene is its clip, so taking the design's own clip out is a swap: one of
+/// the variants steps into its place. Getting it wrong leaves the document
+/// pointing at a file that is gone, which is a design that will not build.
+final class ClipPromotionTests: XCTestCase {
+    private func design(variants: [ClipVariant], default id: UUID? = nil) -> DesignDocument {
+        var subject = DesignDocument.new(name: "Scene", sourceVideoName: "own.mp4")
+        subject.variants = variants
+        subject.defaultVariantID = id
+        subject.primaryClipName = "Rainy day"
+        return subject
+    }
+
+    func testTheLastClipCannotGo() {
+        XCTAssertNil(ClipPromotion.promoting(in: design(variants: [])))
+    }
+
+    func testTheFirstVariantTakesOverWhenTheSceneLeadsWithItsOwn() throws {
+        let storm = ClipVariant(name: "Storm", sourceVideoName: "storm.gif")
+        let sunset = ClipVariant(name: "Sunset", sourceVideoName: "sunset.gif")
+        let result = try XCTUnwrap(ClipPromotion.promoting(in: design(variants: [storm, sunset])))
+
+        XCTAssertEqual(result.design.sourceVideoName, "storm.gif")
+        XCTAssertEqual(result.design.primaryClipName, "Storm")
+        XCTAssertEqual(result.design.variants.map(\.name), ["Sunset"])
+        XCTAssertEqual(result.retiredFileName, "own.mp4")
+    }
+
+    /// The clip a phone already shows is the one to keep, so it is the one that
+    /// takes over rather than whichever happens to be first.
+    func testTheClipTheSceneLeadsWithTakesOver() throws {
+        let storm = ClipVariant(name: "Storm", sourceVideoName: "storm.gif")
+        let sunset = ClipVariant(name: "Sunset", sourceVideoName: "sunset.gif")
+        let result = try XCTUnwrap(
+            ClipPromotion.promoting(in: design(variants: [storm, sunset], default: sunset.id))
+        )
+
+        XCTAssertEqual(result.design.sourceVideoName, "sunset.gif")
+        XCTAssertEqual(result.design.primaryClipName, "Sunset")
+        XCTAssertEqual(result.design.variants.map(\.name), ["Storm"])
+    }
+
+    /// It is the design's own clip now, and that is what nil means. Leaving the
+    /// id would name a variant that no longer exists, and the build writes no
+    /// default at all for one of those.
+    func testThePromotedClipStopsBeingTheNamedDefault() throws {
+        let sunset = ClipVariant(name: "Sunset", sourceVideoName: "sunset.gif")
+        let result = try XCTUnwrap(
+            ClipPromotion.promoting(in: design(variants: [sunset], default: sunset.id))
+        )
+        XCTAssertNil(result.design.defaultVariantID)
+    }
+
+    /// A default pointing at some other variant is still valid, so it stays.
+    func testAnUnrelatedDefaultIsLeftAlone() throws {
+        let storm = ClipVariant(name: "Storm", sourceVideoName: "storm.gif")
+        let sunset = ClipVariant(name: "Sunset", sourceVideoName: "sunset.gif")
+        var subject = design(variants: [storm, sunset], default: sunset.id)
+        subject.defaultVariantID = sunset.id
+        // Leads with Sunset, so Sunset takes over; nothing else is named.
+        let result = try XCTUnwrap(ClipPromotion.promoting(in: subject))
+        XCTAssertNil(result.design.defaultVariantID)
+
+        subject.defaultVariantID = nil
+        let plain = try XCTUnwrap(ClipPromotion.promoting(in: subject))
+        XCTAssertNil(plain.design.defaultVariantID, "Storm took over, and it was not the default")
+    }
+
+    func testEverythingElseAboutTheDesignSurvives() throws {
+        var subject = design(variants: [ClipVariant(name: "Storm", sourceVideoName: "storm.gif")])
+        subject.tiles = [PlacedTile(appID: "spotify", center: CGPoint(x: 10, y: 20), size: 100)]
+        subject.loopStartFrame = 7
+        let result = try XCTUnwrap(ClipPromotion.promoting(in: subject))
+
+        XCTAssertEqual(result.design.id, subject.id)
+        XCTAssertEqual(result.design.tiles, subject.tiles)
+        XCTAssertEqual(result.design.mediaTransform, subject.mediaTransform)
+        XCTAssertEqual(result.design.loopStartFrame, 7)
+    }
+}
