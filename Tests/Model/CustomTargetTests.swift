@@ -144,3 +144,53 @@ final class OfferedAlternatesTests: XCTestCase {
         XCTAssertEqual(Set(names).count, names.count, "two icons would be written to one filename")
     }
 }
+
+/// Running a Shortcut is the last route before the web address: it is the only
+/// one that can reach an app publishing no working scheme at all, which is the
+/// gap a list of schemes cannot close however long the list gets.
+final class ShortcutTargetTests: XCTestCase {
+    func testTheShortcutComesAfterTheSchemeAndBeforeTheWeb() {
+        let target = CustomTarget(
+            name: "Bear",
+            scheme: "bear://",
+            webFallback: "https://bear.app/",
+            shortcutName: "Open Bear"
+        )
+        XCTAssertEqual(
+            target.launchCandidates.map(\.absoluteString),
+            ["bear://", "shortcuts://run-shortcut?name=Open%20Bear", "https://bear.app/"]
+        )
+    }
+
+    /// A Shortcut's title is whatever somebody called it. Pasted into a URL
+    /// raw, the space ends the URL and Shortcuts opens its own list instead of
+    /// running anything.
+    func testASpacedNameSurvivesAsAQuery() {
+        let url = CustomTarget.shortcutURL(named: "Log a coffee")
+        XCTAssertEqual(url?.absoluteString, "shortcuts://run-shortcut?name=Log%20a%20coffee")
+    }
+
+    func testPunctuationInTheNameSurvives() {
+        let url = CustomTarget.shortcutURL(named: "Coffee & Notes")
+        XCTAssertEqual(
+            URLComponents(url: url!, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "name" })?.value,
+            "Coffee & Notes"
+        )
+    }
+
+    func testAnEmptyNameIsNoRoute() {
+        XCTAssertNil(CustomTarget.shortcutURL(named: "   "))
+        let target = CustomTarget(name: "Bear", scheme: "bear://", shortcutName: "  ")
+        XCTAssertEqual(target.launchCandidates.map(\.absoluteString), ["bear://"])
+    }
+
+    /// Absent from an older document rather than empty, which is the case that
+    /// silently rewrites every design if it decodes wrong.
+    func testADocumentWithoutTheKeyStillDecodes() throws {
+        let json = #"{"name":"Bear","scheme":"bear://"}"#
+        let target = try JSONDecoder().decode(CustomTarget.self, from: Data(json.utf8))
+        XCTAssertNil(target.shortcutName)
+        XCTAssertEqual(target.launchCandidates.map(\.absoluteString), ["bear://"])
+    }
+}

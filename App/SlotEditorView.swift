@@ -23,6 +23,7 @@ struct SlotEditorView: View {
     @State private var selection = ""
     @State private var customLink = false
     @State private var customName = ""
+    @State private var customShortcut = ""
     @State private var customScheme = ""
 
     /// One thing the slot can become: an app drawn in this set's style.
@@ -106,6 +107,7 @@ struct SlotEditorView: View {
             // is the exact confusion a set is meant to remove.
             customLink = false
             customName = ""
+            customShortcut = ""
             customScheme = ""
             write()
         } label: {
@@ -185,6 +187,16 @@ struct SlotEditorView: View {
                 .textFieldStyle(.roundedBorder)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
+
+                // Left blank by most people. It is here for the app whose
+                // scheme does not work or does not exist, where a Shortcut is
+                // the only thing that can still open it.
+                TextField("Shortcut name (optional)", text: Binding(
+                    get: { customShortcut },
+                    set: { customShortcut = $0; write() }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled()
             }
 
             if let first = target()?.launchCandidates.first {
@@ -219,6 +231,7 @@ struct SlotEditorView: View {
             customLink = true
             customName = stored.name
             customScheme = stored.scheme
+            customShortcut = stored.shortcutName ?? ""
         }
     }
 
@@ -227,7 +240,12 @@ struct SlotEditorView: View {
     private func target() -> CustomTarget? {
         guard customLink || catalogueApp == nil, !isBlank else { return nil }
         let name = customName.trimmingCharacters(in: .whitespaces)
-        return CustomTarget(name: name.isEmpty ? selection : name, scheme: customScheme)
+        let shortcut = customShortcut.trimmingCharacters(in: .whitespaces)
+        return CustomTarget(
+            name: name.isEmpty ? selection : name,
+            scheme: customScheme,
+            shortcutName: shortcut.isEmpty ? nil : shortcut
+        )
     }
 
     private func write() {
