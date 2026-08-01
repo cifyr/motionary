@@ -658,6 +658,35 @@ struct BuildManifest: Codable, Equatable, Sendable {
     /// What to call the primary, ready to show.
     var primaryClipTitle: String { primaryClipName ?? "Standard" }
 
+    /// One clip as the phone offers it: what it is called, and which one it is.
+    struct ClipChoice: Equatable, Identifiable, Sendable {
+        /// Nil is the design's own clip.
+        let variantID: UUID?
+        let name: String
+
+        var id: String { variantID?.uuidString ?? "primary" }
+    }
+
+    /// Every clip this build carries, in the order a phone steps through them.
+    ///
+    /// Alphabetical, so a list of a dozen can be found in, and rotated to start
+    /// on the one the design leads with - which may be halfway through the
+    /// alphabet, so the sequence wraps. Both at once: sorting alone would make
+    /// the first swipe jump away from what is on screen, and leading alone
+    /// would leave the rest in whatever order they were imported.
+    var clipSequence: [ClipChoice] {
+        let all = [ClipChoice(variantID: nil, name: primaryClipTitle)]
+            + builtVariants.map { ClipChoice(variantID: $0.id, name: $0.name) }
+        // Natural order, so "Clip 2" comes before "Clip 10" rather than after.
+        let sorted = all.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        guard let start = sorted.firstIndex(where: { $0.variantID == defaultVariantID }) else {
+            // The default names a clip this build does not carry, which the
+            // build guards against; falling back keeps the list usable.
+            return sorted
+        }
+        return Array(sorted[start...] + sorted[..<start])
+    }
+
     var spec: TimerFontSpec {
         TimerFontSpec(laneCount: laneCount, framesPerSecond: framesPerSecond)
     }

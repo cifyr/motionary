@@ -231,17 +231,16 @@ struct HomeView: View {
     /// what this design happens to carry is worse than one that means nothing.
     private func switchBackground(by step: Int) {
         guard let manifest = entry?.manifest, !manifest.builtVariants.isEmpty else { return }
-        let options: [UUID?] = [nil] + manifest.builtVariants.map { Optional($0.id) }
+        // Alphabetical from the clip this scene leads with, so a swipe walks
+        // the same order the options sheet lists.
+        let options = manifest.clipSequence
         let current = VariantChoice.resolved(in: manifest)?.id
-        let position = options.firstIndex(of: current) ?? 0
+        let position = options.firstIndex { $0.variantID == current } ?? 0
         let next = options[(position + step + options.count) % options.count]
-        VariantChoice.set(next, designID: manifest.designID)
+        VariantChoice.set(next.variantID, designID: manifest.designID)
         WidgetCenterBridge.reloadAll()
         slotsEdition += 1
-        note = VariantChoice.title(
-            of: next.flatMap { id in manifest.builtVariants.first { $0.id == id } },
-            in: manifest
-        )
+        note = next.name
     }
 
     private func save() {

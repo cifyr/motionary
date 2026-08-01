@@ -151,3 +151,101 @@ final class VariantChoiceTests: XCTestCase {
         XCTAssertEqual(VariantChoice.title(of: sunset, in: manifest(variants: [sunset])), "Sunset")
     }
 }
+
+/// The order a phone steps through the clips: alphabetical so a dozen can be
+/// found in, rotated to start on the one the scene leads with so the first
+/// swipe moves away from what is on screen rather than jumping to it.
+final class ClipSequenceTests: XCTestCase {
+    private func built(_ name: String) -> BuildManifest.VariantBuild {
+        BuildManifest.VariantBuild(
+            id: UUID(), name: name, fontFamilyBase: "MFont\(name)L", totalFontBytes: 1
+        )
+    }
+
+    private func manifest(
+        _ variants: [BuildManifest.VariantBuild],
+        primary: String? = nil,
+        default id: UUID? = nil
+    ) -> BuildManifest {
+        var subject = BuildManifest(
+            designID: UUID(),
+            buildGeneration: 1,
+            fontFamilyBase: "MFontabcL",
+            laneCount: 32,
+            framesPerSecond: 16,
+            loopFrameCount: 20,
+            animationCrop: .zero,
+            widgetRect: DeviceGeometry.widgetRect,
+            screenSize: DeviceGeometry.screenPixelSize,
+            wallpaperName: "wallpaper.png",
+            totalFontBytes: 1,
+            builtAt: Date()
+        )
+        subject.clipVariants = variants.isEmpty ? nil : variants
+        subject.primaryClipName = primary
+        subject.defaultVariantID = id
+        return subject
+    }
+
+    func testASceneWithOneClipIsJustThatClip() {
+        XCTAssertEqual(manifest([]).clipSequence.map(\.name), ["Standard"])
+    }
+
+    /// The design's own clip sorts among the rest rather than always leading:
+    /// it is one of the choices, not a category of its own. Named so it sorts
+    /// first here, which is the one case where sorted and rotated agree.
+    func testTheClipsAreAlphabeticalWithTheScenesOwnAmongThem() {
+        let subject = manifest(
+            [built("Zebra"), built("Mario"), built("Pacman")],
+            primary: "Atari"
+        )
+        XCTAssertEqual(subject.clipSequence.map(\.name), ["Atari", "Mario", "Pacman", "Zebra"])
+    }
+
+    /// And with the scene leading elsewhere the same four wrap around it.
+    func testTheAlphabetWrapsAroundTheClipItLeadsWith() {
+        let subject = manifest(
+            [built("Zebra"), built("Atari"), built("Pacman")],
+            primary: "Mario"
+        )
+        XCTAssertEqual(subject.clipSequence.map(\.name), ["Mario", "Pacman", "Zebra", "Atari"])
+    }
+
+    /// Sorted alone, the first swipe would jump to whatever sorts first
+    /// instead of moving on from what is showing.
+    func testTheSequenceStartsOnTheClipTheSceneLeadsWith() {
+        let pacman = built("Pacman")
+        let subject = manifest(
+            [built("Zebra"), built("Atari"), pacman], primary: "Mario", default: pacman.id
+        )
+        XCTAssertEqual(subject.clipSequence.map(\.name), ["Pacman", "Zebra", "Atari", "Mario"])
+    }
+
+    func testLeadingWithTheScenesOwnClipStartsThere() {
+        let subject = manifest([built("Zebra"), built("Atari")], primary: "Mario")
+        XCTAssertEqual(subject.clipSequence.map(\.name), ["Mario", "Zebra", "Atari"])
+    }
+
+    /// A name with a number in it sorts the way a person reads it.
+    func testNumbersSortNaturally() {
+        let subject = manifest(
+            [built("Clip 10"), built("Clip 2")], primary: "Clip 1"
+        )
+        XCTAssertEqual(subject.clipSequence.map(\.name), ["Clip 1", "Clip 2", "Clip 10"])
+    }
+
+    /// The build guards against it, but a manifest naming a clip it does not
+    /// carry must still produce a usable list rather than an empty one.
+    func testADefaultThisBuildDoesNotCarryStillLists() {
+        let subject = manifest([built("Atari")], primary: "Mario", default: UUID())
+        XCTAssertEqual(subject.clipSequence.map(\.name), ["Atari", "Mario"])
+    }
+
+    /// Every entry has to be addressable, since the id is what gets stored.
+    func testTheScenesOwnClipCarriesNoVariantID() throws {
+        let subject = manifest([built("Atari")], primary: "Mario")
+        let own = try XCTUnwrap(subject.clipSequence.first { $0.name == "Mario" })
+        XCTAssertNil(own.variantID)
+        XCTAssertNotNil(try XCTUnwrap(subject.clipSequence.first { $0.name == "Atari" }).variantID)
+    }
+}

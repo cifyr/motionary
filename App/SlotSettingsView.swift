@@ -21,9 +21,10 @@ struct SlotSettingsView: View {
                 if !manifest.builtVariants.isEmpty {
                     Section {
                         Picker("Animation", selection: variantBinding) {
-                            Text(manifest.primaryClipTitle).tag(UUID?.none)
-                            ForEach(manifest.builtVariants) { variant in
-                                Text(variant.name).tag(UUID?.some(variant.id))
+                            // Alphabetical from the one this scene leads with,
+                            // the same order a swipe walks.
+                            ForEach(manifest.clipSequence) { clip in
+                                Text(clip.name).tag(clip.variantID)
                             }
                         }
                         .pickerStyle(.inline)
