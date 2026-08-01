@@ -36,8 +36,15 @@ final class BackgroundTapTests: XCTestCase {
         XCTAssertNil(BackgroundTap.url(for: "https://"))
     }
 
-    func testTheDefaultAddressIsUsable() {
-        XCTAssertNotNil(BackgroundTap.url(for: BackgroundTap.defaultAddress))
+    /// Every engine on offer has to be somewhere the browser can go, or the
+    /// picker has a row that quietly does nothing.
+    func testEveryEngineIsUsable() {
+        for engine in BackgroundTap.engines {
+            XCTAssertNotNil(BackgroundTap.url(for: engine.address), engine.name)
+        }
+        let ids = BackgroundTap.engines.map(\.id)
+        XCTAssertEqual(Set(ids).count, ids.count, "two engines share an id")
+        XCTAssertFalse(ids.contains(BackgroundTap.customValue), "an engine shadows the custom row")
     }
 
     // MARK: - The stored setting
@@ -46,6 +53,7 @@ final class BackgroundTapTests: XCTestCase {
         let defaults = UserDefaults(suiteName: DesignStore.appGroupIdentifier)
         defaults?.removeObject(forKey: "backgroundTapEnabled")
         defaults?.removeObject(forKey: "backgroundTapAddress")
+        defaults?.removeObject(forKey: "backgroundTapChoice")
         super.tearDown()
     }
 
@@ -58,7 +66,19 @@ final class BackgroundTapTests: XCTestCase {
 
     func testSwitchingItOnGivesTheWidgetSomewhereToGo() {
         BackgroundTap.isEnabled = true
-        BackgroundTap.address = "example.com"
+        BackgroundTap.choice = "duckduckgo"
+        XCTAssertEqual(BackgroundTap.destination?.absoluteString, "https://duckduckgo.com")
+    }
+
+    /// The typed address is only used when it is what was chosen, so switching
+    /// back to an engine does not leave the old one in force.
+    func testAnEngineWinsOverWhateverWasTyped() {
+        BackgroundTap.isEnabled = true
+        BackgroundTap.customAddress = "example.com"
+        BackgroundTap.choice = "bing"
+        XCTAssertEqual(BackgroundTap.destination?.absoluteString, "https://www.bing.com")
+
+        BackgroundTap.choice = BackgroundTap.customValue
         XCTAssertEqual(BackgroundTap.destination?.absoluteString, "https://example.com")
     }
 
@@ -66,7 +86,8 @@ final class BackgroundTapTests: XCTestCase {
     /// rather than one that refuses.
     func testAnUnusableAddressLeavesNoDestination() {
         BackgroundTap.isEnabled = true
-        BackgroundTap.address = "spotify://"
+        BackgroundTap.choice = BackgroundTap.customValue
+        BackgroundTap.customAddress = "spotify://"
         XCTAssertNil(BackgroundTap.destination)
     }
 }
