@@ -64,10 +64,17 @@ struct SlotSettingsView: View {
                                 WidgetCenterBridge.reloadAll()
                             }
                         )) {
-                            ForEach(BackgroundTap.engines) { engine in
-                                Text(engine.name).tag(engine.id)
+                            Section("The browser itself") {
+                                ForEach(BackgroundTap.browsers) { browser in
+                                    Text(browser.name).tag(browser.id)
+                                }
                             }
-                            Text("A page of my own").tag(BackgroundTap.customValue)
+                            Section("A search page") {
+                                ForEach(BackgroundTap.engines) { engine in
+                                    Text(engine.name).tag(engine.id)
+                                }
+                                Text("A page of my own").tag(BackgroundTap.customValue)
+                            }
                         }
 
                         if choice == BackgroundTap.customValue {
@@ -94,13 +101,19 @@ struct SlotSettingsView: View {
                 } header: {
                     Text("The space between the icons")
                 } footer: {
-                    Text("""
-                    A tap that misses every icon opens this in whichever \
-                    browser your phone is set to use - straight from the Home \
-                    Screen rather than through Motionary. iOS does not tell \
-                    apps which search engine that browser is set to, so pick \
-                    it here once. Off leaves the gaps doing nothing.
-                    """)
+                    Text(BackgroundTap.destinationChoice?.isApp == true
+                         ? """
+                         Opens the browser itself, through Motionary - iOS \
+                         gives a widget no way to open an app directly, which \
+                         is why every icon here works the same way. If it is \
+                         not installed, its page opens instead.
+                         """
+                         : """
+                         Opens this page straight from the Home Screen, in \
+                         whichever browser your phone is set to use. iOS does \
+                         not tell apps which search engine that browser \
+                         searches with, so pick it here once.
+                         """)
                 }
 
                 Section {

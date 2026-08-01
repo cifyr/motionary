@@ -57,12 +57,13 @@ enum AppCatalog {
                    scheme: "app-settings:", webFallback: nil, category: .system),
         CatalogApp(id: "calendar", name: "Calendar", symbol: "calendar", tint: .red,
                    scheme: "calshow://", webFallback: nil, category: .system),
-        // Four spellings, because Apple publishes none of them and which one
-        // answers has moved between releases. This carried no scheme at all
-        // for a while, on the grounds that claiming a route that cannot work
-        // turns a tap into "Clock could not be opened" - but the router tries
-        // every candidate and only says that once all of them have refused, so
-        // listing four is strictly better than listing none.
+        // Four spellings, none of them Apple's - it publishes none. Measured
+        // against them all: the lab build that came before this tried clock:,
+        // clock-alarm:, clock-worldclock:, clock-timer: and clock-stopwatch:
+        // on a physical iPhone running iOS 27 and every one was rejected. They
+        // are listed anyway because the router walks its candidates and stops
+        // at the first that opens, so they cost a tap nothing and may answer
+        // on some other release. Nothing here is a promise that Clock opens.
         CatalogApp(id: "clock", name: "Clock", symbol: "clock.fill", tint: .orange,
                    scheme: "clock-alarm://", webFallback: nil,
                    alternates: ["clock-worldclock://", "clock-timer://", "clock-sleep-alarm://"], category: .system),

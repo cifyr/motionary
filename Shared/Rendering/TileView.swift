@@ -145,6 +145,28 @@ enum LaunchLink {
         return components.url ?? url(for: tile.appID)
     }
 
+    /// A link that hands several routes to the app, tried in order.
+    ///
+    /// A widget cannot open a custom scheme itself - the lab build settled
+    /// that on a physical iPhone - so anything that is not https travels this
+    /// way, and the app walks the list exactly as it does for a tile.
+    static func url(opening candidates: [URL]) -> URL {
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = "open"
+        components.queryItems = candidates.map { URLQueryItem(name: "url", value: $0.absoluteString) }
+        return components.url ?? candidates.first ?? url(for: "")
+    }
+
+    /// Every route a link carries, in order. One `url` item is the common
+    /// case; a background tap that opens a browser carries two.
+    static func candidates(from url: URL) -> [URL] {
+        guard url.scheme == scheme, url.host == "open",
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        else { return [] }
+        return items.filter { $0.name == "url" }.compactMap { $0.value }.compactMap(URL.init(string:))
+    }
+
     static func target(from url: URL) -> Target? {
         guard url.scheme == scheme else { return nil }
         if url.host == "launch", let id = url.pathComponents.dropFirst().first {

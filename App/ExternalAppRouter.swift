@@ -33,10 +33,17 @@ final class ExternalAppRouter: ObservableObject {
                 await self?.open(app)
             }
         case .url(let destination):
-            // An app the catalogue does not know, addressed by its own URL.
+            // Every route the link carries, not just the first: a background
+            // tap that opens a browser sends the app's own scheme and its web
+            // address, so an uninstalled browser lands on its page rather than
+            // on nothing.
+            let candidates = LaunchLink.candidates(from: url)
             Task { [weak self] in
                 try? await Task.sleep(for: Self.settleDelay)
-                await self?.open(candidates: [destination], named: destination.scheme ?? "that app")
+                await self?.open(
+                    candidates: candidates.isEmpty ? [destination] : candidates,
+                    named: destination.host ?? destination.scheme ?? "that app"
+                )
             }
         }
     }

@@ -74,7 +74,7 @@ struct DesignWidgetView: View {
                 // address rather than a route through Motionary: a widget hands
                 // https straight to the default browser, and bouncing through
                 // the app to do the same would be a visible detour.
-                background: BackgroundTap.destination,
+                background: BackgroundTap.widgetDestination,
                 assets: source.manifest.placedAssets,
                 assetImage: { asset in
                     PrebuiltDesign.pictureURL(assetID: asset.id)

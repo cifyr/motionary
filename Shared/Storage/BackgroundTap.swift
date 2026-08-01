@@ -7,35 +7,60 @@ import os
 /// space. Off by default, because a Home Screen where the gaps do something
 /// unexpected is worse than one where they do nothing.
 ///
-/// Where it goes is a web address, and that is not a limitation so much as the
-/// whole mechanism: a widget hands `https` straight to whatever browser the
-/// phone is set to open links with. Arc, Chrome, Safari - it is the system's
-/// choice, not this app's, and the same tap gets it without going through
-/// Motionary first. An app's own scheme from an extension is unreliable, which
-/// is why every tile does go through Motionary and why this cannot.
+/// Where it goes is either a browser or a page, and the two travel differently
+/// - see `Destination`. A page is https, which a widget hands straight to
+/// whichever browser the phone opens links with; a browser is an app, and an
+/// app is opened the way every tile is, through Motionary.
 enum BackgroundTap {
     private static let logger = Logger(subsystem: "com.caden.Motionary", category: "BackgroundTap")
 
-    /// A search engine to land on.
+    /// Somewhere a tap can go.
     ///
-    /// iOS tells an app nothing about which engine the browser is set to, and
-    /// there is no address that means "wherever my browser opens a new tab" -
-    /// so it is asked once here rather than guessed at every tap.
-    struct Engine: Identifiable, Equatable, Sendable {
+    /// Two kinds, because they travel differently. A page is https, and a
+    /// widget hands that straight to whatever browser the phone opens links
+    /// with - no detour. A browser opened *as an app* is a custom scheme, and
+    /// a widget cannot open one of those: the lab build that came before this
+    /// established that on a physical iPhone, and it is why every tile goes
+    /// through Motionary. So those go the same way the tiles do.
+    struct Destination: Identifiable, Equatable, Sendable {
         let id: String
         let name: String
+        /// The app's own scheme, for a browser. Nil for a plain page.
+        let scheme: String?
+        /// Where it goes: the page for a search engine, and the fallback for a
+        /// browser that turns out not to be installed.
         let address: String
+
+        var isApp: Bool { scheme != nil }
     }
 
-    static let engines: [Engine] = [
-        Engine(id: "google", name: "Google", address: "https://www.google.com"),
-        Engine(id: "duckduckgo", name: "DuckDuckGo", address: "https://duckduckgo.com"),
-        Engine(id: "bing", name: "Bing", address: "https://www.bing.com"),
-        Engine(id: "brave", name: "Brave Search", address: "https://search.brave.com"),
-        Engine(id: "ecosia", name: "Ecosia", address: "https://www.ecosia.org"),
-        Engine(id: "startpage", name: "Startpage", address: "https://www.startpage.com"),
-        Engine(id: "yahoo", name: "Yahoo", address: "https://search.yahoo.com"),
+    /// Opened as apps, through Motionary, because a widget cannot open a
+    /// custom scheme itself. `arcmobile2://` is Arc Search's own, which the
+    /// lab build used and which was verified on a physical iPhone.
+    static let browsers: [Destination] = [
+        Destination(id: "arc", name: "Arc Search", scheme: "arcmobile2://", address: "https://arc.net/"),
+        Destination(id: "safari", name: "Safari", scheme: "x-web-search://", address: "https://www.apple.com/"),
+        Destination(id: "chrome", name: "Chrome", scheme: "googlechrome://", address: "https://www.google.com"),
+        Destination(id: "firefox", name: "Firefox", scheme: "firefox://", address: "https://www.mozilla.org/firefox/"),
+        Destination(id: "edge", name: "Edge", scheme: "microsoft-edge://", address: "https://www.bing.com"),
+        Destination(id: "bravebrowser", name: "Brave", scheme: "brave://", address: "https://search.brave.com"),
     ]
+
+    /// Opened as pages, straight from the widget, in whichever browser the
+    /// phone is set to use. iOS tells an app nothing about which engine that
+    /// browser searches with, and there is no address meaning "wherever my
+    /// browser opens a new tab" - so it is asked once here rather than guessed.
+    static let engines: [Destination] = [
+        Destination(id: "google", name: "Google", scheme: nil, address: "https://www.google.com"),
+        Destination(id: "duckduckgo", name: "DuckDuckGo", scheme: nil, address: "https://duckduckgo.com"),
+        Destination(id: "bing", name: "Bing", scheme: nil, address: "https://www.bing.com"),
+        Destination(id: "brave", name: "Brave Search", scheme: nil, address: "https://search.brave.com"),
+        Destination(id: "ecosia", name: "Ecosia", scheme: nil, address: "https://www.ecosia.org"),
+        Destination(id: "startpage", name: "Startpage", scheme: nil, address: "https://www.startpage.com"),
+        Destination(id: "yahoo", name: "Yahoo", scheme: nil, address: "https://search.yahoo.com"),
+    ]
+
+    static var allDestinations: [Destination] { browsers + engines }
 
     /// Stored value meaning "the address typed by hand" rather than an engine.
     static let customValue = "-custom-"
@@ -56,9 +81,10 @@ enum BackgroundTap {
         }
     }
 
-    /// An engine's id, or `customValue`.
+    /// A destination's id, or `customValue`. Defaults to the browser itself,
+    /// which is what a tap on empty space most obviously means.
     static var choice: String {
-        get { defaults?.string(forKey: choiceKey) ?? engines[0].id }
+        get { defaults?.string(forKey: choiceKey) ?? browsers[0].id }
         set { defaults?.set(newValue, forKey: choiceKey) }
     }
 
@@ -69,16 +95,31 @@ enum BackgroundTap {
         set { defaults?.set(newValue, forKey: addressKey) }
     }
 
-    static var engine: Engine? {
-        engines.first { $0.id == choice }
+    static var destinationChoice: Destination? {
+        allDestinations.first { $0.id == choice }
     }
 
-    /// The address the current choice stands for, tidied or not.
+    /// The address the current choice stands for.
     static var address: String {
-        engine?.address ?? customAddress
+        destinationChoice?.address ?? customAddress
     }
 
     /// Where a tap actually goes, or nil when nothing should answer it.
+    ///
+    /// A browser goes through Motionary, which walks the scheme and then the
+    /// web address - so choosing Arc opens Arc, and opens arc.net in whatever
+    /// browser is set if Arc is not installed. A page goes direct.
+    static var widgetDestination: URL? {
+        guard isEnabled else { return nil }
+        guard let chosen = destinationChoice, let scheme = chosen.scheme else {
+            return url(for: address)
+        }
+        let candidates = [URL(string: scheme), url(for: chosen.address)].compactMap { $0 }
+        return candidates.isEmpty ? nil : LaunchLink.url(opening: candidates)
+    }
+
+    /// What the settings screen says it will do, which is the page rather than
+    /// the route to it.
     static var destination: URL? {
         guard isEnabled else { return nil }
         return url(for: address)
