@@ -405,9 +405,28 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     var tiles: [PlacedTile] = []
     /// Decoration placed on the composition, drawn beneath the tiles.
     var assets: [PlacedAsset] = []
-    /// Alternative clips for the animated part. The design's own clip is the
-    /// default; the phone chooses among all of them after install.
+    /// Alternative clips for the animated part. The design's own clip is one of
+    /// them; the phone chooses among all of them after install.
     var variants: [ClipVariant] = []
+
+    /// What the design's own clip is called.
+    ///
+    /// It sits in the phone's list beside the variants, so leaving it unnamed
+    /// makes it the one entry that cannot say what it is. Nil is "Standard".
+    var primaryClipName: String?
+
+    /// The clip a phone shows before it has chosen one. Nil is the design's
+    /// own, which is what a design with no opinion should do.
+    ///
+    /// A choice rather than a rebuild: every variant is fully built and in the
+    /// bundle, so which one leads is a name in the manifest, not a re-encode.
+    var defaultVariantID: UUID?
+
+    /// The design's own clip as an entry in the same list as the variants, so
+    /// naming and defaulting can treat all the clips alike.
+    var primaryClip: ClipVariant {
+        ClipVariant(id: id, name: primaryClipName ?? "Standard", sourceVideoName: sourceVideoName)
+    }
     /// The grid tiles land on inside the widget frame.
     var grid: WidgetGrid = WidgetGrid()
     var snapEnabled: Bool = true
@@ -536,6 +555,8 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         tiles = try container.decodeIfPresent([PlacedTile].self, forKey: .tiles) ?? []
         assets = try container.decodeIfPresent([PlacedAsset].self, forKey: .assets) ?? []
         variants = try container.decodeIfPresent([ClipVariant].self, forKey: .variants) ?? []
+        primaryClipName = try container.decodeIfPresent(String.self, forKey: .primaryClipName)
+        defaultVariantID = try container.decodeIfPresent(UUID.self, forKey: .defaultVariantID)
         grid = try container.decodeIfPresent(WidgetGrid.self, forKey: .grid) ?? WidgetGrid()
         snapEnabled = try container.decodeIfPresent(Bool.self, forKey: .snapEnabled) ?? true
         backgroundName = try container.decodeIfPresent(String.self, forKey: .backgroundName)
@@ -624,6 +645,18 @@ struct BuildManifest: Codable, Equatable, Sendable {
     var clipVariants: [VariantBuild]?
 
     var builtVariants: [VariantBuild] { clipVariants ?? [] }
+
+    /// What the design's own clip is called in the phone's list. Nil is
+    /// "Standard", which is what every build before naming existed shows.
+    var primaryClipName: String?
+
+    /// The clip a phone shows before it has chosen one, or nil for the
+    /// design's own. Written only when that variant actually built - a default
+    /// pointing at fonts the bundle does not carry is a black widget.
+    var defaultVariantID: UUID?
+
+    /// What to call the primary, ready to show.
+    var primaryClipTitle: String { primaryClipName ?? "Standard" }
 
     var spec: TimerFontSpec {
         TimerFontSpec(laneCount: laneCount, framesPerSecond: framesPerSecond)

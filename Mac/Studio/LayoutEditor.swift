@@ -1305,43 +1305,97 @@ struct LayoutEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            // The design's own clip is in the list because it is one of the
+            // choices on the phone: it can be named and it can be led with,
+            // exactly like the rest.
+            clipRow(
+                name: Binding(
+                    get: { design.primaryClipName ?? "Standard" },
+                    set: { design.primaryClipName = $0.isEmpty ? nil : $0 }
+                ),
+                isPreviewed: previewedVariantID == nil,
+                isDefault: design.defaultVariantID == nil,
+                onPreview: { previewedVariantID = nil },
+                onDefault: { design.defaultVariantID = nil },
+                onRemove: nil
+            )
+
             ForEach(design.variants) { variant in
-                HStack(spacing: 6) {
-                    Image(systemName: previewedVariantID == variant.id ? "eye.fill" : "film")
-                        .font(.caption2)
-                        .foregroundStyle(previewedVariantID == variant.id ? Color.accentColor : .secondary)
-                    Text(variant.name)
-                        .font(.caption)
-                        .foregroundStyle(previewedVariantID == variant.id ? Color.accentColor : .primary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer()
-                    Button {
-                        removeVariant(variant)
-                    } label: {
-                        Image(systemName: "xmark.circle")
-                    }
-                    .buttonStyle(.plain)
-                    .help("Remove \(variant.name) and its clip")
-                }
-                .contentShape(Rectangle())
-                // Click to stand this clip on the canvas; click again for the
-                // primary. One shared transform positions every clip at the
-                // same centre, so this only switches which picture shows.
-                .onTapGesture {
-                    previewedVariantID = previewedVariantID == variant.id ? nil : variant.id
-                }
-                .help("Show \(variant.name) on the canvas")
+                clipRow(
+                    name: Binding(
+                        get: { variant.name },
+                        set: { newName in
+                            guard let index = design.variants.firstIndex(where: { $0.id == variant.id })
+                            else { return }
+                            design.variants[index].name = newName
+                        }
+                    ),
+                    isPreviewed: previewedVariantID == variant.id,
+                    isDefault: design.defaultVariantID == variant.id,
+                    onPreview: {
+                        previewedVariantID = previewedVariantID == variant.id ? nil : variant.id
+                    },
+                    onDefault: { design.defaultVariantID = variant.id },
+                    onRemove: { removeVariant(variant) }
+                )
             }
 
             if !design.variants.isEmpty {
-                Text("Click a variant to see it on the canvas. Position and crop are shared - every clip centres on the same point - and each variant loops at its own length.")
+                Text("Click a clip to see it on the canvas, and the star to lead with it - a phone shows that one until it picks another. Position and crop are shared, and each clip loops at its own length.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .disabled(store == nil)
+    }
+
+    /// One clip in the list: what it is called, whether the canvas is showing
+    /// it, and whether the phone leads with it. `onRemove` is nil for the
+    /// design's own clip, which is the design and cannot be taken out of it.
+    @ViewBuilder
+    private func clipRow(
+        name: Binding<String>,
+        isPreviewed: Bool,
+        isDefault: Bool,
+        onPreview: @escaping () -> Void,
+        onDefault: @escaping () -> Void,
+        onRemove: (() -> Void)?
+    ) -> some View {
+        HStack(spacing: 6) {
+            Button(action: onPreview) {
+                Image(systemName: isPreviewed ? "eye.fill" : "film")
+                    .font(.caption2)
+                    .foregroundStyle(isPreviewed ? Color.accentColor : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Show this clip on the canvas")
+
+            // A field rather than a label: the name is what the phone's list
+            // shows, and a clip called "Variant 3" says nothing there.
+            TextField("Name", text: name)
+                .textFieldStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(isPreviewed ? Color.accentColor : .primary)
+                .lineLimit(1)
+
+            Button(action: onDefault) {
+                Image(systemName: isDefault ? "star.fill" : "star")
+                    .font(.caption2)
+                    .foregroundStyle(isDefault ? Color.accentColor : .secondary)
+            }
+            .buttonStyle(.plain)
+            .disabled(isDefault)
+            .help(isDefault ? "Phones show this one first" : "Show this one first on a phone")
+
+            if let onRemove {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark.circle")
+                }
+                .buttonStyle(.plain)
+                .help("Remove this clip")
+            }
+        }
     }
 
     private func importVariants() {
@@ -1372,6 +1426,9 @@ struct LayoutEditor: View {
     /// the design, and a swapped-out variant should not keep growing it.
     private func removeVariant(_ variant: ClipVariant) {
         if previewedVariantID == variant.id { previewedVariantID = nil }
+        // Otherwise the design leads with a clip that is no longer in it, and
+        // the build quietly writes no default at all.
+        if design.defaultVariantID == variant.id { design.defaultVariantID = nil }
         design.variants.removeAll { $0.id == variant.id }
         store?.removeVariantClip(named: variant.sourceVideoName, for: design.id)
     }

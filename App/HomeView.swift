@@ -238,7 +238,10 @@ struct HomeView: View {
         VariantChoice.set(next, designID: manifest.designID)
         WidgetCenterBridge.reloadAll()
         slotsEdition += 1
-        note = next.flatMap { id in manifest.builtVariants.first { $0.id == id }?.name } ?? "Standard"
+        note = VariantChoice.title(
+            of: next.flatMap { id in manifest.builtVariants.first { $0.id == id } },
+            in: manifest
+        )
     }
 
     private func save() {

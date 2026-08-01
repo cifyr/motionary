@@ -21,7 +21,7 @@ struct SlotSettingsView: View {
                 if !manifest.builtVariants.isEmpty {
                     Section {
                         Picker("Animation", selection: variantBinding) {
-                            Text("Standard").tag(UUID?.none)
+                            Text(manifest.primaryClipTitle).tag(UUID?.none)
                             ForEach(manifest.builtVariants) { variant in
                                 Text(variant.name).tag(UUID?.some(variant.id))
                             }
