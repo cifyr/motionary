@@ -241,9 +241,13 @@ struct StudioPipeline: Sendable {
             clipRect: design.backgroundName == nil ? nil : design.widgetRect,
             clipCornerRadius: design.effectiveCornerRadius
         )
+        // The whole loop, not a prefix of it: a crop measured against only the
+        // first 16 frames missed everything a clip did after its first half
+        // second - real for anything that travels rather than idles in place,
+        // and it locked the box that gets reused for every remaining frame.
         let sample = try await extractor.composedFrames(
             startFrame: 0,
-            count: min(design.loopFrameCount, 16),
+            count: design.loopFrameCount,
             frameRate: design.spec.framesPerSecond
         )
         // The detector works across the whole screen and the motion it finds
