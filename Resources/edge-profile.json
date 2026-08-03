@@ -3,30 +3,102 @@
   "note": "Light the Home Screen adds along a widget's top and bottom rows, per channel, by distance in pixels inward from the edge. Written by Tools/edge-calibrate.py; the same numbers are compiled into EdgeCompensation as the shipped default, so a missing or unreadable file cannot ship a design with no correction at all. Nothing down the left and right edges: measured at both side boundaries the score was -1.9 to +0.4, i.e. noise.",
   "devices": {
     "iphone17pro": {
-      "measuredAt": "2026-07-29",
-      "measuredFrom": "full-resolution iPhone 17 Pro Home Screen screenshots, three measure-adjust rounds against the Polaroid design",
+      "measuredAt": "2026-08-02",
+      "measuredFrom": "shot_png1.png against prebuilt-e51e8452-29a3-4943-bc25-eb159a2aa727-wallpaper.png, 9 column bins, clamped bins excluded; rewritten: top, bottom",
       "strength": 1.0,
       "top": [
-        [68, 70, 63],
-        [54, 45, 47],
-        [40, 32, 23],
-        [14, 13, 10],
-        [11, 10, 8],
-        [11, 7, 6],
-        [7, 7, 5],
-        [6, 6, 4],
-        [5, 5, 4]
+        [
+          86.8,
+          91.8,
+          94.5
+        ],
+        [
+          51.8,
+          52.8,
+          59.5
+        ],
+        [
+          33.8,
+          36.8,
+          38.5
+        ],
+        [
+          10.8,
+          11.8,
+          14.5
+        ],
+        [
+          10.8,
+          10.8,
+          12.5
+        ],
+        [
+          9.8,
+          8.8,
+          10.5
+        ],
+        [
+          6.8,
+          7.8,
+          9.5
+        ],
+        [
+          5.8,
+          5.8,
+          7.5
+        ],
+        [
+          4.8,
+          4.8,
+          7.5
+        ]
       ],
       "bottom": [
-        [86, 75, 68],
-        [64, 67, 68],
-        [47, 39, 45],
-        [19, 14, 17],
-        [16, 12, 6],
-        [11, 10, 5],
-        [12, 7, 6],
-        [9, 6, 5],
-        [8, 5, 3]
+        [
+          86.0,
+          75.0,
+          68.0
+        ],
+        [
+          64.0,
+          67.0,
+          68.0
+        ],
+        [
+          38.7,
+          39.0,
+          40.0
+        ],
+        [
+          11.7,
+          11.9,
+          12.9
+        ],
+        [
+          11.7,
+          11.8,
+          11.7
+        ],
+        [
+          8.6,
+          9.9,
+          10.7
+        ],
+        [
+          7.8,
+          7.7,
+          8.1
+        ],
+        [
+          6.5,
+          6.8,
+          6.9
+        ],
+        [
+          6.6,
+          6.5,
+          5.5
+        ]
       ]
     }
   }
