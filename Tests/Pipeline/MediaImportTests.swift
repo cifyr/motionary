@@ -57,6 +57,106 @@ final class MediaImportTests: XCTestCase {
         CGColor(red: r, green: g, blue: b, alpha: 1)
     }
 
+    /// A source that is transparent everywhere but a small centred block — the
+    /// shape a cut-out clip has, and the one the dimmed blow-up gets wrong.
+    private func writeTransparentGIF(
+        named name: String,
+        frames: [CGColor],
+        size: CGSize = CGSize(width: 40, height: 40)
+    ) throws -> URL {
+        let url = directory.appendingPathComponent(name)
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.gif.identifier as CFString, frames.count, nil
+        ))
+        for colour in frames {
+            let context = try XCTUnwrap(CGContext(
+                data: nil, width: Int(size.width), height: Int(size.height),
+                bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            context.clear(CGRect(origin: .zero, size: size))
+            context.setFillColor(colour)
+            context.fill(CGRect(x: size.width / 4, y: size.height / 4, width: size.width / 2, height: size.height / 2))
+            let image = try XCTUnwrap(context.makeImage())
+            CGImageDestinationAddImage(destination, image, [
+                kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.1],
+            ] as CFDictionary)
+        }
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return url
+    }
+
+    // MARK: - Transparent sources
+
+    /// An alpha channel is not the same as a transparent pixel: a GIF decodes
+    /// to an alpha format whatever it contains, so only the samples can decide.
+    func testOnlyActualTransparencyCountsAsACutOut() throws {
+        func image(_ alpha: CGImageAlphaInfo, clear: Bool) throws -> CGImage {
+            let context = try XCTUnwrap(CGContext(
+                data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: alpha.rawValue
+            ))
+            context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: clear ? 32 : 64))
+            return try XCTUnwrap(context.makeImage())
+        }
+        XCTAssertTrue(MediaFrameExtractor.isCutOut(try image(.premultipliedLast, clear: true)))
+        XCTAssertFalse(
+            MediaFrameExtractor.isCutOut(try image(.premultipliedLast, clear: false)),
+            "an opaque frame in an alpha format is not a cut-out"
+        )
+        XCTAssertFalse(MediaFrameExtractor.isCutOut(try image(.noneSkipLast, clear: true)))
+    }
+
+    /// The blow-up exists to hide behind an opaque clip and only show past its
+    /// edges. A cut-out clip lets all of it through, which put a second, fainter
+    /// copy of the subject on screen somewhere else entirely.
+    func testTransparentSourceGetsNoDimmedBlowUpBehindIt() async throws {
+        let url = try writeTransparentGIF(named: "cutout.gif", frames: [colour(1, 0, 0), colour(0, 1, 0)])
+        let frame = try await MediaFrameExtractor(
+            url: url,
+            transform: MediaTransform(scale: 0.4, offset: .zero, fillsBackground: true)
+        ).composedFrames(startFrame: 0, count: 1, frameRate: 16)[0]
+
+        // Where the aspect-filled blow-up would have painted the block, but the
+        // shrunken clip does not reach.
+        let screen = DeviceGeometry.screenPixelSize
+        let ghost = CGPoint(x: screen.width / 2, y: screen.height * 0.3)
+        XCTAssertEqual(pixel(at: ghost, in: frame), [0, 0, 0], "a cut-out clip must not be echoed behind itself")
+    }
+
+    func testOpaqueSourceKeepsTheDimmedBlowUp() async throws {
+        let url = try writeGIF(named: "opaque.gif", frames: [colour(1, 0, 0), colour(0, 1, 0)])
+        let frame = try await MediaFrameExtractor(
+            url: url,
+            transform: MediaTransform(scale: 0.4, offset: .zero, fillsBackground: true)
+        ).composedFrames(startFrame: 0, count: 1, frameRate: 16)[0]
+
+        let corner = CGPoint(x: 20, y: 20)
+        XCTAssertGreaterThan(pixel(at: corner, in: frame)[0], 40, "an opaque clip still fills the uncovered screen")
+    }
+
+    // MARK: - Centring
+
+    func testCentringMovesTheClipOntoTheWidgetWithoutResizing() {
+        let screen = CGSize(width: 1206, height: 2622)
+        let widget = CGRect(x: 66, y: 270, width: 1074, height: 1632)
+        let start = MediaTransform(scale: 0.5, offset: CGPoint(x: 400, y: -900), fillsBackground: true)
+        let centred = start.centred(inside: widget, screenSize: screen)
+
+        XCTAssertEqual(centred.scale, start.scale, "centring must not resize")
+        XCTAssertTrue(centred.fillsBackground)
+
+        let placed = MediaFrameExtractor.placement(
+            sourceSize: CGSize(width: 400, height: 400),
+            screenSize: screen,
+            transform: centred
+        )
+        XCTAssertEqual(placed.midX, widget.midX, accuracy: 0.01)
+        XCTAssertEqual(placed.midY, widget.midY, accuracy: 0.01)
+    }
+
     // MARK: - Kind detection
 
     func testGIFIsDetectedByContentNotExtension() throws {

@@ -684,7 +684,9 @@ struct LayoutEditor: View {
                 // dimmed blow-up of the same frame rather than black. Drawing
                 // black here instead - which this did - meant the wallpaper
                 // that came out did not look like the one that was positioned.
-                if background == nil, design.mediaTransform.fillsBackground {
+                if background == nil,
+                   design.mediaTransform.fillsBackground,
+                   !MediaFrameExtractor.isCutOut(poster) {
                     let fill = MediaFrameExtractor.backdropPlacement(
                         sourceSize: sourceSize,
                         screenSize: model.screenPixelSize
@@ -1986,12 +1988,23 @@ struct LayoutEditor: View {
                     ),
                     in: 0.1 ... 4
                 )
-                Button("Fit to widget") {
-                    design.mediaTransform = MediaTransform.fitting(
-                        sourceSize: sourceSize,
-                        inside: design.widgetRect,
-                        screenSize: model.screenPixelSize
-                    )
+                HStack(spacing: 10) {
+                    Button("Fit to widget") {
+                        design.mediaTransform = MediaTransform.fitting(
+                            sourceSize: sourceSize,
+                            inside: design.widgetRect,
+                            screenSize: model.screenPixelSize
+                        )
+                    }
+                    Button("Centre") {
+                        design.mediaTransform = design.mediaTransform.centred(
+                            inside: design.widgetRect,
+                            screenSize: model.screenPixelSize
+                        )
+                    }
+                    Button("Fill screen") {
+                        design.mediaTransform = .identity
+                    }
                 }
                 .buttonStyle(.link)
             }
