@@ -318,6 +318,10 @@ struct PlacedAsset: Codable, Equatable, Identifiable, Sendable {
     var opacity: Double = 1
     /// Draw order among assets. Higher draws later, so over the others.
     var zIndex: Int = 0
+    /// Drawn before the animated layer instead of after it. A transparent
+    /// picture placed this way sits between the wallpaper and the motion,
+    /// rather than always covering it.
+    var drawsBehindAnimation: Bool = false
     /// Keying settings, applied when the asset is drawn.
     ///
     /// Non-destructive on purpose: the imported file is never rewritten, so a
@@ -343,6 +347,7 @@ struct PlacedAsset: Codable, Equatable, Identifiable, Sendable {
         rotation: Double = 0,
         opacity: Double = 1,
         zIndex: Int = 0,
+        drawsBehindAnimation: Bool = false,
         chroma: ChromaKey.Settings? = nil
     ) {
         self.id = id
@@ -352,6 +357,7 @@ struct PlacedAsset: Codable, Equatable, Identifiable, Sendable {
         self.rotation = rotation
         self.opacity = opacity
         self.zIndex = zIndex
+        self.drawsBehindAnimation = drawsBehindAnimation
         self.chroma = chroma
     }
 
@@ -366,6 +372,7 @@ struct PlacedAsset: Codable, Equatable, Identifiable, Sendable {
         rotation = try container.decodeIfPresent(Double.self, forKey: .rotation) ?? 0
         opacity = try container.decodeIfPresent(Double.self, forKey: .opacity) ?? 1
         zIndex = try container.decodeIfPresent(Int.self, forKey: .zIndex) ?? 0
+        drawsBehindAnimation = try container.decodeIfPresent(Bool.self, forKey: .drawsBehindAnimation) ?? false
         chroma = try container.decodeIfPresent(ChromaKey.Settings.self, forKey: .chroma)
     }
 }

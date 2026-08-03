@@ -666,6 +666,12 @@ struct LayoutEditor: View {
                     .frame(width: canvas.width, height: canvas.height)
                     .clipped()
             }
+            // Between the wallpaper and the clip, matching the compositor: a
+            // picture marked to draw behind the animation shows through it
+            // rather than always covering it.
+            ForEach(design.assets.filter(\.drawsBehindAnimation).sorted { $0.zIndex < $1.zIndex }) { asset in
+                assetView(asset)
+            }
             if !playbackFrames.isEmpty {
                 // A composed frame already carries the placement, the fill and
                 // the background, so it stands in for both layers below rather
@@ -696,7 +702,7 @@ struct LayoutEditor: View {
             guideOverlay
             // Under the tiles, matching what the wallpaper bakes, so the canvas
             // shows the stacking the phone will actually have.
-            ForEach(design.assets.sorted { $0.zIndex < $1.zIndex }) { asset in
+            ForEach(design.assets.filter { !$0.drawsBehindAnimation }.sorted { $0.zIndex < $1.zIndex }) { asset in
                 assetView(asset)
             }
             ForEach(design.readouts.sorted { $0.zIndex < $1.zIndex }) { readout in
@@ -1220,6 +1226,12 @@ struct LayoutEditor: View {
 
             LabeledContent("Opacity", value: String(format: "%.2f", asset.opacity)).font(.caption2)
             Slider(value: assetBinding(asset.id, \.opacity, fallback: 1), in: 0 ... 1)
+
+            // A transparent picture placed here shows the wallpaper through
+            // it, with the motion drawn on top - rather than always covering
+            // the animation, which is the only stacking there used to be.
+            Toggle("Behind the animation", isOn: assetBinding(asset.id, \.drawsBehindAnimation, fallback: false))
+                .font(.caption)
 
             Divider()
             keyingControls(asset)

@@ -21,9 +21,11 @@ struct CompositionView<Tile: View>: View {
     /// widget black.
     var wallpaperRect: CGRect?
     let isAnimated: Bool
-    /// Placed pictures, drawn over the animation and under the tiles - the
-    /// same stacking the editor and the wallpaper bake use. Defaulted so the
-    /// font lab, which draws no decoration, does not have to say so.
+    /// Placed pictures, drawn over the animation and under the tiles by
+    /// default - the same stacking the editor and the wallpaper bake use. An
+    /// asset with `drawsBehindAnimation` set instead draws between the
+    /// wallpaper and the animated layer. Defaulted so the font lab, which
+    /// draws no decoration, does not have to say so.
     var assets: [PlacedAsset] = []
     var assetImage: (PlacedAsset) -> Image? = { _ in nil }
     /// Live text, drawn over the pictures and under the tiles: a readout is
@@ -68,6 +70,8 @@ struct CompositionView<Tile: View>: View {
                         )
                 }
 
+                assetLayer(assets.filter(\.drawsBehindAnimation), scale: scale, originX: originX, originY: originY)
+
                 if isAnimated {
                     TimerFontLayer(
                         laneCount: manifest.laneCount,
@@ -83,20 +87,7 @@ struct CompositionView<Tile: View>: View {
                     .offset(x: originX, y: originY)
                 }
 
-                ForEach(assets.sorted { $0.zIndex < $1.zIndex }) { asset in
-                    if let image = assetImage(asset) {
-                        image
-                            .resizable()
-                            .interpolation(.high)
-                            .frame(width: asset.size.width * scale, height: asset.size.height * scale)
-                            .rotationEffect(.degrees(asset.rotation))
-                            .opacity(asset.opacity)
-                            .offset(
-                                x: originX + asset.rect.minX * scale,
-                                y: originY + asset.rect.minY * scale
-                            )
-                    }
-                }
+                assetLayer(assets.filter { !$0.drawsBehindAnimation }, scale: scale, originX: originX, originY: originY)
 
                 ForEach(readouts.sorted { $0.zIndex < $1.zIndex }) { readout in
                     ReadoutView(readout: readout, scale: scale, values: readoutValues)
@@ -123,6 +114,24 @@ struct CompositionView<Tile: View>: View {
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
         .clipped()
+    }
+
+    @ViewBuilder
+    private func assetLayer(_ group: [PlacedAsset], scale: CGFloat, originX: CGFloat, originY: CGFloat) -> some View {
+        ForEach(group.sorted { $0.zIndex < $1.zIndex }) { asset in
+            if let image = assetImage(asset) {
+                image
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: asset.size.width * scale, height: asset.size.height * scale)
+                    .rotationEffect(.degrees(asset.rotation))
+                    .opacity(asset.opacity)
+                    .offset(
+                        x: originX + asset.rect.minX * scale,
+                        y: originY + asset.rect.minY * scale
+                    )
+            }
+        }
     }
 }
 
