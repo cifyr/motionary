@@ -113,7 +113,8 @@ enum HeadlessBuild {
             let writer = try BundleWriter(projectRoot: root)
             let result = try writer.install(
                 bundled,
-                iconsFolder: StudioPipeline.iconsFolder(for: store)
+                iconsFolder: StudioPipeline.iconsFolder(for: store),
+                store: store
             )
             print("bundled \(bundled.count) designs, \(result.fontCount) fonts, \(result.totalBytes / 1_048_576)MB")
             for design in bundled { print("  - \(design.name)") }
@@ -249,6 +250,8 @@ struct StudioView: View {
     @State private var targeting = false
 
     @State private var projectRoot: URL? = ProjectLocator.find()
+    /// The run in flight, kept so Escape can stop it.
+    @State private var buildTask: Task<Void, Never>?
 
     private var isBusy: Bool { stage != nil }
 
@@ -292,6 +295,8 @@ struct StudioView: View {
             }
         }
         .frame(minWidth: 880, minHeight: 700)
+        // Escape stops a run wherever the focus happens to be.
+        .onExitCommand { stopBuild() }
         .task {
             refreshDevices()
             StudioPipeline.migrateLegacyDesigns()
@@ -695,7 +700,12 @@ struct StudioView: View {
     private func progress(_ stage: StudioPipeline.Stage) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             ProgressView(value: stage.fraction)
-            Text(stage.caption).font(.callout).foregroundStyle(.secondary)
+            HStack {
+                Text(stage.caption).font(.callout).foregroundStyle(.secondary)
+                Spacer()
+                Button("Stop") { stopBuild() }
+                    .help("Stop the build (esc)")
+            }
         }
     }
 
@@ -803,7 +813,7 @@ struct StudioView: View {
         let pipeline = StudioPipeline(projectRoot: projectRoot, model: model)
         let loop = loopSeconds
         let device = deviceID
-        Task {
+        buildTask = Task {
             do {
                 let built = try await pipeline.install(
                     edited,
@@ -829,13 +839,31 @@ struct StudioView: View {
                             : "Installed. \(built.summary). Add the Motionary widget if it is not already on the Home Screen."
                     }
                 }
+            } catch is CancellationError {
+                // Asked for, so it is not a failure. Says so, because a run
+                // that simply stopped looks exactly like one that crashed.
+                await MainActor.run {
+                    self.stage = nil
+                    self.done = "Build stopped. Nothing was installed."
+                }
             } catch {
                 await MainActor.run {
                     self.stage = nil
                     self.failure = String(describing: error)
                 }
             }
+            await MainActor.run { self.buildTask = nil }
         }
+    }
+
+    /// Escape stops a build. A render is long enough that starting one by
+    /// mistake needs a way out that is not force-quitting the studio.
+    private func stopBuild() {
+        guard let buildTask else { return }
+        buildTask.cancel()
+        self.buildTask = nil
+        stage = nil
+        done = "Build stopped. Nothing was installed."
     }
 }
 
@@ -850,35 +878,29 @@ private struct EditorWindow: View {
     @State private var undo = UndoCoordinator()
     /// What the autosave last wrote, so opening a design does not restamp it.
     @State private var lastSaved: DesignDocument?
+    /// What the toolbar says under the name. Set by the autosave rather than
+    /// timed, so it reports a write that happened instead of guessing.
+    @State private var savedNote = ""
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Scrolled rather than sized to fit. As a sheet this could demand
-            // its own dimensions; as a pane it has to survive whatever width
-            // the split view is dragged to, and the canvas is a fixed size.
-            ScrollView([.horizontal, .vertical]) {
-                LayoutEditor(
-                    design: $prepared.design,
-                    model: model,
-                    poster: prepared.poster,
-                    store: prepared.store
-                )
-                .frame(
-                    minWidth: LayoutEditor.width(for: model),
-                    minHeight: LayoutEditor.height(for: model)
-                )
-            }
-            Divider()
-            HStack {
-                // "Done", not "Close": it saves either way, and in a pane there
-                // is no sheet for "close" to refer to.
-                Button("Done") { onCancel(prepared) }
-                Spacer()
-                Button("Build and install") { onBuild(prepared) }
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(16)
-        }
+        // The editor carries its own toolbar and status bar now, and scrolls
+        // the canvas itself, so the window is just a host for it.
+        LayoutEditor(
+            design: $prepared.design,
+            model: model,
+            poster: prepared.poster,
+            store: prepared.store,
+            documentName: prepared.design.name,
+            savedNote: savedNote,
+            // "Preview" leaves the editor the way Done did: it saves, and the
+            // library pane behind is where a design is looked at.
+            onPreview: { onCancel(prepared) },
+            onBuild: { onBuild(prepared) }
+        )
+        .frame(
+            minWidth: LayoutEditor.width(for: model),
+            minHeight: LayoutEditor.height(for: model)
+        )
         .onAppear {
             lastSaved = prepared.design
             undo.apply = { prepared.design = $0 }
@@ -892,9 +914,17 @@ private struct EditorWindow: View {
         // on remembering to press Done.
         .task(id: prepared.design) {
             guard prepared.design != lastSaved else { return }
+            savedNote = "unsaved changes"
             guard (try? await Task.sleep(for: .milliseconds(800))) != nil else { return }
-            try? prepared.store.save(prepared.design)
-            lastSaved = prepared.design
+            do {
+                try prepared.store.save(prepared.design)
+                lastSaved = prepared.design
+                savedNote = "saved just now"
+            } catch {
+                // Named rather than silent: an autosave that stops working
+                // looks exactly like one that is working.
+                savedNote = "could not save: \(error.localizedDescription)"
+            }
         }
     }
 }

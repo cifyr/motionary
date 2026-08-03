@@ -98,3 +98,65 @@ final class SlotChoicesTests: XCTestCase {
         XCTAssertNil(AppCatalog.app(id: SlotChoices.hiddenValue))
     }
 }
+
+/// The phone can point a slot at any app it has and dress it in any icon that
+/// shipped - so a design is a starting point rather than the final word.
+final class SlotOverrideTests: XCTestCase {
+    private let design = UUID()
+
+    private func tile() -> PlacedTile {
+        PlacedTile(appID: "spotify", center: .zero, size: 100, skin: "authored.png")
+    }
+
+    override func tearDown() {
+        let defaults = UserDefaults(suiteName: DesignStore.appGroupIdentifier)
+        defaults?.removeObject(forKey: "slotIcons-\(design.uuidString)")
+        defaults?.removeObject(forKey: "slotLinks-\(design.uuidString)")
+        super.tearDown()
+    }
+
+    func testAnIconChosenOnThePhoneReplacesTheAuthoredOne() {
+        let subject = tile()
+        SlotChoices.setIcon("neon-mail.png", designID: design, tileID: subject.id)
+        let applied = SlotChoices.apply(to: [subject], designID: design)
+        XCTAssertEqual(applied.first?.skin, "neon-mail.png")
+    }
+
+    func testClearingTheChoiceGivesTheAuthoredIconBack() {
+        let subject = tile()
+        SlotChoices.setIcon("neon-mail.png", designID: design, tileID: subject.id)
+        SlotChoices.setIcon(nil, designID: design, tileID: subject.id)
+        XCTAssertEqual(SlotChoices.apply(to: [subject], designID: design).first?.skin, "authored.png")
+    }
+
+    func testALinkChosenOnThePhoneIsWhatTheTileOpens() throws {
+        let subject = tile()
+        SlotChoices.setLink(
+            CustomTarget(name: "Bear", scheme: "bear"),
+            designID: design, tileID: subject.id
+        )
+        let applied = try XCTUnwrap(SlotChoices.apply(to: [subject], designID: design).first)
+
+        XCTAssertEqual(applied.displayName, "Bear")
+        XCTAssertEqual(LaunchLink.target(from: LaunchLink.url(for: applied)),
+                       .url(try XCTUnwrap(URL(string: "bear://"))))
+    }
+
+    func testClearingTheLinkReturnsTheSlotToItsApp() {
+        let subject = tile()
+        SlotChoices.setLink(CustomTarget(name: "Bear", scheme: "bear"), designID: design, tileID: subject.id)
+        SlotChoices.setLink(nil, designID: design, tileID: subject.id)
+        let applied = SlotChoices.apply(to: [subject], designID: design).first
+        XCTAssertNil(applied?.custom)
+        XCTAssertEqual(applied?.displayName, "Spotify")
+    }
+
+    /// The overrides are per slot, so setting one must not reach the others.
+    func testAnOverrideOnlyTouchesItsOwnSlot() {
+        let first = tile()
+        let second = PlacedTile(appID: "calendar", center: .zero, size: 100, skin: "second.png")
+        SlotChoices.setIcon("neon-mail.png", designID: design, tileID: first.id)
+        let applied = SlotChoices.apply(to: [first, second], designID: design)
+        XCTAssertEqual(applied.last?.skin, "second.png")
+    }
+}

@@ -15,17 +15,49 @@ struct SkinLibrary {
 
     let root: URL
 
-    init() throws {
+    /// The old shared library, kept only so designs made before skins moved
+    /// can have theirs carried across.
+    static func legacyRoot() throws -> URL {
         let support = try FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
+            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
         )
-        root = support
+        return support
             .appendingPathComponent("Motionary", isDirectory: true)
             .appendingPathComponent("Skins", isDirectory: true)
+    }
+
+    init() throws {
+        try self.init(root: try Self.legacyRoot())
+    }
+
+    /// Rooted wherever the caller says, which is the design's own folder.
+    init(root: URL) throws {
+        self.root = root
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    /// Removes a skin's file. Missing is not an error: the document is the
+    /// record of what exists, and a half-deleted library must still open.
+    func remove(_ name: String) {
+        let target = url(for: name)
+        guard FileManager.default.fileExists(atPath: target.path) else { return }
+        try? FileManager.default.removeItem(at: target)
+    }
+
+    /// Brings a design's skins over from the shared library it used to draw
+    /// from, so opening an old design does not find its icons gone.
+    @discardableResult
+    static func migrateIfNeeded(_ names: Set<String>, into library: SkinLibrary) -> Int {
+        guard let legacy = try? legacyRoot() else { return 0 }
+        let manager = FileManager.default
+        var carried = 0
+        for name in names where !manager.fileExists(atPath: library.url(for: name).path) {
+            let source = legacy.appendingPathComponent(name)
+            guard manager.fileExists(atPath: source.path) else { continue }
+            guard (try? manager.copyItem(at: source, to: library.url(for: name))) != nil else { continue }
+            carried += 1
+        }
+        return carried
     }
 
     struct Skin: Identifiable, Hashable, Sendable {
@@ -73,6 +105,25 @@ struct SkinLibrary {
             added.append(name)
         }
         return added
+    }
+
+    /// Imports artwork already in memory, under a name the caller chooses.
+    ///
+    /// The same keying, trimming, squaring and scaling a file import gets, so
+    /// a cell cut out of a sprite sheet ends up indistinguishable from the
+    /// same icon imported on its own.
+    /// `alreadyKeyed` skips the colour key, for artwork whose backdrop has
+    /// been cleared some other way - a sheet's cell has its surround filled
+    /// out from the border, which keying by colour would undo by taking the
+    /// green out of the icon as well.
+    func importing(_ image: CGImage, named name: String, alreadyKeyed: Bool = false) throws {
+        let keyed = alreadyKeyed ? image : (Self.keyingOut(image) ?? image)
+        let trimmed = Self.trimmed(keyed) ?? keyed
+        let squared = Self.squared(trimmed) ?? trimmed
+        guard let scaled = Self.scaled(squared, to: Self.renderedSide) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        try Self.writePNG(scaled, to: url(for: name))
     }
 
     /// A stable, readable filename, so importing the same file twice replaces

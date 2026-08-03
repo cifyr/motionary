@@ -26,6 +26,14 @@ struct DesignWidgetView: View {
             }
             .widgetAccentable(false)
             .containerBackground(for: .widget) { Color.black }
+            // Everywhere no tile's Link covers. This rather than a clear Link
+            // under the wallpaper: that drew no pixels and sat beneath an
+            // opaque image, so it never took a tap and the gaps fell through
+            // to the system default of just opening Motionary. `widgetURL` is
+            // the supported way to say "the rest of the widget", and the lab
+            // build ran it against per-icon Links on a physical iPhone. Nil
+            // leaves the gaps dead, which is the default.
+            .widgetURL(BackgroundTap.widgetDestination)
     }
 
     /// Where a renderable design came from, and everything needed to draw it.
@@ -58,29 +66,48 @@ struct DesignWidgetView: View {
             )
             CompositionView(
                 manifest: source.manifest,
-                tiles: SlotChoices.apply(to: source.manifest.placedTiles, designID: source.manifest.designID),
+                // Spots the phone filled included: an added tile is live
+                // SwiftUI over the frozen animation exactly like an authored
+                // one, so the widget draws both without a rebuild.
+                tiles: SlotChoices.effectiveTiles(manifest: source.manifest),
                 // The rendered rect, not the cut frame: only the viewport's
                 // origin positions content, and the system's origin is 2px left
                 // of the frame a design is cut to.
                 viewport: DeviceGeometry.renderedWidgetRect,
                 wallpaper: source.backdrop,
                 wallpaperRect: source.manifest.backdropRect,
-                isAnimated: source.fontsUsable
+                isAnimated: source.fontsUsable,
+                assets: source.manifest.placedAssets,
+                assetImage: { asset in
+                    PrebuiltDesign.pictureURL(assetID: asset.id)
+                        .flatMap {
+                            ImageLoader.load(
+                                at: $0,
+                                maxPixelSize: Int(max(asset.size.width, asset.size.height))
+                            )
+                        }
+                        .map { Image(decorative: $0, scale: 1) }
+                },
+                readouts: source.manifest.placedReadouts,
+                // What the app last gathered. The clock sources ignore it and
+                // draw themselves; the rest are only as fresh as the last
+                // reload, which is why the app writes here and the widget only
+                // reads.
+                readoutValues: ReadoutStore.current
             ) { tile, side in
                 // Through the app rather than straight to the destination: a
                 // Link from an extension to a third-party scheme is
                 // unreliable, so the app takes the tap and forwards it.
-                Link(destination: LaunchLink.url(for: tile.appID)) {
+                Link(destination: LaunchLink.url(for: tile)) {
                     TileView(
                         tile: tile,
                         side: side,
-                        iconImage: PrebuiltDesign.iconURL(
-                            tileID: tile.id,
-                            appID: tile.appID,
-                            authoredAppID: authored[tile.id] ?? tile.appID
+                        iconImage: SlotArtwork.image(
+                            for: tile,
+                            designID: source.manifest.designID,
+                            authoredAppID: authored[tile.id] ?? tile.appID,
+                            side: side
                         )
-                            .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(side * 3)) }
-                            .map { Image(decorative: $0, scale: 1) }
                     )
                 }
             }

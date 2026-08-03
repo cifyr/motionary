@@ -5,16 +5,18 @@ import XCTest
 /// panel laid over the picture rather than part of it.
 @MainActor
 final class WidgetTintTests: XCTestCase {
-    /// The measured difference was red up, green and blue down inside the widget,
-    /// so the correction has to push the other way. A gain that lifted all three
-    /// would only make the widget brighter, not match its colour.
-    func testTheGainOpposesTheMeasuredWarmth() {
-        XCTAssertLessThan(WidgetTint.gain.r, 1, "red was measured high inside the widget")
-        XCTAssertGreaterThan(WidgetTint.gain.g, 1)
-        XCTAssertGreaterThan(WidgetTint.gain.b, WidgetTint.gain.g, "blue was the furthest off")
+    /// Measured cleanly - between the icon rows, and on the side clear of the
+    /// animated crop - the two display paths agree, so the correction is
+    /// identity. Both earlier gains reproduced themselves in the residual,
+    /// which is what a correction for a difference that is not there does.
+    func testThereIsNoCorrectionToApply() {
+        XCTAssertEqual(WidgetTint.gain.r, 1)
+        XCTAssertEqual(WidgetTint.gain.g, 1)
+        XCTAssertEqual(WidgetTint.gain.b, 1)
     }
 
-    /// Small enough to be a colour match rather than a look.
+    /// Small enough to be a colour match rather than a look, whatever it is set
+    /// to. This is the guard on any future re-measurement, not on today's value.
     func testTheGainStaysSubtle() {
         for factor in [WidgetTint.gain.r, WidgetTint.gain.g, WidgetTint.gain.b] {
             XCTAssertGreaterThan(factor, 0.9)
@@ -30,17 +32,32 @@ final class WidgetTintTests: XCTestCase {
         XCTAssertEqual(Double(after.r), Double(before.r) * WidgetTint.gain.r, accuracy: 1.5)
         XCTAssertEqual(Double(after.g), Double(before.g) * WidgetTint.gain.g, accuracy: 1.5)
         XCTAssertEqual(Double(after.b), Double(before.b) * WidgetTint.gain.b, accuracy: 1.5)
-        XCTAssertGreaterThan(after.b, before.b, "blue has to come up or nothing was corrected")
     }
 
-    /// White stays white: the gain would push blue past 255, and a highlight that
-    /// clipped in one channel only would come out tinted.
+    /// The whole picture survives an identity gain. A pass that quietly dropped
+    /// the alpha layout, or rounded every level, would still satisfy a check on
+    /// one pixel of flat colour.
+    func testAnIdentityGainReturnsThePictureUnchanged() throws {
+        let image = try solid(r: 37, g: 149, b: 220, side: 8)
+        let before = try Pixels(image)
+        let after = try Pixels(WidgetTint.applied(to: image))
+        for y in 0 ..< 8 {
+            for x in 0 ..< 8 {
+                XCTAssertEqual(after.at(x: x, y: y).r, before.at(x: x, y: y).r)
+                XCTAssertEqual(after.at(x: x, y: y).g, before.at(x: x, y: y).g)
+                XCTAssertEqual(after.at(x: x, y: y).b, before.at(x: x, y: y).b)
+            }
+        }
+    }
+
+    /// White stays white, whatever the gain is: a highlight that clipped in one
+    /// channel only would come out tinted.
     func testHighlightsStayNeutral() throws {
         let image = try solid(r: 255, g: 255, b: 255, side: 8)
         let after = try Pixels(WidgetTint.applied(to: image)).at(x: 4, y: 4)
+        XCTAssertEqual(after.r, 255)
         XCTAssertEqual(after.g, 255)
         XCTAssertEqual(after.b, 255)
-        XCTAssertGreaterThan(after.r, 245, "red is only pulled down 1%; white must not go grey")
     }
 
     func testBlackStaysBlack() throws {

@@ -15,8 +15,7 @@ enum BackdropMigration {
     static func run(store: DesignStore, designs: [DesignDocument]) -> Int {
         var created = 0
         for design in designs {
-            let backdrop = store.widgetBackdropURL(for: design.id)
-            guard !FileManager.default.fileExists(atPath: backdrop.path) else { continue }
+            guard store.existingWidgetBackdropURL(for: design.id) == nil else { continue }
 
             let wallpaper = store.wallpaperURL(for: design.id)
             guard FileManager.default.fileExists(atPath: wallpaper.path) else { continue }
@@ -35,11 +34,11 @@ enum BackdropMigration {
             let cropRect = rect.intersection(bounds)
             guard !cropRect.isNull, cropRect.width >= 2, cropRect.height >= 2,
                   let cropped = full.cropping(to: cropRect),
-                  let data = FrameEncoder.jpegData(cropped, quality: 0.9)
+                  let (data, ext) = try? FrameEncoder.backdropData(cropped, quality: 0.9)
             else { continue }
 
             do {
-                try data.write(to: backdrop, options: DesignStore.writingOptions)
+                try store.writeWidgetBackdrop(data, ext: ext, for: design.id)
                 created += 1
                 logger.info("backfilled backdrop for \(design.id.uuidString, privacy: .public), \(data.count) bytes")
             } catch {

@@ -40,8 +40,8 @@ import os
 enum EdgeCompensation {
     private static let logger = Logger(subsystem: "com.caden.Motionary", category: "EdgeCompensation")
 
-    /// The numbers as shipped, from three measure-adjust rounds against the
-    /// Polaroid design at full resolution.
+    /// The numbers as shipped, remeasured against the grey-gradient design at
+    /// full resolution with a lossless backdrop.
     ///
     /// Kept in source as well as in the file so that a missing or malformed
     /// `edge-profile.json` cannot ship a design with no correction: that failure
@@ -51,31 +51,36 @@ enum EdgeCompensation {
     /// The two edges are not symmetric: the top's core is two rows, the bottom's
     /// three, and the bottom peaks one row below where the composition's own frame
     /// ends. Both fade into a tail of a few units over the next several rows.
+    ///
+    /// The bottom's first two rows are the earlier measurement rather than a new
+    /// one: this design's gradient is darker there than the light being taken out,
+    /// so the correction clamps at zero and the residual cannot be read. See
+    /// `strength` for why what is left over is not fixable from here.
     static let shipped = EdgeProfile(
         top: [
-            (68, 70, 63),
-            (54, 45, 47),
-            (40, 32, 23),
-            (14, 13, 10),
-            (11, 10, 8),
-            (11, 7, 6),
-            (7, 7, 5),
-            (6, 6, 4),
-            (5, 5, 4),
+            (86.8, 91.8, 94.5),
+            (51.8, 52.8, 59.5),
+            (33.8, 36.8, 38.5),
+            (10.8, 11.8, 14.5),
+            (10.8, 10.8, 12.5),
+            (9.8, 8.8, 10.5),
+            (6.8, 7.8, 9.5),
+            (5.8, 5.8, 7.5),
+            (4.8, 4.8, 7.5),
         ],
         bottom: [
             (86, 75, 68),
             (64, 67, 68),
-            (47, 39, 45),
-            (19, 14, 17),
-            (16, 12, 6),
-            (11, 10, 5),
-            (12, 7, 6),
-            (9, 6, 5),
-            (8, 5, 3),
+            (38.7, 39.0, 40.0),
+            (11.7, 11.9, 12.9),
+            (11.7, 11.8, 11.7),
+            (8.6, 9.9, 10.7),
+            (7.8, 7.7, 8.1),
+            (6.5, 6.8, 6.9),
+            (6.6, 6.5, 5.5),
         ],
         strength: 1.0,
-        measuredAt: "2026-07-29"
+        measuredAt: "2026-08-02"
     )
 
     /// What this build will subtract: the calibration file, or `shipped` if it

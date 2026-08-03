@@ -11,7 +11,7 @@ enum InstallerError: Error, CustomStringConvertible {
             // The tail rather than the head: xcodebuild's first hundred lines
             // are settings, and the reason it stopped is always at the end.
             let tail = output.split(separator: "\n").suffix(12).joined(separator: "\n")
-            return "\(tool) exited \(status)\n\(tail)"
+            return "\(InstallerHint.forOutput(output) ?? "\(tool) exited \(status)")\n\(tail)"
         case .noDevice:
             return "no iPhone is connected and paired; plug it in and trust this Mac"
         case .toolMissing(let tool):
@@ -110,12 +110,24 @@ struct DeviceInstaller {
         }
     }
 
+    /// Homebrew's own bin dir, on either architecture. A shell inherits this
+    /// through its profile, but a Finder/Dock launch does not - `env` then
+    /// fails to find `xcodegen` even though a Terminal-launched run just did.
+    private static let xcodegenFallbackPaths = [
+        "/opt/homebrew/bin/xcodegen",
+        "/usr/local/bin/xcodegen",
+    ]
+
+    private func xcodegenCommand() -> String {
+        Self.xcodegenFallbackPaths.first { FileManager.default.isExecutableFile(atPath: $0) } ?? "xcodegen"
+    }
+
     /// The project file lists the design's fonts by name, so it has to be
     /// regenerated whenever they change - otherwise the next build, by anyone
     /// and from anywhere, fails on the previous design's filenames.
     func regenerateProject(progress: @escaping @Sendable (String) -> Void) throws {
         progress("Regenerating the project")
-        try run("/usr/bin/env", ["xcodegen", "generate"])
+        try run("/usr/bin/env", [xcodegenCommand(), "generate"])
     }
 
     /// Builds for the device, installs, and launches. Returns a warning when

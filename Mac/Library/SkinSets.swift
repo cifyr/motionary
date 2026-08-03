@@ -13,6 +13,10 @@ struct SkinSet: Codable, Equatable, Identifiable, Sendable {
     var id: UUID = UUID()
     var name: String
     var entries: [Entry] = []
+    /// Which entry a tile takes when the set is applied and the tile's own app
+    /// is not in it. Nil means the first, which is what a set with no opinion
+    /// about its own default should do.
+    var defaultAppID: String?
 
     /// One app drawn in this set's style. The skin is a filename in the skin
     /// library, already keyed, trimmed and squared to one size at import.
@@ -49,12 +53,23 @@ struct SkinSet: Codable, Equatable, Identifiable, Sendable {
     /// becomes an alternate, so on the phone the slot swaps within the set:
     /// same style, same size, different app and link. Alternates are replaced,
     /// not appended: applying a set answers "what can this slot show" in full.
+    /// The entry the set stands for: what a tile becomes when the set itself
+    /// is put on it rather than one of its entries, and what the editor marks
+    /// as the default. Falls back to the first, so a set always has one.
+    var defaultEntry: Entry? {
+        defaultAppID.flatMap { id in entries.first { $0.appID == id } } ?? entries.first
+    }
+
     func applied(to tile: PlacedTile) -> PlacedTile {
         var updated = tile
         if let own = entries.first(where: { $0.appID == tile.appID }) {
             updated.skin = own.skin
             updated.icon = nil
         }
+        // A tile whose app the set does not cover keeps its own artwork.
+        // Overwriting it with the set's default would silently replace a
+        // picture somebody chose, which applying a set to every tile at once
+        // would do to every tile the set does not name.
         updated.alternates = entries
             .filter { $0.appID != tile.appID }
             .map { TileAlternate(appID: $0.appID, skin: $0.skin) }

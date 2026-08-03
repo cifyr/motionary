@@ -93,7 +93,7 @@ struct BundleWriter {
     /// without colliding - but every lane of every design has to be declared in
     /// `UIAppFonts`, and each design costs about 29MB of the install.
     @discardableResult
-    func install(_ designs: [Bundled], iconsFolder: URL? = nil) throws -> Result {
+    func install(_ designs: [Bundled], iconsFolder: URL? = nil, store: DesignStore? = nil) throws -> Result {
         let manager = FileManager.default
         try manager.createDirectory(at: resources, withIntermediateDirectories: true)
 
@@ -124,7 +124,9 @@ struct BundleWriter {
 
             let key = design.manifest.designID.uuidString.lowercased()
             try copy(design.folder.appendingPathComponent("manifest.json"), to: "prebuilt-\(key)-manifest.json")
-            try copy(design.folder.appendingPathComponent("widget-backdrop.jpg"), to: "prebuilt-\(key)-backdrop.jpg")
+            // Whichever extension the build settled on, kept: the phone looks
+            // for both, but only if the one that exists is what got copied.
+            try copyBackdrop(named: "widget-backdrop", from: design.folder, to: "prebuilt-\(key)-backdrop")
             try copy(design.folder.appendingPathComponent("wallpaper.png"), to: "prebuilt-\(key)-wallpaper.png")
             // Tile-free, so the phone can bake whichever occupants its slots
             // hold at export time. `copy` skips it for designs built before it
@@ -137,16 +139,23 @@ struct BundleWriter {
             // the lane glob above, since every clip writes into one folder.
             for variant in design.manifest.builtVariants {
                 let vid = variant.id.uuidString.lowercased()
-                try copy(
-                    design.folder.appendingPathComponent("widget-backdrop-\(vid).jpg"),
-                    to: "prebuilt-\(key)-backdrop-\(vid).jpg"
+                try copyBackdrop(
+                    named: "widget-backdrop-\(vid)",
+                    from: design.folder,
+                    to: "prebuilt-\(key)-backdrop-\(vid)"
                 )
                 try copy(
                     design.folder.appendingPathComponent("preview-\(vid).mp4"),
                     to: "prebuilt-\(key)-preview-\(vid).mp4"
                 )
             }
-            try installIcons(manifest: design.manifest, from: iconsFolder)
+            try installIcons(
+                manifest: design.manifest,
+                from: iconsFolder,
+                skinsFolder: store?.skinsFolder(for: design.manifest.designID)
+            )
+            try installPictures(manifest: design.manifest, store: store)
+            try installSkins(designID: design.manifest.designID, store: store)
         }
 
         try writeIndex(designs)
@@ -181,21 +190,21 @@ struct BundleWriter {
     /// only the manifest to go on and no icon cache to consult. Two tiles
     /// sharing an icon costs one extra copy of a 256px PNG, which is cheaper
     /// than teaching the extension about cache keys.
-    private func installIcons(manifest: BuildManifest, from iconsFolder: URL?) throws {
+    private func installIcons(manifest: BuildManifest, from iconsFolder: URL?, skinsFolder: URL?) throws {
         let manager = FileManager.default
-        let artwork = TileArtwork(iconsFolder: iconsFolder)
+        let artwork = TileArtwork(iconsFolder: iconsFolder, skinsFolder: skinsFolder)
         for tile in manifest.placedTiles {
             // Alternates first: they cannot stop the authored icon shipping.
             // Only skinned ones have a file at all - the rest draw their
             // catalogue SF Symbol on the phone, exactly like a missing icon.
-            for alternate in tile.alternates {
+            for alternate in tile.offeredAlternates {
                 guard let skin = alternate.skin, let rendered = artwork.url(forSkin: skin) else { continue }
                 let name = PrebuiltDesign.iconResource(
                     tileID: tile.id,
                     appID: alternate.appID,
                     authoredAppID: tile.appID
                 )
-                try manager.copyItem(at: rendered, to: resources.appendingPathComponent("\(name).png"))
+                try replace(rendered, with: "\(name).png")
             }
 
             guard let rendered = artwork.url(for: tile) else {
@@ -203,10 +212,83 @@ struct BundleWriter {
                 // which is a worse icon rather than a missing one.
                 continue
             }
-            try manager.copyItem(
-                at: rendered,
-                to: resources.appendingPathComponent("\(PrebuiltDesign.iconResource(tileID: tile.id)).png")
+            try replace(rendered, with: "\(PrebuiltDesign.iconResource(tileID: tile.id)).png")
+        }
+    }
+
+    /// Placed pictures ship as keyed PNGs, one per placement, because the
+    /// widget draws them live over the animation. Baked into the wallpaper
+    /// alone - which is all they used to get - they never reached the widget's
+    /// own frame, and the app's preview video covered them too.
+    private func installPictures(manifest: BuildManifest, store: DesignStore?) throws {
+        guard !manifest.placedAssets.isEmpty else { return }
+        guard let store else {
+            FileHandle.standardError.write(Data("""
+            bundle: no store to read placed pictures from; \
+            \(manifest.placedAssets.count) picture(s) will not draw on the phone\n
+            """.utf8))
+            return
+        }
+        for asset in manifest.placedAssets {
+            guard let keyed = AssetArtwork.image(for: asset, designID: manifest.designID, store: store) else {
+                // Logged by AssetArtwork; the design still ships, minus this one.
+                continue
+            }
+            try FrameEncoder.pngData(keyed).write(
+                to: resources.appendingPathComponent("\(PrebuiltDesign.pictureResource(assetID: asset.id)).png"),
+                options: .atomic
             )
+        }
+    }
+
+    /// Writes over whatever is already there.
+    ///
+    /// `copyItem` throws on an existing file, and two tiles sharing artwork -
+    /// or one written twice - is a normal thing for a design to do, not a
+    /// reason to abandon a build halfway through the Resources folder.
+    private func replace(_ source: URL, with name: String) throws {
+        let destination = resources.appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.copyItem(at: source, to: destination)
+    }
+
+    /// Every skin the design owns, so the phone can put any of them on any
+    /// slot. The icons baked per tile stay as they are - they are what draws
+    /// by default; this is the library behind the phone's own picker.
+    private func installSkins(designID: UUID, store: DesignStore?) throws {
+        guard let store, let library = try? SkinLibrary(root: store.skinsFolder(for: designID)) else { return }
+        let skins = library.all()
+        guard !skins.isEmpty else { return }
+
+        var names: [String] = []
+        for skin in skins {
+            let resource = PrebuiltDesign.skinResource(designID: designID, skin: skin.id)
+            try replace(skin.url, with: "\(resource).png")
+            names.append(skin.id)
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(names.sorted()).write(
+            to: resources.appendingPathComponent(
+                "\(PrebuiltDesign.skinIndexResource(designID: designID)).json"
+            ),
+            options: .atomic
+        )
+    }
+
+    /// Copies a backdrop under whatever extension the build gave it, keeping
+    /// that extension. Copying only `.jpg` shipped nothing at all once flat
+    /// backgrounds started coming out as PNG, which reads on the phone as a
+    /// widget with no backdrop behind its animation.
+    private func copyBackdrop(named source: String, from folder: URL, to name: String) throws {
+        for ext in DesignStore.backdropExtensions {
+            let file = folder.appendingPathComponent("\(source).\(ext)")
+            guard FileManager.default.fileExists(atPath: file.path) else { continue }
+            try copy(file, to: "\(name).\(ext)")
+            return
         }
     }
 

@@ -145,6 +145,7 @@ struct FontSetGenerator {
 
         var builtVariants: [BuildManifest.VariantBuild] = []
         for variant in design.variants {
+            try Task.checkCancellation()
             onStage(.buildingVariant(name: variant.name))
             do {
                 let result = try await buildClip(
@@ -164,6 +165,10 @@ struct FontSetGenerator {
                     totalFontBytes: result.totalBytes,
                     loopFrameCount: result.loopFrameCount
                 ))
+            } catch is CancellationError {
+                // Rethrown bare: wrapped in `variantFailed` a stopped build
+                // would be reported as a crash in whichever clip it reached.
+                throw CancellationError()
             } catch {
                 // Named, because five clips build in one run and "payload too
                 // large" without a name points at the wrong one four times
@@ -187,7 +192,19 @@ struct FontSetGenerator {
             builtAt: Date(),
             backdropRect: primary.bakedBackdrop,
             tiles: design.tiles,
-            clipVariants: builtVariants.isEmpty ? nil : builtVariants
+            assets: design.assets.isEmpty ? nil : design.assets,
+            readouts: design.readouts.isEmpty ? nil : design.readouts,
+            clipVariants: builtVariants.isEmpty ? nil : builtVariants,
+            // The resolved title, not the raw override: the phone has no
+            // filename to fall back on, so an unnamed clip would arrive as
+            // "Standard" there however it reads in the studio.
+            primaryClipName: design.primaryClipTitle,
+            // Only when it actually built. A default naming a variant whose
+            // fonts are not in the bundle is a black widget on first install,
+            // which is the failure this project can least afford.
+            defaultVariantID: builtVariants.contains { $0.id == design.defaultVariantID }
+                ? design.defaultVariantID
+                : nil
         )
         try store.save(manifest)
 
@@ -216,7 +233,7 @@ struct FontSetGenerator {
         let natural = max(1, Int((
             duration * Double(spec.framesPerSecond) / max(playbackSpeed, 0.01)
         ).rounded(.down)))
-        return spec.seamlessLoopLength(nearest: natural, maximum: min(96, natural))
+        return spec.seamlessLoopLength(nearest: natural, maximum: min(TimerFontSpec.maximumLoopFrames, natural))
     }
 
     /// One clip's full output: fonts, backdrop, preview - and for the primary
@@ -309,7 +326,10 @@ struct FontSetGenerator {
             } catch {
                 throw GeneratorError.laneWriteFailed(lane: lane, path: url.path, underlying: error)
             }
-            // 64 multi-megabyte writes would otherwise starve the UI entirely.
+            // 64 multi-megabyte writes would otherwise starve the UI entirely,
+            // and it is where a stopped build actually stops: without the
+            // check, Escape would hide a run that kept writing fonts.
+            try Task.checkCancellation()
             await Task.yield()
         }
         onStage(.writingFonts(completed: spec.laneCount, total: spec.laneCount))
@@ -383,15 +403,13 @@ struct FontSetGenerator {
                 will still show across \(Int(crop.width))px of it
                 """)
             }
-            // 0.95 rather than 0.9: the correction above is a step of up to 79
-            // units across two or three rows, and quantisation smooths exactly
-            // that. Measured, 0.9 gave back 2-6 units of the line and 0.95 under
-            // 3, for about 130KB.
-            let data = try FrameEncoder.jpegData(corrected, quality: 0.95)
-                ?? FrameEncoder.pngData(corrected)
-            let destination = variantID.map { store.widgetBackdropURL(for: design.id, variant: $0) }
-                ?? store.widgetBackdropURL(for: design.id)
-            try data.write(to: destination, options: DesignStore.writingOptions)
+            // Lossless whenever lossless is also the smaller file, which a flat
+            // background is. The quality below only decides the other case: 0.95
+            // rather than 0.9 because the correction above is a step of up to 79
+            // units across two or three rows and quantisation smooths exactly
+            // that - measured, 0.9 gave back 2-6 units of the line, 0.95 under 3.
+            let (data, ext) = try FrameEncoder.backdropData(corrected, quality: 0.95)
+            try store.writeWidgetBackdrop(data, ext: ext, for: design.id, variant: variantID)
             bakedBackdrop = backdropRect
             Self.logger.info("""
             widget backdrop \(Int(backdropRect.width))x\(Int(backdropRect.height)), \

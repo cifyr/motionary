@@ -24,6 +24,10 @@ struct TileView: View {
         return app?.tint ?? .gray
     }
 
+    /// The custom name when the tile carries one: a tile opening an app the
+    /// catalogue never heard of should still say what it is.
+    private var caption: String { tile.displayName }
+
     /// A skin replaces the plate rather than sitting on it.
     private var isSkinned: Bool { tile.skin != nil && iconImage != nil }
 
@@ -69,7 +73,7 @@ struct TileView: View {
             .frame(width: side, height: side)
 
             if tile.showsLabel {
-                Text(app?.name ?? "Unknown")
+                Text(caption)
                     .font(.system(size: max(6, side * 0.15), weight: .medium))
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.7), radius: side * 0.03)
@@ -89,17 +93,97 @@ struct TileView: View {
     }
 }
 
+/// The artwork a slot draws: whatever the phone put on it, else the icon baked
+/// for its occupant at build time.
+///
+/// The chosen one is a skin that shipped with the design, loaded from the
+/// bundle and decoded here rather than handed over as a path - a widget's
+/// renderer cannot reach a file itself.
+enum SlotArtwork {
+    static func image(for tile: PlacedTile, designID: UUID, authoredAppID: String, side: CGFloat) -> Image? {
+        let url = tile.skin.flatMap { PrebuiltDesign.skinURL(designID: designID, skin: $0) }
+            ?? PrebuiltDesign.iconURL(
+                tileID: tile.id,
+                appID: tile.appID,
+                authoredAppID: authoredAppID
+            )
+        return url
+            .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(side * 3)) }
+            .map { Image(decorative: $0, scale: 1) }
+    }
+}
+
 /// Deep link the widget uses to hand a launch back to the containing app.
+///
+/// Everything goes through the app because a `Link` from an extension straight
+/// to a third-party scheme is unreliable. A catalogue app travels as its id; an
+/// app the catalogue does not know travels as its URL, so a tile can open
+/// anything on the phone rather than only what was compiled in.
 enum LaunchLink {
     static let scheme = "motionary"
+
+    enum Target: Equatable {
+        case app(String)
+        case url(URL)
+    }
 
     static func url(for appID: String) -> URL {
         URL(string: "\(scheme)://launch/\(appID)")!
     }
 
+    /// The link for a tile, custom target included.
+    static func url(for tile: PlacedTile) -> URL {
+        guard let custom = tile.custom, let first = custom.launchCandidates.first else {
+            return url(for: tile.appID)
+        }
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = "open"
+        components.queryItems = [URLQueryItem(name: "url", value: first.absoluteString)]
+        // The id is the fallback when the query cannot be built, so a tap
+        // still reaches something nameable rather than nothing.
+        return components.url ?? url(for: tile.appID)
+    }
+
+    /// A link that hands several routes to the app, tried in order.
+    ///
+    /// A widget cannot open a custom scheme itself - the lab build settled
+    /// that on a physical iPhone - so anything that is not https travels this
+    /// way, and the app walks the list exactly as it does for a tile.
+    static func url(opening candidates: [URL]) -> URL {
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = "open"
+        components.queryItems = candidates.map { URLQueryItem(name: "url", value: $0.absoluteString) }
+        return components.url ?? candidates.first ?? url(for: "")
+    }
+
+    /// Every route a link carries, in order. One `url` item is the common
+    /// case; a background tap that opens a browser carries two.
+    static func candidates(from url: URL) -> [URL] {
+        guard url.scheme == scheme, url.host == "open",
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        else { return [] }
+        return items.filter { $0.name == "url" }.compactMap { $0.value }.compactMap(URL.init(string:))
+    }
+
+    static func target(from url: URL) -> Target? {
+        guard url.scheme == scheme else { return nil }
+        if url.host == "launch", let id = url.pathComponents.dropFirst().first {
+            return .app(id)
+        }
+        if url.host == "open",
+           let raw = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+               .queryItems?.first(where: { $0.name == "url" })?.value,
+           let target = URL(string: raw) {
+            return .url(target)
+        }
+        return nil
+    }
+
     static func appID(from url: URL) -> String? {
-        guard url.scheme == scheme, url.host == "launch" else { return nil }
-        return url.pathComponents.dropFirst().first
+        if case .app(let id) = target(from: url) { return id }
+        return nil
     }
 }
 

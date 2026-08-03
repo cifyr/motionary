@@ -41,7 +41,7 @@ enum PrebuiltDesign {
         }
 
         var manifestName: String { resource("manifest") }
-        var backdropURL: URL? { PrebuiltDesign.resource(named: resource("backdrop"), extension: "jpg") }
+        var backdropURL: URL? { PrebuiltDesign.resolvedBackdrop(named: resource("backdrop")) }
         var wallpaperURL: URL? { PrebuiltDesign.resource(named: resource("wallpaper"), extension: "png") }
         /// The wallpaper without the tiles, when this build shipped one. The
         /// phone bakes its own occupants onto it at export time; nil means the
@@ -52,9 +52,8 @@ enum PrebuiltDesign {
 
         /// A clip variant's own backdrop and preview, addressed by variant id.
         func backdropURL(variant: UUID) -> URL? {
-            PrebuiltDesign.resource(
-                named: resource("backdrop-\(variant.uuidString.lowercased())"),
-                extension: "jpg"
+            PrebuiltDesign.resolvedBackdrop(
+                named: resource("backdrop-\(variant.uuidString.lowercased())")
             )
         }
 
@@ -176,8 +175,18 @@ enum PrebuiltDesign {
             ?? Bundle(for: BundleMarker.self).url(forResource: name, withExtension: ext)
     }
 
+    /// A backdrop under whichever extension it was bundled with. The build
+    /// writes PNG or JPEG depending on which came out smaller, so the name on
+    /// its own does not say which is there.
+    static func resolvedBackdrop(named name: String) -> URL? {
+        DesignStore.backdropExtensions
+            .lazy
+            .compactMap { resource(named: name, extension: $0) }
+            .first
+    }
+
     static var backdropURL: URL? {
-        PrebuiltDesign.resource(named: backdropResource, extension: "jpg")
+        resolvedBackdrop(named: backdropResource)
     }
 
     static var wallpaperURL: URL? {
@@ -229,6 +238,43 @@ enum PrebuiltDesign {
             named: iconResource(tileID: tileID, appID: appID, authoredAppID: authoredAppID),
             extension: "png"
         )
+    }
+
+    /// A placed picture, keyed at build time and drawn live between the
+    /// animation and the tiles - the widget cannot key or fetch one itself.
+    static func pictureURL(assetID: UUID) -> URL? {
+        PrebuiltDesign.resource(named: pictureResource(assetID: assetID), extension: "png")
+    }
+
+    static func pictureResource(assetID: UUID) -> String {
+        "prebuilt-picture-\(assetID.uuidString.lowercased())"
+    }
+
+    /// A skin from the design's own library, shipped so the phone can put any
+    /// of them on any slot rather than only the icon baked for that app.
+    static func skinResource(designID: UUID, skin: String) -> String {
+        let safe = skin
+            .replacingOccurrences(of: "[^A-Za-z0-9]+", with: "-", options: .regularExpression)
+            .lowercased()
+        return "prebuilt-skin-\(designID.uuidString.lowercased())-\(safe.prefix(60))"
+    }
+
+    static func skinIndexResource(designID: UUID) -> String {
+        "prebuilt-skins-\(designID.uuidString.lowercased())"
+    }
+
+    static func skinURL(designID: UUID, skin: String) -> URL? {
+        resource(named: skinResource(designID: designID, skin: skin), extension: "png")
+    }
+
+    /// The names of every skin that shipped with a design, for the phone's
+    /// icon picker. Empty when the design was built before they travelled.
+    static func skinNames(designID: UUID) -> [String] {
+        guard let url = resource(named: skinIndexResource(designID: designID), extension: "json"),
+              let data = try? Data(contentsOf: url),
+              let names = try? JSONDecoder().decode([String].self, from: data)
+        else { return [] }
+        return names
     }
 
     /// Whether every lane font declared in `UIAppFonts` actually resolved.

@@ -115,3 +115,39 @@ final class DeviceModelTests: XCTestCase {
         XCTAssertEqual(DeviceGeometry.screenPixelSize, DeviceGeometry.model.screenPixelSize)
     }
 }
+
+/// A locked phone times out after a couple of minutes and comes back as
+/// "exited 70" under a wall of build settings, which reads as a broken build
+/// rather than a phone that wants a thumb on it. The tool's own words say
+/// which it is, so the message should too.
+final class InstallerHintTests: XCTestCase {
+    private let lockedOutput = """
+    xcodebuild: error: Timed out waiting for all destinations matching the provided destination specifier to become available
+        Available destinations for the "Motionary" scheme:
+            { platform:iOS, arch:arm64, id:00008150-00042CA60C9A401C, name:iPhone Mini, \
+    error:iPhone Mini may need to be unlocked to recover from previously reported preparation errors }
+    """
+
+    /// A locked phone also reports a timeout, so the order of the rules
+    /// matters: being told to unlock it is more use than being told it did
+    /// not answer.
+    func testALockedPhoneSaysToUnlockItRatherThanThatItTimedOut() throws {
+        let hint = try XCTUnwrap(InstallerHint.forOutput(lockedOutput))
+        XCTAssertTrue(hint.contains("Unlock"), hint)
+        XCTAssertFalse(hint.contains("did not answer"), hint)
+    }
+
+    func testATimeoutWithNoLockedDeviceStillSaysSomethingUseful() throws {
+        let hint = try XCTUnwrap(
+            InstallerHint.forOutput("xcodebuild: error: Timed out waiting for all destinations")
+        )
+        XCTAssertTrue(hint.contains("did not answer"), hint)
+    }
+
+    /// A compile error is the project's own problem and must not be dressed up
+    /// as a phone that needs unlocking.
+    func testAnOrdinaryBuildFailureGetsNoHint() {
+        XCTAssertNil(InstallerHint.forOutput("LayoutEditor.swift:42: error: cannot find 'foo' in scope"))
+        XCTAssertNil(InstallerHint.forOutput("error: linker command failed with exit code 1"))
+    }
+}
