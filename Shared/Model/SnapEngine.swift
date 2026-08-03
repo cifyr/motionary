@@ -84,7 +84,7 @@ struct SnapEngine {
             // the dashed cell on the canvas is drawn around.
             for column in 0 ..< max(grid.columns, 1) {
                 let cell = GridCell(row: 0, column: column)
-                add(grid.cellRect(cell, in: widgetRect).midX, .iconGrid)
+                add(grid.cellRect(cell).midX, .iconGrid)
             }
             // Centre to centre with whatever is already placed.
             for sibling in siblings {
@@ -97,7 +97,7 @@ struct SnapEngine {
             add(widgetRect.maxY - tileSize / 2, .widgetFrame)
             for row in 0 ..< max(grid.rows, 1) {
                 let cell = GridCell(row: row, column: 0)
-                add(grid.cellRect(cell, in: widgetRect).midY, .iconGrid)
+                add(grid.cellRect(cell).midY, .iconGrid)
             }
             for sibling in siblings {
                 add(sibling.center.y, .sibling)

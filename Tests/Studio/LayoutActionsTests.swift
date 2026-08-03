@@ -114,12 +114,39 @@ final class LayoutActionsTests: XCTestCase {
 final class WidgetGridTests: XCTestCase {
     private let frame = DeviceGeometry.widgetRect
 
-    func testTheDefaultGridIsFourAcrossByTwoDown() {
+    func testTheDefaultGridIsTheHomeScreensOwn() {
         let grid = WidgetGrid()
-        XCTAssertEqual(grid.cellCount, 8)
-        XCTAssertEqual(grid.allCells.count, 8)
+        XCTAssertEqual(grid.cellCount, 24)
+        XCTAssertEqual(grid.allCells.count, 24)
         XCTAssertEqual(grid.allCells.first?.label, "R1C1")
-        XCTAssertEqual(grid.allCells.last?.label, "R2C4")
+        XCTAssertEqual(grid.allCells.last?.label, "R6C4")
+    }
+
+    /// The numbers read off a 1206x2622 Home Screen screenshot. They are the
+    /// whole point of the grid: a cell that is not where the icon is puts the
+    /// baked wallpaper out of register with the live icons drawn over it.
+    func testCellsLandOnTheMeasuredHomeScreenIcons() {
+        let grid = WidgetGrid()
+        for (column, left) in [91.0, 368.0, 647.0, 924.0].enumerated() {
+            let rect = grid.cellRect(GridCell(row: 0, column: column))
+            XCTAssertEqual(rect.minX, left, accuracy: 1, "column \(column + 1)")
+            XCTAssertEqual(rect.width, 192, accuracy: 0.01)
+        }
+        for (row, top) in [270.0, 571.0, 872.0, 1173.0, 1474.0, 1775.0].enumerated() {
+            let rect = grid.cellRect(GridCell(row: row, column: 0))
+            XCTAssertEqual(rect.minY, top, accuracy: 0.01, "row \(row + 1)")
+            XCTAssertEqual(rect.height, 192, accuracy: 0.01)
+        }
+    }
+
+    /// The last row genuinely hangs past the widget's bottom edge on the real
+    /// Home Screen. Requiring every cell to fit is what forced the grid to be
+    /// divided out of the frame, which is what put it out of register.
+    func testTheLastRowHangsPastTheWidgetFrame() {
+        let grid = WidgetGrid()
+        let last = grid.cellRect(GridCell(row: 5, column: 0))
+        XCTAssertGreaterThan(last.maxY, frame.maxY)
+        XCTAssertLessThan(last.minY, frame.maxY, "but it still starts inside it")
     }
 
     /// Reading order: a row is filled left to right before the next one starts.
@@ -128,19 +155,21 @@ final class WidgetGridTests: XCTestCase {
         XCTAssertEqual(cells.prefix(4).map(\.label), ["R1C1", "R1C2", "R1C3", "R1C4"])
     }
 
-    func testEveryCellFallsInsideTheWidgetFrame() {
+    /// Every cell has to at least begin inside the frame, or a tap could never
+    /// reach the tile in it.
+    func testEveryCellStartsInsideTheWidgetFrame() {
         let grid = WidgetGrid()
         for cell in grid.allCells {
             XCTAssertTrue(
-                frame.contains(grid.cellRect(cell, in: frame)),
-                "\(cell.label) falls outside the frame a tap can reach"
+                frame.contains(grid.cellRect(cell).origin),
+                "\(cell.label) begins outside the frame a tap can reach"
             )
         }
     }
 
     func testCellsDoNotOverlap() {
         let grid = WidgetGrid()
-        let rects = grid.allCells.map { grid.cellRect($0, in: frame) }
+        let rects = grid.allCells.map { grid.cellRect($0) }
         for (index, rect) in rects.enumerated() {
             for other in rects[(index + 1)...] {
                 XCTAssertFalse(rect.intersects(other), "cells overlap")
@@ -167,18 +196,16 @@ final class WidgetGridTests: XCTestCase {
     func testTheNearestCellIsTheOneAPointSitsIn() {
         let grid = WidgetGrid()
         let target = GridCell(row: 1, column: 2)
-        let centre = grid.cellCenter(target, in: frame)
-        XCTAssertEqual(grid.nearestCell(to: centre, in: frame), target)
+        let centre = grid.cellCenter(target)
+        XCTAssertEqual(grid.nearestCell(to: centre), target)
     }
 
-    /// A tile is square and a cell need not be, so the default side has to fit
-    /// the smaller dimension or tiles would overhang their cells.
-    func testTheDefaultTileSideFitsACell() {
+    /// A tile stands in for an app icon, so it is sized like one.
+    func testTheDefaultTileSideFillsACell() {
         let grid = WidgetGrid()
-        let rect = grid.cellRect(GridCell(row: 0, column: 0), in: frame)
-        let side = grid.tileSide(in: frame)
-        XCTAssertLessThanOrEqual(side, rect.width)
-        XCTAssertLessThanOrEqual(side, rect.height)
+        let rect = grid.cellRect(GridCell(row: 0, column: 0))
+        XCTAssertEqual(grid.tileSide, rect.width, accuracy: 0.01)
+        XCTAssertEqual(grid.tileSide, rect.height, accuracy: 0.01)
     }
 
     /// A design written before the grid existed has no such key, and Swift does

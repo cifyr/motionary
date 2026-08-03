@@ -569,7 +569,7 @@ struct LayoutEditor: View {
         if design.snapEnabled {
             let frame = design.widgetRect
             ForEach(design.grid.allCells, id: \.self) { cell in
-                let rect = design.grid.cellRect(cell, in: frame)
+                let rect = design.grid.cellRect(cell)
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .strokeBorder(
                         .white.opacity(occupiedCells.contains(cell) ? 0.08 : 0.22),
@@ -947,9 +947,9 @@ struct LayoutEditor: View {
                 // deliberate slot, and a tile a few pixels from one means that
                 // one. Guides still catch anything placed between cells.
                 let frame = design.widgetRect
-                if let cell = design.grid.nearestCell(to: moved, in: frame) {
-                    let centre = design.grid.cellCenter(cell, in: frame)
-                    let reach = design.grid.tileSide(in: frame) * 0.45
+                if let cell = design.grid.nearestCell(to: moved) {
+                    let centre = design.grid.cellCenter(cell)
+                    let reach = design.grid.tileSide * 0.45
                     let taken = design.tiles.contains { $0.id != draggedID && $0.cell == cell }
                     if !taken, abs(centre.x - moved.x) < reach, abs(centre.y - moved.y) < reach {
                         design.tiles[index].center = centre
@@ -2373,7 +2373,7 @@ struct LayoutEditor: View {
         let tile = design.tiles[index]
         let taken = Set(design.tiles.filter { $0.id != tile.id }.compactMap(\.cell))
 
-        let nearest = design.grid.nearestCell(to: tile.center, in: frame)
+        let nearest = design.grid.nearestCell(to: tile.center)
         let target = (nearest.map { !taken.contains($0) } ?? false)
             ? nearest
             : design.grid.firstFreeCell(occupied: taken)
@@ -2381,7 +2381,7 @@ struct LayoutEditor: View {
             skinNote = "All \(design.grid.cellCount) cells are taken. Make the grid bigger in Scene, or remove a tile."
             return
         }
-        design.tiles[index].center = design.grid.cellCenter(target, in: frame)
+        design.tiles[index].center = design.grid.cellCenter(target)
         design.tiles[index].cell = target
     }
 
