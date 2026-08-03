@@ -242,6 +242,14 @@ struct StudioPipeline: Sendable {
             clipRect: design.backgroundName == nil ? nil : design.widgetRect,
             clipCornerRadius: design.effectiveCornerRadius
         )
+        // Sized before the sample as well as after it. The sample is what the
+        // crop gets measured over, and a loop length left behind by an earlier
+        // build spans the wrong part of the clip: a design carrying 96 frames
+        // measured three seconds of travel where there were ten, locking a box
+        // the other seven escaped. Sizing it again after the planner is still
+        // required, because changing smoothness changes the frame rate the loop
+        // is counted in.
+        design.retuneLoop()
         // The whole loop, not a prefix of it: a crop measured against only the
         // first 16 frames missed everything a clip did after its first half
         // second - real for anything that travels rather than idles in place,

@@ -223,6 +223,24 @@ final class MediaImportTests: XCTestCase {
         XCTAssertEqual(design.loopFrameCount, loop)
     }
 
+    /// The build sizes the loop, samples that many frames to find the crop,
+    /// then sizes it again because the planner may have changed the frame rate.
+    /// Both sizings have to describe the same span of clip, or the crop was
+    /// measured over one stretch and the animation encoded from another.
+    func testResizingAfterASmoothnessChangeCoversTheSameSpan() {
+        var design = DesignDocument.new(name: "span", sourceVideoName: "span.mov")
+        design.smoothness = MotionSmoothness.standard
+        design.sourceDuration = 10.6
+        design.retuneLoop()
+        let before = design.loopDuration
+
+        design.smoothness = MotionSmoothness.light
+        design.retuneLoop()
+
+        XCTAssertEqual(design.loopDuration, before, accuracy: 0.001, "same seconds, different frame rate")
+        XCTAssertNotEqual(design.loopFrameCount, 0)
+    }
+
     // MARK: - Centring
 
     func testCentringMovesTheClipOntoTheWidgetWithoutResizing() {
