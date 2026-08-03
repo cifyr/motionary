@@ -2,38 +2,45 @@ import CoreGraphics
 import Foundation
 import os
 
-/// Matches the widget's colour to the wallpaper around it.
+/// Where a correction would go if the widget's colour ever needed one.
 ///
-/// The same picture reads warmer inside the widget than outside it. Measured
-/// across both side boundaries of a real Home Screen - where the picture is
-/// continuous and, unlike the top and bottom, no rim line is drawn, so strips a
-/// few pixels either side of the edge are directly comparable - the widget's
-/// content came back about 1% up in red, 3% down in green and 7% down in blue.
-/// Consistent at five separate places down each side, on wood, on shadow and on
-/// the bright Polaroid border.
+/// It does not. The wallpaper pipeline and the widget renderer were long
+/// believed to disagree - "warmer inside", answered by a gain of
+/// (0.984, 1.035, 1.096) - and that was measured by comparing strips either
+/// side of the widget's edge. Both readings taken that way were contaminated:
+/// the inside strip catches the drop shadows of the icon rows, which the
+/// outside strip has none of, and on a design whose animated crop reaches the
+/// left edge it also lands on content drawn from the glyph JPEGs rather than
+/// from the backdrop. Sampling only between icon rows, and only on the side
+/// clear of the crop, removes both.
 ///
-/// It is not the files: both the wallpaper and the backdrop are written from the
-/// same composed frame, both untagged, and both read as sRGB. The difference is
-/// in the two display paths - the Home Screen's wallpaper pipeline and the widget
-/// renderer - so the fix is the same trick as the edge line: apply the inverse to
-/// what the widget draws, and the two agree on screen.
+/// Done that way across two screenshots of the same design taken under very
+/// different gains, the residual came back as almost exactly the gain that had
+/// been applied: (0.986, 1.029, 1.095) under the old one and
+/// (1.024, 1.037, 1.039) under a later (1.026, 1.032, 1.029). Each therefore
+/// asks for a gain of 1 - (0.998, 1.006, 1.001) and (1.002, 0.995, 0.990). A
+/// correction that reproduces itself in the residual is the whole error, and
+/// the uncorrected paths already agree.
+///
+/// Measured on a near-neutral grey over levels 60 to 108. The old figure came
+/// off wood, shadow and a bright Polaroid border, so a difference that only
+/// appears on saturated or bright content would not show here - if one is ever
+/// measured cleanly, this is where it goes.
 enum WidgetTint {
     private static let logger = Logger(subsystem: "com.caden.Motionary", category: "WidgetTint")
 
-    /// What to multiply the widget's content by. The inverse of the measured
-    /// difference, so the display path lands back on the wallpaper's colour.
-    ///
-    /// Refined once against a screenshot taken with the first gain in place,
-    /// which cut the difference from (+1.6, -3.5, -7.1) to (+0.8, -0.6, -1.4);
-    /// this folds in the rest. What is left after that varies by a few units
-    /// down the height of the widget rather than being a single offset, so it is
-    /// the average that goes to zero, not every row.
-    static let gain = (r: 0.984, g: 1.035, b: 1.096)
+    /// What to multiply the widget's content by. Identity, because nothing was
+    /// found to correct - kept as a gain rather than deleted so a difference
+    /// measured cleanly on some future design has somewhere to go.
+    static let gain = (r: 1.0, g: 1.0, b: 1.0)
 
-    /// Clamped rather than gamut-mapped. On the design measured, 2.4% of the
-    /// widget's pixels would exceed 255 in some channel, all of them already at
-    /// or near 255 before the gain - highlights that stay white either way.
+    /// Clamped rather than gamut-mapped, for when the gain is not identity: a
+    /// highlight that clipped in one channel only would come out tinted.
     static func applied(to image: CGImage) -> CGImage {
+        // Every frame of every build goes through here, so an identity gain
+        // skips the round trip rather than paying for a copy that changes
+        // nothing.
+        guard gain != (r: 1, g: 1, b: 1) else { return image }
         let width = image.width
         let height = image.height
         let bytesPerRow = width * 4

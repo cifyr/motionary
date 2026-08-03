@@ -438,26 +438,72 @@ final class GeometryAndSnapTests: XCTestCase {
         XCTAssertNil(LaunchLink.appID(from: URL(string: "https://example.com/launch/spotify")!))
     }
 
-    /// Apple does not publish a URL scheme for every one of its apps, so
-    /// "everything is launchable" was never true - it had simply never been
-    /// tested against an entry that admitted it. The rule that does hold is
-    /// narrower: an entry is launchable unless it is one of the few known not
-    /// to be, and a new entry arriving with no scheme still fails here.
-    private static let knownUnlaunchable: Set<String> = ["clock"]
-
+    /// Every entry has to be able to open something, which was not true until
+    /// the routes were researched one by one: Clock, Weather, Calculator,
+    /// Safari and Claude sat in the list as decoration, and a tap on one did
+    /// nothing at all.
     func testCatalogEntriesAreUniqueAndLaunchable() {
         let ids = AppCatalog.all.map(\.id)
         XCTAssertEqual(Set(ids).count, ids.count, "catalog ids must be unique")
-        for app in AppCatalog.all where !Self.knownUnlaunchable.contains(app.id) {
+        for app in AppCatalog.all {
             XCTAssertTrue(app.canLaunch, "\(app.name) has no launch route")
         }
     }
 
-    func testUnlaunchableEntriesAdmitIt() {
-        for id in Self.knownUnlaunchable {
+    /// Apple publishes no list of the schemes its own apps answer, and the
+    /// community ones disagree and go stale - `calc://` is documented
+    /// everywhere and stopped working around iOS 16. Where the sources
+    /// disagree the entry carries every spelling, and the router walks them.
+    func testTheUndocumentedAppleAppsCarryMoreThanOneRoute() {
+        for id in ["clock", "weather", "calculator"] {
             let app = AppCatalog.app(id: id)
-            XCTAssertNotNil(app, "\(id) is listed as unlaunchable but is not in the catalogue")
-            XCTAssertEqual(app?.canLaunch, false, "\(id) gained a launch route; take it off the list")
+            XCTAssertNotNil(app, "\(id) is not in the catalogue")
+            XCTAssertGreaterThan(
+                app?.launchCandidates.count ?? 0, 1,
+                "\(id) has one route, and Apple documents none of them"
+            )
+        }
+    }
+
+    /// Two entries answering to the same scheme means one of them was copied
+    /// and half-edited, and the wrong app opens - which looks like the scheme
+    /// being wrong rather than the entry being a duplicate. Cheap to state,
+    /// and the catalogue is now large enough that reading for it does not
+    /// work.
+    func testNoTwoAppsClaimTheSameScheme() {
+        var seen: [String: String] = [:]
+        for app in AppCatalog.all {
+            guard let scheme = app.scheme else { continue }
+            if let owner = seen[scheme] {
+                XCTFail("\(app.name) and \(owner) both claim \(scheme)")
+            }
+            seen[scheme] = app.name
+        }
+    }
+
+    /// The web address opens something whatever is installed, so a candidate
+    /// after it would never be tried.
+    func testTheWebAddressComesLast() {
+        for app in AppCatalog.all {
+            guard let web = app.webFallback else { continue }
+            XCTAssertEqual(
+                app.launchCandidates.last?.absoluteString, web,
+                "\(app.name) has a route the web address would swallow"
+            )
+        }
+    }
+
+    /// A scheme that cannot be turned into a URL is a candidate that silently
+    /// disappears, which is how an app comes to have fewer routes than it looks
+    /// like it has.
+    func testEveryWrittenRouteSurvivesBecomingAURL() {
+        for app in AppCatalog.all {
+            let written = ([app.scheme] + app.alternates.map { Optional($0) } + [app.webFallback])
+                .compactMap { $0 }
+            XCTAssertEqual(
+                app.launchCandidates.count, written.count,
+                "\(app.name) has a route that is not a valid URL"
+            )
         }
     }
 }
@@ -508,5 +554,42 @@ final class TilePlacementTests: XCTestCase {
         let straddling = PlacedTile(appID: "spotify", center: CGPoint(x: frame.minX, y: frame.midY), size: 180)
         XCTAssertTrue(SnapEngine.isFullyInside(inside, frame: frame))
         XCTAssertFalse(SnapEngine.isFullyInside(straddling, frame: frame))
+    }
+
+    /// New tiles land on a free spot: every one used to drop on the frame's
+    /// centre, so adding four apps began with un-stacking a pile.
+    func testNewTilesDoNotLandOnEachOther() {
+        var tiles: [PlacedTile] = []
+        for _ in 0 ..< 4 {
+            let center = engine.freePlacement(size: 180, avoiding: tiles)
+            tiles.append(PlacedTile(appID: "spotify", center: center, size: 180))
+        }
+
+        for tile in tiles {
+            XCTAssertTrue(
+                SnapEngine.isFullyInside(tile, frame: frame),
+                "a new tile landed where it cannot be tapped"
+            )
+        }
+        for (index, tile) in tiles.enumerated() {
+            for other in tiles[(index + 1)...] {
+                XCTAssertFalse(
+                    tile.rect.intersects(other.rect),
+                    "tiles overlap at \(tile.center) / \(other.center)"
+                )
+            }
+        }
+    }
+
+    /// A frame with no room left still answers with somewhere visible.
+    func testAFullFrameFallsBackToTheCentre() {
+        // One tile covering the whole frame leaves no free spot.
+        let wall = PlacedTile(
+            appID: "spotify",
+            center: CGPoint(x: frame.midX, y: frame.midY),
+            size: max(frame.width, frame.height) * 2
+        )
+        let center = engine.freePlacement(size: 180, avoiding: [wall])
+        XCTAssertEqual(center, CGPoint(x: frame.midX, y: frame.midY))
     }
 }

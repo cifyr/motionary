@@ -24,9 +24,13 @@ struct SnapEngine {
     var threshold: CGFloat = 14
     var screenSize: CGSize = DeviceGeometry.screenPixelSize
     var widgetRect: CGRect
-    /// Icon grid columns and rows used for alignment candidates.
-    var gridColumns: Int = 4
-    var gridRows: Int = 6
+    /// The tile grid whose column and row centres are snap candidates.
+    ///
+    /// This used to be a bare column count divided into the frame, which drew
+    /// one set of cells on the canvas and snapped to another: the lines a tile
+    /// locked onto were not the ones under it. Taking the design's own grid
+    /// means the candidates are exactly the cells being shown.
+    var grid = WidgetGrid()
 
     struct Result {
         let center: CGPoint
@@ -76,10 +80,13 @@ struct SnapEngine {
             // Tile edges flush to the widget frame, not just centred in it.
             add(widgetRect.minX + tileSize / 2, .widgetFrame)
             add(widgetRect.maxX - tileSize / 2, .widgetFrame)
-            for column in 0 ..< gridColumns {
-                let pitch = widgetRect.width / CGFloat(gridColumns)
-                add(widgetRect.minX + pitch * (CGFloat(column) + 0.5), .iconGrid)
+            // One candidate per column, at the column's centre: the same line
+            // the dashed cell on the canvas is drawn around.
+            for column in 0 ..< max(grid.columns, 1) {
+                let cell = GridCell(row: 0, column: column)
+                add(grid.cellRect(cell).midX, .iconGrid)
             }
+            // Centre to centre with whatever is already placed.
             for sibling in siblings {
                 add(sibling.center.x, .sibling)
             }
@@ -88,9 +95,9 @@ struct SnapEngine {
             add(widgetRect.midY, .widgetFrame)
             add(widgetRect.minY + tileSize / 2, .widgetFrame)
             add(widgetRect.maxY - tileSize / 2, .widgetFrame)
-            for row in 0 ..< gridRows {
-                let pitch = widgetRect.height / CGFloat(gridRows)
-                add(widgetRect.minY + pitch * (CGFloat(row) + 0.5), .iconGrid)
+            for row in 0 ..< max(grid.rows, 1) {
+                let cell = GridCell(row: row, column: 0)
+                add(grid.cellRect(cell).midY, .iconGrid)
             }
             for sibling in siblings {
                 add(sibling.center.y, .sibling)
@@ -117,6 +124,39 @@ struct SnapEngine {
             x: min(max(center.x, box.minX + halfX), box.maxX - halfX),
             y: min(max(center.y, box.minY + halfY), box.maxY - halfY)
         )
+    }
+
+    /// Somewhere inside the widget frame a new tile can land without covering
+    /// one already placed.
+    ///
+    /// Every tile used to drop on the frame's centre, so adding four apps made
+    /// a stack that had to be dealt before anything could be arranged. Scans a
+    /// grid from the top left, the reading order a row of launchers is usually
+    /// built in; when the frame is genuinely full, the centre is still the
+    /// honest answer.
+    func freePlacement(size: CGFloat, avoiding tiles: [PlacedTile]) -> CGPoint {
+        let occupied = tiles.map { tile in
+            CGRect(
+                x: tile.center.x - tile.boundingExtent / 2,
+                y: tile.center.y - tile.boundingExtent / 2,
+                width: tile.boundingExtent,
+                height: tile.boundingExtent
+            )
+        }
+        let step = size * 0.55
+        var y = widgetRect.minY + size / 2
+        while y <= widgetRect.maxY - size / 2 {
+            var x = widgetRect.minX + size / 2
+            while x <= widgetRect.maxX - size / 2 {
+                let candidate = CGRect(x: x - size / 2, y: y - size / 2, width: size, height: size)
+                if !occupied.contains(where: { $0.intersects(candidate) }) {
+                    return CGPoint(x: x, y: y)
+                }
+                x += step
+            }
+            y += step
+        }
+        return CGPoint(x: widgetRect.midX, y: widgetRect.midY)
     }
 
     /// Whether the whole tile is tappable, which only the part inside the widget

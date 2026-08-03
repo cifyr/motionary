@@ -21,6 +21,18 @@ struct CompositionView<Tile: View>: View {
     /// widget black.
     var wallpaperRect: CGRect?
     let isAnimated: Bool
+    /// Placed pictures, drawn over the animation and under the tiles by
+    /// default - the same stacking the editor and the wallpaper bake use. An
+    /// asset with `drawsBehindAnimation` set instead draws between the
+    /// wallpaper and the animated layer. Defaulted so the font lab, which
+    /// draws no decoration, does not have to say so.
+    var assets: [PlacedAsset] = []
+    var assetImage: (PlacedAsset) -> Image? = { _ in nil }
+    /// Live text, drawn over the pictures and under the tiles: a readout is
+    /// decoration that happens to change, and a tile still has to take its own
+    /// taps whatever is written near it.
+    var readouts: [PlacedReadout] = []
+    var readoutValues: ReadoutValues = .empty
     @ViewBuilder let tileContent: (PlacedTile, CGFloat) -> Tile
 
     var body: some View {
@@ -58,6 +70,8 @@ struct CompositionView<Tile: View>: View {
                         )
                 }
 
+                assetLayer(assets.filter(\.drawsBehindAnimation), scale: scale, originX: originX, originY: originY)
+
                 if isAnimated {
                     TimerFontLayer(
                         laneCount: manifest.laneCount,
@@ -73,6 +87,21 @@ struct CompositionView<Tile: View>: View {
                     .offset(x: originX, y: originY)
                 }
 
+                assetLayer(assets.filter { !$0.drawsBehindAnimation }, scale: scale, originX: originX, originY: originY)
+
+                ForEach(readouts.sorted { $0.zIndex < $1.zIndex }) { readout in
+                    ReadoutView(readout: readout, scale: scale, values: readoutValues)
+                        // Positioned by its centre, not its corner: the text is
+                        // as wide as the value comes out, so a corner would
+                        // slide the whole readout every time the value's width
+                        // changed - "9" to "10" would move it.
+                        .frame(width: readout.rect.width * scale, alignment: .center)
+                        .offset(
+                            x: originX + readout.rect.minX * scale,
+                            y: originY + readout.rect.minY * scale
+                        )
+                }
+
                 ForEach(tiles) { tile in
                     tileContent(tile, tile.size * scale)
                         .frame(width: tile.size * scale, height: tile.size * scale)
@@ -85,6 +114,24 @@ struct CompositionView<Tile: View>: View {
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
         .clipped()
+    }
+
+    @ViewBuilder
+    private func assetLayer(_ group: [PlacedAsset], scale: CGFloat, originX: CGFloat, originY: CGFloat) -> some View {
+        ForEach(group.sorted { $0.zIndex < $1.zIndex }) { asset in
+            if let image = assetImage(asset) {
+                image
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: asset.size.width * scale, height: asset.size.height * scale)
+                    .rotationEffect(.degrees(asset.rotation))
+                    .opacity(asset.opacity)
+                    .offset(
+                        x: originX + asset.rect.minX * scale,
+                        y: originY + asset.rect.minY * scale
+                    )
+            }
+        }
     }
 }
 

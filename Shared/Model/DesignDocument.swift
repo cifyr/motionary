@@ -1,6 +1,140 @@
 import CoreGraphics
 import Foundation
 
+/// One slot of the widget's tile grid, numbered from the top left.
+struct GridCell: Codable, Equatable, Hashable, Sendable {
+    var row: Int
+    var column: Int
+
+    /// How the editor names a cell: R1C1 is the top left.
+    var label: String { "R\(row + 1)C\(column + 1)" }
+}
+
+/// The grid tiles land on inside the widget frame.
+///
+/// An aid, not a constraint: a tile may sit off grid, because the wallpaper
+/// carries a baked picture of anything crossing the frame's edge. What the
+/// grid buys is that adding apps never stacks them and a row can be made
+/// without measuring.
+struct WidgetGrid: Codable, Equatable, Sendable {
+    var columns: Int = 4
+    var rows: Int = 6
+    /// Gutter used when spacing tiles by hand, in screen pixels. Not what the
+    /// cells below are laid out on - those come from the device.
+    var gap: CGFloat = 40
+
+    var cellCount: Int { max(columns, 1) * max(rows, 1) }
+
+    var allCells: [GridCell] {
+        (0 ..< max(rows, 1)).flatMap { row in
+            (0 ..< max(columns, 1)).map { GridCell(row: row, column: $0) }
+        }
+    }
+
+    /// Where a cell sits on screen, in screen pixels.
+    ///
+    /// Read off the device's own icon grid rather than divided out of the
+    /// widget frame. The Home Screen's grid is anchored to the screen, and its
+    /// last two rows run past the widget's bottom edge, so no division of a
+    /// 1632-tall frame can reproduce it - which is why dividing it left every
+    /// row between 40px below and 105px above the icons it was meant to sit on.
+    func cellRect(_ cell: GridCell) -> CGRect {
+        DeviceGeometry.model.iconRect(row: cell.row, column: cell.column)
+    }
+
+    func cellCenter(_ cell: GridCell) -> CGPoint {
+        let rect = cellRect(cell)
+        return CGPoint(x: rect.midX, y: rect.midY)
+    }
+
+    /// What a tile is sized to by default: an app icon, because that is what a
+    /// tile stands in for.
+    var tileSide: CGFloat { DeviceGeometry.model.iconSide }
+
+    func nearestCell(to point: CGPoint) -> GridCell? {
+        allCells.min {
+            cellCenter($0).distance(to: point) < cellCenter($1).distance(to: point)
+        }
+    }
+
+    /// The first cell nothing occupies, in reading order. Nil when the grid is
+    /// full, which the editor reports rather than silently stacking.
+    func firstFreeCell(occupied: Set<GridCell>) -> GridCell? {
+        allCells.first { !occupied.contains($0) }
+    }
+}
+
+private extension CGPoint {
+    func distance(to other: CGPoint) -> CGFloat {
+        let dx = x - other.x
+        let dy = y - other.y
+        return (dx * dx + dy * dy).squareRoot()
+    }
+}
+
+/// An app the catalogue does not know, named and addressed by hand.
+///
+/// The catalogue covers the common Home Screen, but a person's own phone has
+/// apps nobody can enumerate ahead of time. A tile carrying one of these opens
+/// it the same way every other tile does: the widget hands the tap to the app,
+/// and the app opens the URL. What is authored here is only the URL.
+struct CustomTarget: Codable, Equatable, Sendable {
+    /// What the tile is called, since there is no catalogue entry to ask.
+    var name: String
+    /// The app's URL scheme, e.g. `things:` or `bear://`. A bare word is
+    /// taken as a scheme, because that is what people type.
+    var scheme: String
+    /// Opened when the scheme does not, which is what happens when the app is
+    /// not installed.
+    var webFallback: String?
+    /// A Shortcut to run when the scheme does not open.
+    ///
+    /// The escape hatch for an app that publishes no working scheme at all: a
+    /// Shortcut can open one when nothing here can. It costs a second hop -
+    /// Motionary, then Shortcuts, then the app - so it goes after the scheme
+    /// rather than in front of it.
+    var shortcutName: String?
+
+    init(name: String, scheme: String, webFallback: String? = nil, shortcutName: String? = nil) {
+        self.name = name
+        self.scheme = scheme
+        self.webFallback = webFallback
+        self.shortcutName = shortcutName
+    }
+
+    /// The URL that runs a named Shortcut, or nil when there is no name.
+    ///
+    /// Built through `URLComponents` because the name is whatever somebody
+    /// called their Shortcut: spaces and punctuation are ordinary in one, and
+    /// pasted into a URL raw they make it unparseable, so Shortcuts opens to
+    /// its own list instead of running anything.
+    static func shortcutURL(named name: String) -> URL? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        var components = URLComponents()
+        components.scheme = "shortcuts"
+        components.host = "run-shortcut"
+        components.queryItems = [URLQueryItem(name: "name", value: trimmed)]
+        return components.url
+    }
+
+    /// The URLs to try, in order. A scheme typed without punctuation still has
+    /// to become one, or `UIApplication.open` refuses it outright.
+    var launchCandidates: [URL] {
+        let trimmed = scheme.trimmingCharacters(in: .whitespaces)
+        var primary = trimmed
+        if !primary.isEmpty, !primary.contains(":") {
+            primary += "://"
+        }
+        // The Shortcut sits between the scheme and the web address: the web
+        // address always opens something, so anything after it is unreachable.
+        let routes = [primary].filter { !$0.isEmpty }.compactMap(URL.init(string:))
+            + [shortcutName.flatMap(Self.shortcutURL(named:))].compactMap { $0 }
+            + [webFallback ?? ""].filter { !$0.isEmpty }.compactMap(URL.init(string:))
+        return routes
+    }
+}
+
 /// An app the phone may put in a tile's slot instead of the authored one.
 ///
 /// The authored `appID` on the tile is the default occupant - the first of the
@@ -11,14 +145,17 @@ struct TileAlternate: Codable, Equatable, Identifiable, Sendable {
     var appID: String
     /// Artwork by filename in the skin library, like `PlacedTile.skin`.
     var skin: String?
+    /// An app outside the catalogue, when this alternate opens one.
+    var custom: CustomTarget?
 
     /// The appID: one slot offering the same app twice would make the phone's
     /// stored choice ambiguous, so the editor refuses duplicates instead.
     var id: String { appID }
 
-    init(appID: String, skin: String? = nil) {
+    init(appID: String, skin: String? = nil, custom: CustomTarget? = nil) {
         self.appID = appID
         self.skin = skin
+        self.custom = custom
     }
 }
 
@@ -52,9 +189,39 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
     /// list. Which one occupies the slot is the phone's choice, stored in the
     /// app group - the one part of a design that is not frozen at install time.
     var alternates: [TileAlternate] = []
+    /// An app outside the catalogue, when this tile opens one. It wins over
+    /// `appID`, which stays as the fallback so a tile always has a name.
+    var custom: CustomTarget?
+    /// The grid cell this tile sits in, or nil for a tile placed off grid.
+    /// Dragging with snapping off is what puts a tile off grid; the editor
+    /// says which it is rather than leaving it to be guessed from position.
+    var cell: GridCell?
 
     var rect: CGRect {
         CGRect(x: center.x - size / 2, y: center.y - size / 2, width: size, height: size)
+    }
+
+    /// What this tile is called - the custom name when it carries one, the
+    /// catalogue's otherwise, and the raw id when neither knows it.
+    var displayName: String {
+        custom?.name ?? AppCatalog.app(id: appID)?.name ?? appID
+    }
+
+    /// The alternates actually on offer: never the tile's own app, and never
+    /// the same app twice.
+    ///
+    /// A slot offering its own occupant is not a choice, and it resolves to
+    /// the same baked icon filename as the authored one - which is how a build
+    /// came to copy two files over the same destination and stop.
+    var offeredAlternates: [TileAlternate] {
+        var seen: Set<String> = [appID]
+        return alternates.filter { seen.insert($0.appID).inserted }
+    }
+
+    /// Whether a tap on this tile can open anything at all.
+    var canLaunch: Bool {
+        if let custom { return !custom.launchCandidates.isEmpty }
+        return AppCatalog.app(id: appID)?.canLaunch ?? false
     }
 
     /// Width of the tile's axis-aligned bounding box once rotated. A tile at
@@ -77,7 +244,9 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         skin: String? = nil,
         tintHex: String? = nil,
         rotation: Double = 0,
-        alternates: [TileAlternate] = []
+        alternates: [TileAlternate] = [],
+        custom: CustomTarget? = nil,
+        cell: GridCell? = nil
     ) {
         self.id = id
         self.appID = appID
@@ -91,6 +260,8 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         self.tintHex = tintHex
         self.rotation = rotation
         self.alternates = alternates
+        self.custom = custom
+        self.cell = cell
     }
 
     /// Decoded field by field rather than by the synthesised initialiser.
@@ -113,6 +284,8 @@ struct PlacedTile: Codable, Equatable, Identifiable, Sendable {
         tintHex = try container.decodeIfPresent(String.self, forKey: .tintHex)
         rotation = try container.decodeIfPresent(Double.self, forKey: .rotation) ?? 0
         alternates = try container.decodeIfPresent([TileAlternate].self, forKey: .alternates) ?? []
+        custom = try container.decodeIfPresent(CustomTarget.self, forKey: .custom)
+        cell = try container.decodeIfPresent(GridCell.self, forKey: .cell)
     }
 }
 
@@ -138,6 +311,10 @@ struct PlacedAsset: Codable, Equatable, Identifiable, Sendable {
     var opacity: Double = 1
     /// Draw order among assets. Higher draws later, so over the others.
     var zIndex: Int = 0
+    /// Drawn before the animated layer instead of after it. A transparent
+    /// picture placed this way sits between the wallpaper and the motion,
+    /// rather than always covering it.
+    var drawsBehindAnimation: Bool = false
     /// Keying settings, applied when the asset is drawn.
     ///
     /// Non-destructive on purpose: the imported file is never rewritten, so a
@@ -163,6 +340,7 @@ struct PlacedAsset: Codable, Equatable, Identifiable, Sendable {
         rotation: Double = 0,
         opacity: Double = 1,
         zIndex: Int = 0,
+        drawsBehindAnimation: Bool = false,
         chroma: ChromaKey.Settings? = nil
     ) {
         self.id = id
@@ -172,6 +350,7 @@ struct PlacedAsset: Codable, Equatable, Identifiable, Sendable {
         self.rotation = rotation
         self.opacity = opacity
         self.zIndex = zIndex
+        self.drawsBehindAnimation = drawsBehindAnimation
         self.chroma = chroma
     }
 
@@ -186,6 +365,7 @@ struct PlacedAsset: Codable, Equatable, Identifiable, Sendable {
         rotation = try container.decodeIfPresent(Double.self, forKey: .rotation) ?? 0
         opacity = try container.decodeIfPresent(Double.self, forKey: .opacity) ?? 1
         zIndex = try container.decodeIfPresent(Int.self, forKey: .zIndex) ?? 0
+        drawsBehindAnimation = try container.decodeIfPresent(Bool.self, forKey: .drawsBehindAnimation) ?? false
         chroma = try container.decodeIfPresent(ChromaKey.Settings.self, forKey: .chroma)
     }
 }
@@ -252,9 +432,44 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     var tiles: [PlacedTile] = []
     /// Decoration placed on the composition, drawn beneath the tiles.
     var assets: [PlacedAsset] = []
-    /// Alternative clips for the animated part. The design's own clip is the
-    /// default; the phone chooses among all of them after install.
+    /// Live text placed on the composition, drawn over the assets.
+    var readouts: [PlacedReadout] = []
+    /// Alternative clips for the animated part. The design's own clip is one of
+    /// them; the phone chooses among all of them after install.
     var variants: [ClipVariant] = []
+
+    /// What the design's own clip is called, when it has been named by hand.
+    /// `primaryClipTitle` is what to show; this is only the override.
+    var primaryClipName: String?
+
+    /// The clip a phone shows before it has chosen one. Nil is the design's
+    /// own, which is what a design with no opinion should do.
+    ///
+    /// A choice rather than a rebuild: every variant is fully built and in the
+    /// bundle, so which one leads is a name in the manifest, not a re-encode.
+    var defaultVariantID: UUID?
+
+    /// What the design's own clip is called in a list of clips.
+    ///
+    /// Its own file's name when nothing has been typed, the same way an
+    /// imported variant takes one. Calling it "Standard" made the scene's own
+    /// clip read as a setting rather than as a clip - next to a variant called
+    /// Mario, a primary that *is* Mario 1 looked like a second, separate thing
+    /// to swipe past. A digest of a filename says even less than "Standard"
+    /// does, so that is the one case that keeps the word.
+    var primaryClipTitle: String {
+        if let primaryClipName, !primaryClipName.isEmpty { return primaryClipName }
+        let stem = (sourceVideoName as NSString).deletingPathExtension
+        return stem.isEmpty || DesignStore.looksLikeADigest(stem) ? "Standard" : stem
+    }
+
+    /// The design's own clip as an entry in the same list as the variants, so
+    /// naming and defaulting can treat all the clips alike.
+    var primaryClip: ClipVariant {
+        ClipVariant(id: id, name: primaryClipTitle, sourceVideoName: sourceVideoName)
+    }
+    /// The grid tiles land on inside the widget frame.
+    var grid: WidgetGrid = WidgetGrid()
     var snapEnabled: Bool = true
 
     /// A chosen background image, by filename inside the design's folder.
@@ -295,9 +510,28 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     /// Changing smoothness changes the frame rate, so a loop chosen under the
     /// old one plays at the wrong speed — 40 frames is 1.25s at 32fps but 2.5s
     /// at 16fps, and the same clip suddenly runs at half speed.
-    mutating func retuneLoop(maximum: Int = 96) {
+    mutating func retuneLoop(maximum: Int = TimerFontSpec.maximumLoopFrames) {
         guard sourceDuration > 0 else { return }
         loopFrameCount = spec.seamlessLoopLength(nearest: naturalLoopFrames, maximum: maximum)
+        fitSpeedToLoop()
+    }
+
+    /// Nudges playback speed so the whole clip lands on the chosen loop.
+    ///
+    /// A loop has to divide the timer cycle, so it rarely equals a source's own
+    /// length: a 10.6s clip at 32fps wants 339 frames, the nearest seamless
+    /// length is 320, and the last 0.6s is never encoded. Running 6% faster
+    /// fits all of it and is not visible.
+    ///
+    /// Only small corrections, measured against whatever speed is already set:
+    /// a clip far longer than any available loop should be cut rather than
+    /// played at several times speed, and a speed chosen on purpose should
+    /// survive being fitted.
+    mutating func fitSpeedToLoop(tolerance: Double = 0.15) {
+        guard sourceDuration > 0, loopFrameCount > 0, playbackSpeed > 0 else { return }
+        let wanted = sourceDuration * Double(spec.framesPerSecond) / Double(loopFrameCount)
+        guard abs(wanted / playbackSpeed - 1) <= tolerance else { return }
+        playbackSpeed = wanted
     }
 
     /// How long the built loop runs on screen.
@@ -381,6 +615,9 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         tiles = try container.decodeIfPresent([PlacedTile].self, forKey: .tiles) ?? []
         assets = try container.decodeIfPresent([PlacedAsset].self, forKey: .assets) ?? []
         variants = try container.decodeIfPresent([ClipVariant].self, forKey: .variants) ?? []
+        primaryClipName = try container.decodeIfPresent(String.self, forKey: .primaryClipName)
+        defaultVariantID = try container.decodeIfPresent(UUID.self, forKey: .defaultVariantID)
+        grid = try container.decodeIfPresent(WidgetGrid.self, forKey: .grid) ?? WidgetGrid()
         snapEnabled = try container.decodeIfPresent(Bool.self, forKey: .snapEnabled) ?? true
         backgroundName = try container.decodeIfPresent(String.self, forKey: .backgroundName)
         widgetCornerRadius = try container.decodeIfPresent(CGFloat.self, forKey: .widgetCornerRadius)
@@ -440,6 +677,23 @@ struct BuildManifest: Codable, Equatable, Sendable {
 
     var placedTiles: [PlacedTile] { tiles ?? [] }
 
+    /// Placed pictures, drawn live between the animation and the tiles.
+    ///
+    /// They travel like the tiles do, because baked into the wallpaper alone
+    /// they never reach the widget's own frame - the backdrop is the raw
+    /// clip, and the app's preview video plays over the wallpaper. Optional
+    /// for the same decoding reason `tiles` is.
+    var assets: [PlacedAsset]?
+
+    var placedAssets: [PlacedAsset] { assets ?? [] }
+
+    /// Live text placed on the design. Optional for the same decoding reason
+    /// `tiles` is: a manifest written before readouts existed has no key here,
+    /// and a non-optional would fail the whole decode rather than default.
+    var readouts: [PlacedReadout]?
+
+    var placedReadouts: [PlacedReadout] { readouts ?? [] }
+
     /// What one built variant amounts to at render time. Everything else -
     /// crop, lanes, frame rate, tiles - is the design's, shared.
     struct VariantBuild: Codable, Equatable, Identifiable, Sendable {
@@ -458,6 +712,47 @@ struct BuildManifest: Codable, Equatable, Sendable {
     var clipVariants: [VariantBuild]?
 
     var builtVariants: [VariantBuild] { clipVariants ?? [] }
+
+    /// What the design's own clip is called in the phone's list. Nil is
+    /// "Standard", which is what every build before naming existed shows.
+    var primaryClipName: String?
+
+    /// The clip a phone shows before it has chosen one, or nil for the
+    /// design's own. Written only when that variant actually built - a default
+    /// pointing at fonts the bundle does not carry is a black widget.
+    var defaultVariantID: UUID?
+
+    /// What to call the primary, ready to show.
+    var primaryClipTitle: String { primaryClipName ?? "Standard" }
+
+    /// One clip as the phone offers it: what it is called, and which one it is.
+    struct ClipChoice: Equatable, Identifiable, Sendable {
+        /// Nil is the design's own clip.
+        let variantID: UUID?
+        let name: String
+
+        var id: String { variantID?.uuidString ?? "primary" }
+    }
+
+    /// Every clip this build carries, in the order a phone steps through them.
+    ///
+    /// Alphabetical, so a list of a dozen can be found in, and rotated to start
+    /// on the one the design leads with - which may be halfway through the
+    /// alphabet, so the sequence wraps. Both at once: sorting alone would make
+    /// the first swipe jump away from what is on screen, and leading alone
+    /// would leave the rest in whatever order they were imported.
+    var clipSequence: [ClipChoice] {
+        let all = [ClipChoice(variantID: nil, name: primaryClipTitle)]
+            + builtVariants.map { ClipChoice(variantID: $0.id, name: $0.name) }
+        // Natural order, so "Clip 2" comes before "Clip 10" rather than after.
+        let sorted = all.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        guard let start = sorted.firstIndex(where: { $0.variantID == defaultVariantID }) else {
+            // The default names a clip this build does not carry, which the
+            // build guards against; falling back keeps the list usable.
+            return sorted
+        }
+        return Array(sorted[start...] + sorted[..<start])
+    }
 
     var spec: TimerFontSpec {
         TimerFontSpec(laneCount: laneCount, framesPerSecond: framesPerSecond)

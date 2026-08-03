@@ -14,10 +14,12 @@ struct TileArtwork {
     let iconsFolder: URL?
     private let skins: SkinLibrary?
 
-    init(iconsFolder: URL?) {
+    init(iconsFolder: URL?, skinsFolder: URL? = nil) {
         self.iconsFolder = iconsFolder
         // A missing library is not fatal: tiles without skins still resolve.
-        skins = try? SkinLibrary()
+        // The design's own folder when given one, and the old shared library
+        // otherwise, so a design built before skins moved still finds them.
+        skins = skinsFolder.flatMap { try? SkinLibrary(root: $0) } ?? (try? SkinLibrary())
     }
 
     func url(for tile: PlacedTile) -> URL? {

@@ -1,4 +1,5 @@
 import CoreGraphics
+import os
 import SwiftUI
 
 /// Positions the clip and places app tiles on it, before anything is built.
@@ -9,20 +10,35 @@ import SwiftUI
 /// the widget's frame drawn on it, because that frame is the only part that
 /// ends up animated - anything outside it is wallpaper.
 struct LayoutEditor: View {
+    private static let logger = Logger(subsystem: "com.caden.Motionary", category: "LayoutEditor")
+
     @Binding var design: DesignDocument
     let model: DeviceModel
     let poster: CGImage?
     /// Where a chosen background is stored, so the editor can both read one
     /// back and write a newly picked one alongside the design.
     let store: DesignStore?
+    /// What the toolbar's title says, and what its two buttons do. Supplied by
+    /// the window, which owns saving and building.
+    var documentName: String = "Design"
+    var savedNote: String = ""
+    var onPreview: () -> Void = {}
+    var onBuild: () -> Void = {}
 
-    @State private var selection: UUID?
+    /// What is being edited. A set because aligning needs more than one thing
+    /// at a time; command-click adds to it.
+    ///
+    /// Internal rather than private so the toolbar, layer list and status bar
+    /// in LayoutEditorChrome.swift can read it - they are this same view.
+    @State var selection: Set<UUID> = []
     @State private var placementBase: MediaTransform?
     @State private var scaleBase: Double?
     @State private var tileBase: CGPoint?
-    @State private var showingCatalogue = false
     /// The selected tile is collecting an alternate from the catalogue.
     @State private var addingAlternate = false
+    @State private var libraryTab: LibraryTab = .apps
+    /// Keyboard focus for the canvas, so arrow keys nudge the selection.
+    @FocusState private var canvasFocused: Bool
     /// Applied to tiles added later, so turning labels off once does not have
     /// to be repeated for every app placed after it.
     @State private var labelsDefault = true
@@ -32,19 +48,104 @@ struct LayoutEditor: View {
     @State private var skinSets: [SkinSet] = []
     /// The set collecting a new entry from the catalogue popover.
     @State private var addingEntryTo: UUID?
+    /// The sprite-sheet importer, which turns one picture into a whole set.
+    @State private var importingSheet = false
     /// The variant whose clip is standing in for the primary on the canvas.
-    @State private var previewedVariantID: UUID?
+    @State var previewedVariantID: UUID?
     @State private var variantPoster: CGImage?
+    /// The clip running on the canvas, decoded once and held as frames.
+    ///
+    /// Composed exactly as a build composes them - same transform, same
+    /// background, same crop - so what plays here is what the phone gets,
+    /// rather than a second opinion about it. Small, because the canvas is
+    /// small and a full-size loop is hundreds of megabytes.
+    @State private var playbackFrames: [CGImage] = []
+    @State private var isPlaying = false
+    @State private var isLoadingPlayback = false
     /// The asset whose key colour is being picked by clicking it.
     @State private var pickingKeyFor: UUID?
+    /// Set while an option-drag is making a copy, so the drag moves the copy
+    /// rather than making a new one on every tick.
+    @State private var duplicatedDuringDrag: UUID?
+    /// Canvas points per phone point. Everything on the canvas is measured
+    /// through it, so the composition scales as one picture.
+    @State var zoom: CGFloat = LayoutEditor.defaultZoom
+    /// The space the canvas has to sit in, measured rather than assumed, so
+    /// "Fit" can work out a zoom that actually fits.
+    @State private var canvasViewport: CGSize = .zero
+    /// The lines the current drag is locked to, drawn while it lasts.
+    @State private var activeGuides: [SnapGuide] = []
 
-    /// Points per screen pixel, so the canvas is the phone at a readable size.
-    static let zoom: CGFloat = 0.62
+    /// The one thing selected, when exactly one is. Most of the inspector only
+    /// makes sense for a single item; alignment is what the rest is for.
+    private var singleSelection: UUID? {
+        selection.count == 1 ? selection.first : nil
+    }
+
+    private var selectedTiles: [PlacedTile] {
+        design.tiles.filter { selection.contains($0.id) }
+    }
+
+    /// This design's own icon library. Skins used to sit in one folder shared
+    /// by every design, so a pack imported for one turned up in the picker of
+    /// all of them; they live with the design that uses them now.
+    var skinLibrary: SkinLibrary? {
+        guard let store else { return nil }
+        return try? SkinLibrary(root: store.skinsFolder(for: design.id))
+    }
+
+    /// One snap engine for the whole editor, carrying the design's real grid.
+    ///
+    /// The threshold is divided by the zoom so it stays the same distance
+    /// under the cursor: at 25% a 14px reach is barely three points on screen,
+    /// and snapping feels broken rather than subtle.
+    var snapEngine: SnapEngine {
+        SnapEngine(
+            threshold: 14 / max(zoom, 0.05),
+            screenSize: model.screenPixelSize,
+            widgetRect: design.widgetRect,
+            grid: design.grid
+        )
+    }
+
+    // MARK: - Zoom
+
+    /// Steps rather than a free slider: the canvas is a phone, and the sizes
+    /// worth working at are a short list.
+    private static let zoomStops: [CGFloat] = [0.25, 0.35, 0.5, 0.62, 0.75, 1, 1.25, 1.5, 2, 2.5]
+
+    func zoomIn() {
+        zoom = Self.zoomStops.first { $0 > zoom + 0.001 } ?? Self.zoomRange.upperBound
+    }
+
+    func zoomOut() {
+        zoom = Self.zoomStops.last { $0 < zoom - 0.001 } ?? Self.zoomRange.lowerBound
+    }
+
+    /// The largest zoom that still shows the whole phone, with the canvas
+    /// padding left over. Falls back to the default before the viewport has
+    /// been measured, which is the state on the very first frame.
+    func zoomToFit() {
+        guard canvasViewport.width > 1, canvasViewport.height > 1 else {
+            zoom = Self.defaultZoom
+            return
+        }
+        let padding: CGFloat = 56
+        let fit = min(
+            (canvasViewport.width - padding) / model.screenPointSize.width,
+            (canvasViewport.height - padding) / model.screenPointSize.height
+        )
+        zoom = min(max(fit, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
+    }
+
+    /// Where the canvas starts, and what the window is sized against.
+    static let defaultZoom: CGFloat = 0.62
+    static let zoomRange: ClosedRange<CGFloat> = 0.25 ... 2.5
 
     private var canvas: CGSize {
         CGSize(
-            width: model.screenPointSize.width * Self.zoom,
-            height: model.screenPointSize.height * Self.zoom
+            width: model.screenPointSize.width * zoom,
+            height: model.screenPointSize.height * zoom
         )
     }
 
@@ -81,34 +182,81 @@ struct LayoutEditor: View {
         )
     }
 
-    /// Wide enough for the canvas and the sidebar together.
+    /// Wide enough for the canvas with a panel on either side.
     ///
     /// Without it the sheet inherited the studio window's 520pt width and cut
     /// the sidebar and the Build button off the right edge.
     static func width(for model: DeviceModel) -> CGFloat {
-        model.screenPointSize.width * zoom + sidebarWidth + 60
+        model.screenPointSize.width * defaultZoom + sidebarWidth + layersWidth + 90
     }
 
     static func height(for model: DeviceModel) -> CGFloat {
-        model.screenPointSize.height * zoom + 40
+        model.screenPointSize.height * defaultZoom + 140
     }
 
-    private static let sidebarWidth: CGFloat = 240
+    static let sidebarWidth: CGFloat = 250
+    static let layersWidth: CGFloat = 170
 
+    /// Layers on the left, canvas in the middle, inspector and libraries on
+    /// the right, with a toolbar over all three and a status bar under them.
+    ///
+    /// The shape is the point: what is being edited is named in one place, the
+    /// libraries never move, and lining things up is a button rather than a
+    /// steady hand. See docs/studio-design-brief.md.
     var body: some View {
-        HStack(alignment: .top, spacing: 20) {
-            screen
-            // Scrolled, because the sidebar holds more than the sheet is tall.
-            // Overflowing it squeezed the flexible child - the skin grid - down
-            // to nothing, so an imported skin was in the view tree and zero
-            // pixels high, which reads exactly like an import that failed.
-            ScrollView {
-                sidebar.frame(width: Self.sidebarWidth, alignment: .leading)
+        VStack(spacing: 0) {
+            editorToolbar
+            HStack(alignment: .top, spacing: 0) {
+                layersPanel
+                GeometryReader { geometry in
+                    ScrollView([.horizontal, .vertical]) {
+                        screen
+                            .padding(28)
+                            .frame(
+                                minWidth: geometry.size.width,
+                                minHeight: geometry.size.height
+                            )
+                    }
+                    .onAppear { canvasViewport = geometry.size }
+                    .onChange(of: geometry.size) { _, size in canvasViewport = size }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(StudioTheme.canvasBackground)
+                // Scrolled, because the sidebar holds more than the window is
+                // tall. Overflowing it squeezed the flexible child - the skin
+                // grid - down to nothing, so an imported skin was in the view
+                // tree and zero pixels high, which reads exactly like an
+                // import that failed.
+                ScrollView {
+                    sidebar
+                        .frame(width: Self.sidebarWidth, alignment: .leading)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 12)
+                }
+                .frame(width: Self.sidebarWidth + 30)
+                .background(StudioTheme.panel)
+                .overlay(alignment: .leading) {
+                    Rectangle().fill(StudioTheme.panelEdge).frame(width: 1)
+                }
             }
-            .frame(width: Self.sidebarWidth)
+            statusBar
         }
-        .padding(20)
+        .background(StudioTheme.canvasWell)
+        .sheet(isPresented: $importingSheet) {
+            SpriteSheetImporter(library: skinLibrary) { imported in
+                skinSets.append(imported)
+                saveSkinSets()
+                reloadSkins()
+                skinNote = "Imported \(imported.name): \(imported.entries.count) app\(imported.entries.count == 1 ? "" : "s"). Apply it to a tile to offer the rest as swaps."
+            }
+        }
+        // A fixed dark theme: the canvas is a phone screen, and a panel that
+        // changed weight with the system appearance would change what the
+        // artwork beside it looks like.
+        .environment(\.colorScheme, .dark)
+        .tint(StudioTheme.accent)
         .task {
+            migrateSkins()
             reloadSkins()
             reloadBackground()
             reloadSkinSets()
@@ -124,6 +272,119 @@ struct LayoutEditor: View {
                 url: store.variantClipURL(for: design.id, name: variant.sourceVideoName),
                 screenSize: model.screenPixelSize
             ).posterFrame()
+        }
+        // Keyed on both, so switching clips while running reloads rather than
+        // leaving the last one's frames on the canvas.
+        .task(id: PlaybackRequest(clip: previewedVariantID, running: isPlaying)) {
+            await loadPlayback()
+        }
+    }
+
+    /// What a playback load is for, so the task restarts when either changes.
+    private struct PlaybackRequest: Equatable {
+        let clip: UUID?
+        let running: Bool
+    }
+
+    /// Longest side of a decoded playback frame, in pixels.
+    ///
+    /// The canvas is a few hundred points wide, so decoding the loop at screen
+    /// size would spend a hundred megabytes to draw the same picture. At this
+    /// size a 96-frame loop is about 40MB, and it is freed when playback stops.
+    private static let playbackLongestSide: CGFloat = 560
+
+    /// Plays a clip on the canvas, or stops the one already running.
+    private func togglePlayback(of variantID: UUID?) {
+        guard !(isPlaying && previewedVariantID == variantID) else {
+            stopPlayback()
+            return
+        }
+        stopPlayback()
+        previewedVariantID = variantID
+        isPlaying = true
+    }
+
+    private func stopPlayback() {
+        isPlaying = false
+        isLoadingPlayback = false
+        playbackFrames = []
+    }
+
+    /// Decodes the running clip's loop through the same path a build uses.
+    private func loadPlayback() async {
+        guard isPlaying, let store else { return }
+        let variant = design.variants.first { $0.id == previewedVariantID }
+        let source = variant.map { store.variantClipURL(for: design.id, name: $0.sourceVideoName) }
+            ?? store.sourceVideoURL(for: design)
+
+        let screen = model.screenPixelSize
+        let scale = Self.playbackLongestSide / max(screen.width, screen.height)
+        let reduced = CGSize(width: (screen.width * scale).rounded(), height: (screen.height * scale).rounded())
+
+        let extractor = MediaFrameExtractor(
+            url: source,
+            screenSize: reduced,
+            // Against the reduced screen, or the offset - which is screen
+            // pixels - places the clip five times too far from centre.
+            transform: design.mediaTransform.scaled(by: scale),
+            background: design.backgroundName.flatMap {
+                ImageLoader.load(
+                    at: store.backgroundURL(for: design.id, name: $0),
+                    maxPixelSize: Int(max(reduced.width, reduced.height))
+                )
+            },
+            clipRect: design.backgroundName == nil ? nil : scaledRect(design.widgetRect, by: scale),
+            clipCornerRadius: design.effectiveCornerRadius * scale
+        )
+        isLoadingPlayback = true
+        defer { isLoadingPlayback = false }
+        do {
+            // A variant is its own length, measured the way the build measures
+            // it, so what plays here wraps where the built one wraps.
+            var count = design.loopFrameCount
+            if variant != nil {
+                count = FontSetGenerator.variantLoopLength(
+                    duration: try await extractor.summary().duration,
+                    spec: design.spec,
+                    playbackSpeed: design.playbackSpeed
+                )
+            }
+            let frames = try await extractor.composedFrames(
+                startFrame: variant == nil ? design.loopStartFrame : 0,
+                count: count,
+                frameRate: design.spec.framesPerSecond,
+                speed: design.playbackSpeed
+            )
+            guard isPlaying else { return }
+            playbackFrames = frames
+        } catch {
+            // Named: a play button that does nothing is indistinguishable from
+            // a clip that is all one frame.
+            isPlaying = false
+            // Logged as well as shown: the note is cleared by the next thing
+            // that happens, and this is the only record of why a clip refused.
+            Self.logger.error("""
+            could not play \(source.lastPathComponent, privacy: .public): \
+            \(String(describing: error), privacy: .public)
+            """)
+            skinNote = "Could not play \(source.lastPathComponent): \(error)"
+        }
+    }
+
+    private func scaledRect(_ rect: CGRect, by scale: CGFloat) -> CGRect {
+        CGRect(x: rect.minX * scale, y: rect.minY * scale, width: rect.width * scale, height: rect.height * scale)
+    }
+
+    /// Brings whatever this design references over from the old shared
+    /// library, so moving skins into the design does not empty its tiles.
+    private func migrateSkins() {
+        guard let library = skinLibrary else { return }
+        var wanted = Set(design.tiles.compactMap(\.skin))
+        wanted.formUnion(design.tiles.flatMap { $0.alternates.compactMap(\.skin) })
+        wanted.formUnion(((try? SkinSetStore().all()) ?? []).flatMap { $0.entries.map(\.skin) })
+        let carried = SkinLibrary.migrateIfNeeded(wanted, into: library)
+        if carried > 0 {
+            skinNote = "Brought \(carried) skin\(carried == 1 ? "" : "s") into this design."
         }
     }
 
@@ -180,90 +441,83 @@ struct LayoutEditor: View {
     }
 
     private func reloadSkins() {
-        skins = (try? SkinLibrary().all()) ?? []
+        skins = skinLibrary?.all() ?? []
     }
 
-    private func importSkins() {
+    /// One tile's own artwork, imported for it alone.
+    ///
+    /// There used to be a library browser here: every skin in the design, laid
+    /// out in a grid, with a tile selected to receive one. An iconset carries
+    /// both the artwork and the app each piece opens, so that grid was the long
+    /// way round to what a set does in one action. What it was still good for
+    /// is the single odd icon a set has no entry for, and that is what this is.
+    @ViewBuilder
+    private func customIconRow(index: Int) -> some View {
+        let tile = design.tiles[index]
+        HStack(spacing: 6) {
+            Text("Icon").font(.caption).foregroundStyle(.secondary)
+            if let skin = tile.skin {
+                AsyncSkinThumbnail(url: skinLibrary?.url(for: skin))
+                    .frame(width: 28, height: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .help(skin)
+                Text(fromSet(skin) ?? "its own")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                Button("Clear") { clearCustomIcon(at: index) }
+                    .buttonStyle(.studioCompact)
+            } else {
+                Text("the catalogue plate")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Custom...") { importCustomIcon(at: index) }
+                    .buttonStyle(.studioCompact)
+            }
+        }
+    }
+
+    /// The set an icon came from, so the inspector can say where it got it
+    /// rather than implying every icon was picked by hand.
+    private func fromSet(_ skin: String) -> String? {
+        skinSets.first { $0.entries.contains { $0.skin == skin } }?.name
+    }
+
+    /// Puts one imported picture on one tile.
+    private func importCustomIcon(at index: Int) {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.png, .jpeg, .image]
-        panel.allowsMultipleSelection = true
+        panel.allowsMultipleSelection = false
         panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        guard panel.runModal() == .OK, let source = panel.url else { return }
         do {
-            // Counted and reported. Swallowing this with `try?` made a failed
-            // import look exactly like a successful one, which is how an
-            // import that worked came to look like an import that did nothing.
-            let added = try SkinLibrary().importing(panel.urls)
+            // Reported rather than swallowed: an import that failed silently
+            // looks exactly like one that worked, which is how a working
+            // import once came to look broken.
+            guard let library = skinLibrary else { return }
+            let added = try library.importing([source])
             reloadSkins()
-            let failed = panel.urls.count - added.count
-            skinNote = failed == 0
-                ? "Added \(added.count) skin\(added.count == 1 ? "" : "s")."
-                : "Added \(added.count), could not read \(failed)."
+            guard let name = added.first else {
+                skinNote = "Could not read \(source.lastPathComponent)."
+                return
+            }
+            design.tiles[index].skin = name
+            skinNote = nil
         } catch {
             skinNote = "Import failed: \(error.localizedDescription)"
         }
     }
 
-    /// The library, always reachable.
-    ///
-    /// It used to live inside the selected tile's section, which meant there was
-    /// nowhere to import a skin until a tile happened to be selected - and no
-    /// way to tell that was why nothing appeared to happen.
-    private var skinPicker: some View {
-        let index = selection.flatMap { id in design.tiles.firstIndex { $0.id == id } }
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("Skins").font(.caption.weight(.semibold))
-                Spacer()
-                Button("Import...") { importSkins() }.buttonStyle(.link)
-            }
-            if let skinNote {
-                Text(skinNote).font(.caption2).foregroundStyle(.secondary)
-            }
-            if skins.isEmpty {
-                Text("No skins yet. Import icon artwork - a green screen is removed automatically - and it stays available for every design.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if index == nil {
-                Text("\(skins.count) skin\(skins.count == 1 ? "" : "s") ready. Select a tile to put one on it.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if let index {
-                LazyVGrid(columns: Array(repeating: GridItem(.fixed(44), spacing: 6), count: 4), spacing: 6) {
-                    Button {
-                        design.tiles[index].skin = nil
-                    } label: {
-                        Image(systemName: "nosign")
-                            .frame(width: 44, height: 44)
-                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                    .help("No skin - use the tinted plate")
-
-                    ForEach(skins) { skin in
-                        Button {
-                            design.tiles[index].skin = skin.id
-                        } label: {
-                            AsyncSkinThumbnail(url: skin.url)
-                                .frame(width: 44, height: 44)
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .strokeBorder(
-                                            design.tiles[index].skin == skin.id
-                                                ? Color.accentColor : .clear,
-                                            lineWidth: 2
-                                        )
-                                }
-                        }
-                        .buttonStyle(.plain)
-                        .help(skin.id)
-                    }
-                }
-                .fixedSize(horizontal: false, vertical: true)
-            }
+    /// Takes the icon off a tile, and the file with it when it was that tile's
+    /// alone - there is no browser to find an orphan in any more.
+    private func clearCustomIcon(at index: Int) {
+        guard let name = design.tiles[index].skin else { return }
+        design.tiles[index].skin = nil
+        if SkinReferences.isUnused(name, tiles: design.tiles, sets: skinSets) {
+            skinLibrary?.remove(name)
+            reloadSkins()
         }
     }
 
@@ -279,14 +533,92 @@ struct LayoutEditor: View {
         Color.black
             .frame(width: canvas.width, height: canvas.height)
             .overlay(alignment: .topLeading) { layers }
-            .clipShape(RoundedRectangle(cornerRadius: 34 * Self.zoom, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 34 * zoom, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 34 * Self.zoom, style: .continuous)
+                RoundedRectangle(cornerRadius: 34 * zoom, style: .continuous)
                     .strokeBorder(.white.opacity(0.15), lineWidth: 1)
             )
             .gesture(clipDrag)
             .simultaneousGesture(clipZoom)
-            .onTapGesture { selection = nil }
+            .onTapGesture { selection = [] }
+            .focusable()
+            .focusEffectDisabled()
+            .focused($canvasFocused)
+            .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow], phases: [.down, .repeat]) { press in
+                let step: CGFloat = press.modifiers.contains(.shift) ? 10 : 1
+                let moved = switch press.key {
+                case .leftArrow: nudgeSelection(dx: -step, dy: 0)
+                case .rightArrow: nudgeSelection(dx: step, dy: 0)
+                case .upArrow: nudgeSelection(dx: 0, dy: -step)
+                case .downArrow: nudgeSelection(dx: 0, dy: step)
+                default: false
+                }
+                return moved ? .handled : .ignored
+            }
+            // Selecting something on the canvas is the intent to work on it,
+            // arrow keys included.
+            .onChange(of: selection) { _, value in
+                if !value.isEmpty { canvasFocused = true }
+            }
+    }
+
+    /// The cells, drawn only while snapping is on: they are a placement aid,
+    /// and a grid over a design nobody is snapping is just noise.
+    @ViewBuilder
+    private var gridOverlay: some View {
+        if design.snapEnabled {
+            let frame = design.widgetRect
+            ForEach(design.grid.allCells, id: \.self) { cell in
+                let rect = design.grid.cellRect(cell)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(
+                        .white.opacity(occupiedCells.contains(cell) ? 0.08 : 0.22),
+                        style: StrokeStyle(lineWidth: 1, dash: [3, 3])
+                    )
+                    .frame(width: rect.width * unit, height: rect.height * unit)
+                    .offset(x: rect.minX * unit, y: rect.minY * unit)
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// The lines a drag is locked to. They appear only while it lasts, which
+    /// is what makes them read as feedback rather than as part of the design.
+    @ViewBuilder
+    private var guideOverlay: some View {
+        ForEach(activeGuides) { guide in
+            switch guide.axis {
+            case .vertical:
+                Rectangle()
+                    .fill(StudioTheme.accent.opacity(0.9))
+                    .frame(width: 1, height: canvas.height)
+                    .offset(x: guide.position * unit)
+            case .horizontal:
+                Rectangle()
+                    .fill(StudioTheme.accent.opacity(0.9))
+                    .frame(width: canvas.width, height: 1)
+                    .offset(y: guide.position * unit)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private var occupiedCells: Set<GridCell> {
+        Set(design.tiles.compactMap(\.cell))
+    }
+
+    /// Click selects; command-click adds to the selection, so several tiles
+    /// can be aligned together.
+    func select(_ id: UUID) {
+        if NSEvent.modifierFlags.contains(.command) {
+            if selection.contains(id) {
+                selection.remove(id)
+            } else {
+                selection.insert(id)
+            }
+        } else {
+            selection = [id]
+        }
     }
 
     /// The clip, in canvas coordinates.
@@ -334,12 +666,27 @@ struct LayoutEditor: View {
                     .frame(width: canvas.width, height: canvas.height)
                     .clipped()
             }
-            if let poster = activePoster {
+            // Between the wallpaper and the clip, matching the compositor: a
+            // picture marked to draw behind the animation shows through it
+            // rather than always covering it.
+            ForEach(design.assets.filter(\.drawsBehindAnimation).sorted { $0.zIndex < $1.zIndex }) { asset in
+                assetView(asset)
+            }
+            if !playbackFrames.isEmpty {
+                // A composed frame already carries the placement, the fill and
+                // the background, so it stands in for both layers below rather
+                // than on top of them.
+                PlayingClip(frames: playbackFrames, framesPerSecond: design.spec.framesPerSecond)
+                    .frame(width: canvas.width, height: canvas.height)
+                    .clipped()
+            } else if let poster = activePoster {
                 // The generator fills whatever the clip does not cover with a
                 // dimmed blow-up of the same frame rather than black. Drawing
                 // black here instead - which this did - meant the wallpaper
                 // that came out did not look like the one that was positioned.
-                if background == nil, design.mediaTransform.fillsBackground {
+                if background == nil,
+                   design.mediaTransform.fillsBackground,
+                   !MediaFrameExtractor.isCutOut(poster) {
                     let fill = MediaFrameExtractor.backdropPlacement(
                         sourceSize: sourceSize,
                         screenSize: model.screenPixelSize
@@ -353,15 +700,67 @@ struct LayoutEditor: View {
                 clipLayer(poster: poster)
             }
             widgetFrame
+            gridOverlay
+            guideOverlay
             // Under the tiles, matching what the wallpaper bakes, so the canvas
             // shows the stacking the phone will actually have.
-            ForEach(design.assets.sorted { $0.zIndex < $1.zIndex }) { asset in
+            ForEach(design.assets.filter { !$0.drawsBehindAnimation }.sorted { $0.zIndex < $1.zIndex }) { asset in
                 assetView(asset)
+            }
+            ForEach(design.readouts.sorted { $0.zIndex < $1.zIndex }) { readout in
+                readoutView(readout)
             }
             ForEach(design.tiles) { tile in
                 tileView(tile)
             }
         }
+    }
+
+    /// One readout on the canvas, drawn by the same view the widget uses so the
+    /// studio is not a second renderer. Fed sample values, because the real
+    /// ones are the phone's and there is nothing to read here.
+    private func readoutView(_ readout: PlacedReadout) -> some View {
+        ReadoutView(readout: readout, scale: unit, values: Self.sampleValues)
+            .frame(width: readout.rect.width * unit, alignment: .center)
+            .overlay {
+                if selection.contains(readout.id) {
+                    Rectangle().strokeBorder(.white.opacity(0.9), lineWidth: 1)
+                }
+            }
+            .offset(x: readout.rect.minX * unit, y: readout.rect.minY * unit)
+            .gesture(readoutDrag(readout))
+            .onTapGesture { select(readout.id) }
+    }
+
+    /// Stand-in values so the gathered sources show something concrete while
+    /// being placed, rather than the "--" the widget shows before a first read.
+    private static let sampleValues = ReadoutValues(
+        battery: "87%",
+        steps: "8,432",
+        weather: "72 Sunny",
+        calendar: "3:30 Standup",
+        gatheredAt: nil
+    )
+
+    private func readoutDrag(_ readout: PlacedReadout) -> some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard let index = design.readouts.firstIndex(where: { $0.id == readout.id })
+                else { return }
+                let base = tileBase ?? readout.center
+                if tileBase == nil { tileBase = base }
+                // Divided by `unit` so the readout moves by what the cursor
+                // covered on the phone, not on the canvas.
+                let moved = CGPoint(
+                    x: base.x + value.translation.width / unit,
+                    y: base.y + value.translation.height / unit
+                )
+                design.readouts[index].center = snapEngine.clamp(
+                    center: moved,
+                    tileSize: readout.rect.width
+                )
+            }
+            .onEnded { _ in tileBase = nil }
     }
 
     /// The animated region, drawn so the clip can be positioned against it
@@ -380,16 +779,16 @@ struct LayoutEditor: View {
         return TileView(
             tile: tile,
             side: side,
-            isSelected: selection == tile.id,
+            isSelected: selection.contains(tile.id),
             iconImage: tile.skin
-                .flatMap { try? SkinLibrary().url(for: $0) }
+                .flatMap { skinLibrary?.url(for: $0) }
                 .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(side * 3)) }
                 .map { Image(decorative: $0, scale: 1) }
         )
             .frame(width: side, height: side)
             .offset(x: tile.rect.minX * unit, y: tile.rect.minY * unit)
             .gesture(tileDrag(tile))
-            .onTapGesture { selection = tile.id }
+            .onTapGesture { select(tile.id) }
     }
 
     private func assetView(_ asset: PlacedAsset) -> some View {
@@ -427,14 +826,14 @@ struct LayoutEditor: View {
         .rotationEffect(.degrees(asset.rotation))
         .opacity(asset.opacity)
         .overlay {
-            if selection == asset.id {
+            if selection.contains(asset.id) {
                 Rectangle().strokeBorder(.white.opacity(0.9), lineWidth: 1)
                     .rotationEffect(.degrees(asset.rotation))
             }
         }
         .offset(x: asset.rect.minX * unit, y: asset.rect.minY * unit)
         .gesture(assetDrag(asset))
-        .onTapGesture { selection = asset.id }
+        .onTapGesture { select(asset.id) }
     }
 
     private func assetImage(_ asset: PlacedAsset) -> CGImage? {
@@ -450,7 +849,7 @@ struct LayoutEditor: View {
                 let base = tileBase ?? asset.center
                 if tileBase == nil {
                     tileBase = base
-                    selection = asset.id
+                    selection = [asset.id]
                 }
                 design.assets[index].center = CGPoint(
                     x: base.x + value.translation.width / unit,
@@ -507,43 +906,82 @@ struct LayoutEditor: View {
     private func tileDrag(_ tile: PlacedTile) -> some Gesture {
         DragGesture()
             .onChanged { value in
-                guard let index = design.tiles.firstIndex(where: { $0.id == tile.id }) else { return }
-                let base = tileBase ?? design.tiles[index].center
+                // Option-drag leaves the original where it is and moves a copy,
+                // made once at the start of the gesture rather than per tick.
+                var draggedID = duplicatedDuringDrag ?? tile.id
                 if tileBase == nil {
-                    tileBase = base
-                    selection = tile.id
+                    if NSEvent.modifierFlags.contains(.option) {
+                        var copy = tile
+                        copy.id = UUID()
+                        copy.cell = nil
+                        design.tiles.append(copy)
+                        duplicatedDuringDrag = copy.id
+                        draggedID = copy.id
+                    }
+                    tileBase = tile.center
+                    selection = [draggedID]
                 }
+                guard let index = design.tiles.firstIndex(where: { $0.id == draggedID }),
+                      let base = tileBase
+                else { return }
+
                 let moved = CGPoint(
                     x: base.x + value.translation.width / unit,
                     y: base.y + value.translation.height / unit
                 )
                 let extent = design.tiles[index].boundingExtent
-                let engine = SnapEngine(
-                    screenSize: model.screenPixelSize,
-                    widgetRect: design.widgetRect
-                )
+                let engine = snapEngine
                 // Bounded by the screen, not by the widget frame: a tile may
                 // hang over the edge, because the wallpaper carries a picture
                 // of the part the widget cannot draw.
                 guard design.snapEnabled else {
                     design.tiles[index].center = engine.clamp(center: moved, tileSize: extent)
+                    // Dragged by hand with snapping off, so it holds no cell -
+                    // the layer list says "off grid" rather than naming one it
+                    // has left.
+                    design.tiles[index].cell = nil
                     return
+                }
+
+                // The grid first, then the sibling guides: a cell is a
+                // deliberate slot, and a tile a few pixels from one means that
+                // one. Guides still catch anything placed between cells.
+                let frame = design.widgetRect
+                if let cell = design.grid.nearestCell(to: moved) {
+                    let centre = design.grid.cellCenter(cell)
+                    let reach = design.grid.tileSide * 0.45
+                    let taken = design.tiles.contains { $0.id != draggedID && $0.cell == cell }
+                    if !taken, abs(centre.x - moved.x) < reach, abs(centre.y - moved.y) < reach {
+                        design.tiles[index].center = centre
+                        design.tiles[index].cell = cell
+                        activeGuides = [
+                            SnapGuide(axis: .vertical, position: centre.x, kind: .iconGrid),
+                            SnapGuide(axis: .horizontal, position: centre.y, kind: .iconGrid),
+                        ]
+                        return
+                    }
                 }
                 let snapped = engine.snap(
                     center: moved,
                     tileSize: extent,
-                    siblings: design.tiles.filter { $0.id != tile.id }
+                    siblings: design.tiles.filter { $0.id != draggedID }
                 )
                 design.tiles[index].center = engine.clamp(center: snapped.center, tileSize: extent)
+                design.tiles[index].cell = nil
+                activeGuides = snapped.guides
             }
-            .onEnded { _ in tileBase = nil }
+            .onEnded { _ in
+                tileBase = nil
+                duplicatedDuringDrag = nil
+                activeGuides = []
+            }
     }
 
     // MARK: - Assets
 
     private var selectedAsset: PlacedAsset? {
-        guard let selection else { return nil }
-        return design.assets.first { $0.id == selection }
+        guard let singleSelection else { return nil }
+        return design.assets.first { $0.id == singleSelection }
     }
 
     /// Bindings resolve the asset by id on every access rather than closing over
@@ -583,7 +1021,7 @@ struct LayoutEditor: View {
     private var assetsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Pictures").font(.caption.weight(.semibold))
+                StudioTheme.eyebrow("Pictures").foregroundStyle(StudioTheme.textTertiary)
                 Spacer()
                 Button("Add...") { importAssets() }.buttonStyle(.link)
             }
@@ -594,7 +1032,7 @@ struct LayoutEditor: View {
             } else {
                 ForEach(design.assets.sorted { $0.zIndex < $1.zIndex }) { asset in
                     HStack(spacing: 6) {
-                        Image(systemName: selection == asset.id ? "largecircle.fill.circle" : "circle")
+                        Image(systemName: selection.contains(asset.id) ? "largecircle.fill.circle" : "circle")
                             .foregroundStyle(.secondary)
                         Text(asset.fileName)
                             .lineLimit(1)
@@ -603,7 +1041,7 @@ struct LayoutEditor: View {
                         Spacer()
                     }
                     .contentShape(Rectangle())
-                    .onTapGesture { selection = asset.id }
+                    .onTapGesture { select(asset.id) }
                     .contextMenu {
                         Button("Bring to front") { restack(asset, toFront: true) }
                         Button("Send to back") { restack(asset, toFront: false) }
@@ -612,11 +1050,147 @@ struct LayoutEditor: View {
                 }
             }
 
-            if let asset = selectedAsset {
-                assetInspector(asset)
-            }
         }
         .disabled(store == nil)
+    }
+
+    private var readoutsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            StudioTheme.eyebrow("Live text").foregroundStyle(StudioTheme.textTertiary)
+
+            Text("Text that changes on the phone, drawn over the pictures and under the tiles. Time, date and a countdown cost nothing; battery, steps, weather and the calendar update when the app runs.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 2), spacing: 6) {
+                ForEach(PlacedReadout.Source.allCases) { source in
+                    Button(source.title) { addReadout(source) }
+                        .buttonStyle(.studioCompact)
+                }
+            }
+
+            if !design.readouts.isEmpty {
+                Divider()
+                ForEach(design.readouts.sorted { $0.zIndex < $1.zIndex }) { readout in
+                    HStack(spacing: 6) {
+                        Image(systemName: selection.contains(readout.id) ? "largecircle.fill.circle" : "circle")
+                            .foregroundStyle(.secondary)
+                        Text(readout.source.title).font(.caption)
+                        if readout.source.needsPermission {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.secondary)
+                                .help("Needs the phone's permission the first time")
+                        }
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { select(readout.id) }
+                    .contextMenu {
+                        Button("Remove", role: .destructive) { removeReadout(readout) }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The readout inspector: the fields that differ by source. A countdown
+    /// needs a date and a name; every source can take a prefix, a size and a
+    /// colour.
+    @ViewBuilder
+    private func readoutInspector(_ readout: PlacedReadout) -> some View {
+        Divider()
+        VStack(alignment: .leading, spacing: 6) {
+            Text(readout.source.title).font(.caption.weight(.semibold))
+
+            if let index = design.readouts.firstIndex(where: { $0.id == readout.id }) {
+                if readout.source == .countdown {
+                    DatePicker(
+                        "Until",
+                        selection: Binding(
+                            get: { design.readouts[index].targetDate ?? Date() },
+                            set: { design.readouts[index].targetDate = $0 }
+                        ),
+                        displayedComponents: [.date, .hourAndMinute]
+                    )
+                    .font(.caption2)
+                }
+
+                HStack(spacing: 4) {
+                    TextField("before", text: Binding(
+                        get: { design.readouts[index].prefix },
+                        set: { design.readouts[index].prefix = $0 }
+                    ))
+                    TextField("after", text: Binding(
+                        get: { design.readouts[index].suffix },
+                        set: { design.readouts[index].suffix = $0 }
+                    ))
+                }
+                .textFieldStyle(.roundedBorder)
+                .font(.caption2)
+
+                LabeledContent("Size") {
+                    Slider(
+                        value: Binding(
+                            get: { design.readouts[index].pointSize },
+                            set: { design.readouts[index].pointSize = $0 }
+                        ),
+                        in: 20 ... 300
+                    )
+                }
+                .font(.caption2)
+
+                Toggle("Bold", isOn: Binding(
+                    get: { design.readouts[index].isBold },
+                    set: { design.readouts[index].isBold = $0 }
+                ))
+                .font(.caption2)
+
+                TextField("#RRGGBB", text: Binding(
+                    get: { design.readouts[index].colorHex },
+                    set: { design.readouts[index].colorHex = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.caption2)
+
+                LabeledContent("Angle") {
+                    Slider(
+                        value: Binding(
+                            get: { design.readouts[index].rotation },
+                            set: { design.readouts[index].rotation = $0 }
+                        ),
+                        in: -45 ... 45
+                    )
+                }
+                .font(.caption2)
+
+                if readout.source.needsPermission {
+                    Text("The phone asks permission the first time, and the app has to have run at least once to fill this in.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Button("Remove", role: .destructive) { removeReadout(readout) }
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    private func addReadout(_ source: PlacedReadout.Source) {
+        let frame = design.widgetRect
+        var readout = PlacedReadout(
+            source: source,
+            center: CGPoint(x: frame.midX, y: frame.midY),
+            zIndex: (design.readouts.map(\.zIndex).max() ?? 0) + 1
+        )
+        if source == .countdown { readout.targetDate = Date().addingTimeInterval(60 * 60 * 24 * 7) }
+        design.readouts.append(readout)
+        select(readout.id)
+    }
+
+    private func removeReadout(_ readout: PlacedReadout) {
+        design.readouts.removeAll { $0.id == readout.id }
     }
 
     @ViewBuilder
@@ -654,6 +1228,12 @@ struct LayoutEditor: View {
 
             LabeledContent("Opacity", value: String(format: "%.2f", asset.opacity)).font(.caption2)
             Slider(value: assetBinding(asset.id, \.opacity, fallback: 1), in: 0 ... 1)
+
+            // A transparent picture placed here shows the wallpaper through
+            // it, with the motion drawn on top - rather than always covering
+            // the animation, which is the only stacking there used to be.
+            Toggle("Behind the animation", isOn: assetBinding(asset.id, \.drawsBehindAnimation, fallback: false))
+                .font(.caption)
 
             Divider()
             keyingControls(asset)
@@ -783,7 +1363,7 @@ struct LayoutEditor: View {
     /// picture behind would grow the folder every time one is swapped out.
     private func removeAsset(_ asset: PlacedAsset) {
         design.assets.removeAll { $0.id == asset.id }
-        if selection == asset.id { selection = nil }
+        selection.remove(asset.id)
         store?.removeAsset(named: asset.fileName, for: design.id)
     }
 
@@ -796,8 +1376,11 @@ struct LayoutEditor: View {
     private var skinSetsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Skin sets").font(.caption.weight(.semibold))
+                StudioTheme.eyebrow("Skin sets").foregroundStyle(StudioTheme.textTertiary)
                 Spacer()
+                Button("Sheet...") { importingSheet = true }
+                    .buttonStyle(.link)
+                    .help("Cut a sprite sheet into a set, using a table of names")
                 Button("New set") {
                     skinSets.append(SkinSet(name: "Set \(skinSets.count + 1)"))
                     saveSkinSets()
@@ -838,12 +1421,20 @@ struct LayoutEditor: View {
                         .frame(width: 8, height: 8)
                     Text(AppCatalog.app(id: entry.appID)?.name ?? entry.appID)
                         .font(.caption)
-                    AsyncSkinThumbnail(url: (try? SkinLibrary())?.url(for: entry.skin))
+                    AsyncSkinThumbnail(url: skinLibrary?.url(for: entry.skin))
                         .frame(width: 18, height: 18)
                         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    if set.wrappedValue.defaultAppID == entry.appID {
+                        Text("default")
+                            .font(.system(size: 9).monospaced())
+                            .foregroundStyle(StudioTheme.accent)
+                    }
                     Spacer()
                     Button {
                         set.wrappedValue.entries.removeAll { $0.appID == entry.appID }
+                        if set.wrappedValue.defaultAppID == entry.appID {
+                            set.wrappedValue.defaultAppID = nil
+                        }
                         saveSkinSets()
                     } label: {
                         Image(systemName: "xmark.circle")
@@ -851,6 +1442,18 @@ struct LayoutEditor: View {
                     .buttonStyle(.plain)
                     .help("Remove \(AppCatalog.app(id: entry.appID)?.name ?? entry.appID) from the set")
                 }
+                .contentShape(Rectangle())
+                // Clicking an entry connects it to whatever is selected: this
+                // icon, and the app it stands for, on that tile.
+                .onTapGesture { use(entry, from: set.wrappedValue) }
+                .contextMenu {
+                    Button("Put on the selected tile") { use(entry, from: set.wrappedValue) }
+                    Button("Make this the set's default") {
+                        set.wrappedValue.defaultAppID = entry.appID
+                        saveSkinSets()
+                    }
+                }
+                .help("Put \(AppCatalog.app(id: entry.appID)?.name ?? entry.appID) on the selected tile")
             }
 
             HStack {
@@ -877,9 +1480,9 @@ struct LayoutEditor: View {
 
             if !set.wrappedValue.entries.isEmpty {
                 HStack {
-                    if let selection, design.tiles.contains(where: { $0.id == selection }) {
+                    if let singleSelection, design.tiles.contains(where: { $0.id == singleSelection }) {
                         Button("Apply to selected tile") {
-                            apply(set.wrappedValue, onlyTo: selection)
+                            apply(set.wrappedValue, onlyTo: singleSelection)
                         }
                         .buttonStyle(.link)
                         .font(.caption)
@@ -899,6 +1502,30 @@ struct LayoutEditor: View {
         .padding(.leading, 4)
     }
 
+    /// Puts one entry of a set on the selected tile: its artwork, and the app
+    /// it stands for.
+    ///
+    /// Both at once, because that is what an entry is - a picture of an app.
+    /// Either half can still be changed on its own afterwards, from the Opens
+    /// picker or the Skins grid.
+    private func use(_ entry: SkinSet.Entry, from set: SkinSet) {
+        guard let singleSelection,
+              let index = design.tiles.firstIndex(where: { $0.id == singleSelection })
+        else {
+            skinNote = "Select a tile first, then click an app in the set to put it there."
+            return
+        }
+        design.tiles[index].appID = entry.appID
+        design.tiles[index].custom = nil
+        design.tiles[index].skin = entry.skin
+        design.tiles[index].icon = nil
+        // The rest of the set becomes what the phone can swap this slot to.
+        design.tiles[index].alternates = set.entries
+            .filter { $0.appID != entry.appID }
+            .map { TileAlternate(appID: $0.appID, skin: $0.skin) }
+        skinNote = "\(AppCatalog.app(id: entry.appID)?.name ?? entry.appID) from \(set.name)."
+    }
+
     /// Picks the picture for a newly added app, imported through the library
     /// so it is keyed, trimmed and squared like every other skin.
     private func addEntry(appID: String, to set: Binding<SkinSet>) {
@@ -909,7 +1536,8 @@ struct LayoutEditor: View {
         panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
         guard panel.runModal() == .OK, let source = panel.url else { return }
         do {
-            guard let imported = try SkinLibrary().importing([source]).first else {
+            guard let library = skinLibrary,
+                  let imported = try library.importing([source]).first else {
                 skinNote = "Could not read \(source.lastPathComponent) as an image."
                 return
             }
@@ -943,7 +1571,7 @@ struct LayoutEditor: View {
     private var variantsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Animation variants").font(.caption.weight(.semibold))
+                StudioTheme.eyebrow("Animation variants").foregroundStyle(StudioTheme.textTertiary)
                 Spacer()
                 Button("Add...") { importVariants() }.buttonStyle(.link)
             }
@@ -955,43 +1583,123 @@ struct LayoutEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            // The design's own clip is in the list because it is one of the
+            // choices on the phone: it can be named and it can be led with,
+            // exactly like the rest.
+            clipRow(
+                name: Binding(
+                    get: { design.primaryClipTitle },
+                    set: { design.primaryClipName = $0.isEmpty ? nil : $0 }
+                ),
+                isPreviewed: previewedVariantID == nil,
+                isDefault: design.defaultVariantID == nil,
+                onPreview: { previewedVariantID = nil },
+                onDefault: { design.defaultVariantID = nil },
+                onPlay: { togglePlayback(of: nil) },
+                isPlaying: isPlaying && previewedVariantID == nil,
+                isLoading: isLoadingPlayback && previewedVariantID == nil,
+                // A scene is its clip, so the last one cannot go. With others
+                // to take over it can: one of them becomes the design's own.
+                onRemove: design.variants.isEmpty ? nil : { removePrimaryClip() }
+            )
+
             ForEach(design.variants) { variant in
-                HStack(spacing: 6) {
-                    Image(systemName: previewedVariantID == variant.id ? "eye.fill" : "film")
-                        .font(.caption2)
-                        .foregroundStyle(previewedVariantID == variant.id ? Color.accentColor : .secondary)
-                    Text(variant.name)
-                        .font(.caption)
-                        .foregroundStyle(previewedVariantID == variant.id ? Color.accentColor : .primary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer()
-                    Button {
-                        removeVariant(variant)
-                    } label: {
-                        Image(systemName: "xmark.circle")
-                    }
-                    .buttonStyle(.plain)
-                    .help("Remove \(variant.name) and its clip")
-                }
-                .contentShape(Rectangle())
-                // Click to stand this clip on the canvas; click again for the
-                // primary. One shared transform positions every clip at the
-                // same centre, so this only switches which picture shows.
-                .onTapGesture {
-                    previewedVariantID = previewedVariantID == variant.id ? nil : variant.id
-                }
-                .help("Show \(variant.name) on the canvas")
+                clipRow(
+                    name: Binding(
+                        get: { variant.name },
+                        set: { newName in
+                            guard let index = design.variants.firstIndex(where: { $0.id == variant.id })
+                            else { return }
+                            design.variants[index].name = newName
+                        }
+                    ),
+                    isPreviewed: previewedVariantID == variant.id,
+                    isDefault: design.defaultVariantID == variant.id,
+                    onPreview: {
+                        previewedVariantID = previewedVariantID == variant.id ? nil : variant.id
+                    },
+                    onDefault: { design.defaultVariantID = variant.id },
+                    onPlay: { togglePlayback(of: variant.id) },
+                    isPlaying: isPlaying && previewedVariantID == variant.id,
+                    isLoading: isLoadingPlayback && previewedVariantID == variant.id,
+                    onRemove: { removeVariant(variant) }
+                )
             }
 
             if !design.variants.isEmpty {
-                Text("Click a variant to see it on the canvas. Position and crop are shared - every clip centres on the same point - and each variant loops at its own length.")
+                Text("Click a clip to see it on the canvas, and the star to lead with it - a phone shows that one until it picks another. Position and crop are shared, and each clip loops at its own length.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .disabled(store == nil)
+    }
+
+    /// One clip in the list: what it is called, whether the canvas is showing
+    /// it, whether the phone leads with it, and whether it is running.
+    /// `onRemove` is nil while this clip is the only one the scene has.
+    @ViewBuilder
+    private func clipRow(
+        name: Binding<String>,
+        isPreviewed: Bool,
+        isDefault: Bool,
+        onPreview: @escaping () -> Void,
+        onDefault: @escaping () -> Void,
+        onPlay: @escaping () -> Void,
+        isPlaying: Bool,
+        isLoading: Bool,
+        onRemove: (() -> Void)?
+    ) -> some View {
+        HStack(spacing: 6) {
+            Button(action: onPreview) {
+                Image(systemName: isPreviewed ? "eye.fill" : "film")
+                    .font(.caption2)
+                    .foregroundStyle(isPreviewed ? Color.accentColor : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Show this clip on the canvas")
+
+            Button(action: onPlay) {
+                // A six-second clip takes a couple of seconds to decode, and
+                // silence for that long is indistinguishable from a play
+                // button that does not work.
+                if isLoading {
+                    ProgressView().controlSize(.mini).scaleEffect(0.6).frame(width: 11, height: 11)
+                } else {
+                    Image(systemName: isPlaying ? "stop.fill" : "play.fill")
+                        .font(.caption2)
+                        .foregroundStyle(isPlaying ? Color.accentColor : .secondary)
+                }
+            }
+            .buttonStyle(.plain)
+            .help(isPlaying ? "Stop" : "Play this clip on the canvas")
+
+            // A field rather than a label: the name is what the phone's list
+            // shows, and a clip called "Variant 3" says nothing there.
+            TextField("Name", text: name)
+                .textFieldStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(isPreviewed ? Color.accentColor : .primary)
+                .lineLimit(1)
+
+            Button(action: onDefault) {
+                Image(systemName: isDefault ? "star.fill" : "star")
+                    .font(.caption2)
+                    .foregroundStyle(isDefault ? Color.accentColor : .secondary)
+            }
+            .buttonStyle(.plain)
+            .disabled(isDefault)
+            .help(isDefault ? "Phones show this one first" : "Show this one first on a phone")
+
+            if let onRemove {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark.circle")
+                }
+                .buttonStyle(.plain)
+                .help("Remove this clip")
+            }
+        }
     }
 
     private func importVariants() {
@@ -1018,39 +1726,256 @@ struct LayoutEditor: View {
         }
     }
 
+    /// Takes the design's own clip out by promoting another into its place.
+    ///
+    /// Everything positional is shared already, so nothing on the canvas moves;
+    /// only the loop has to be re-measured, because the successor is its own
+    /// length.
+    private func removePrimaryClip() {
+        guard let store, let promotion = ClipPromotion.promoting(in: design) else { return }
+
+        // The successor stops being a variant, so anything holding its id has
+        // to let go before the list changes under it.
+        if !promotion.design.variants.contains(where: { $0.id == previewedVariantID }) {
+            previewedVariantID = nil
+        }
+        stopPlayback()
+
+        design = promotion.design
+        store.removeVariantClip(named: promotion.retiredFileName, for: design.id)
+
+        // The loop was sized to the clip that just went. Left alone, a longer
+        // successor would be cut short and a shorter one sampled past its end.
+        Task {
+            guard let summary = try? await MediaFrameExtractor(
+                url: store.sourceVideoURL(for: design),
+                screenSize: model.screenPixelSize
+            ).summary() else {
+                skinNote = "\(promotion.promotedName) took over, but could not be measured - check the loop length."
+                return
+            }
+            design.sourceDuration = summary.duration
+            design.retuneLoop()
+            skinNote = "\(promotion.promotedName) is now this scene's own clip."
+        }
+    }
+
     /// Takes the clip with it, like removing an asset does: the file lives in
     /// the design, and a swapped-out variant should not keep growing it.
+
     private func removeVariant(_ variant: ClipVariant) {
         if previewedVariantID == variant.id { previewedVariantID = nil }
+        // Otherwise the design leads with a clip that is no longer in it, and
+        // the build quietly writes no default at all.
+        if design.defaultVariantID == variant.id { design.defaultVariantID = nil }
         design.variants.removeAll { $0.id == variant.id }
         store?.removeVariantClip(named: variant.sourceVideoName, for: design.id)
     }
 
     // MARK: - Sidebar
 
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Layout").font(.headline)
+    /// Which library the bottom of the sidebar shows. The inspector above it
+    /// answers the selection; these never reorder or disappear.
+    private enum LibraryTab: String, CaseIterable, Identifiable {
+        case apps = "Apps"
+        case looks = "Looks"
+        case pictures = "Pictures"
+        case live = "Live"
+        case clips = "Clips"
 
-            Button {
-                showingCatalogue = true
-            } label: {
-                Label("Add app", systemImage: "plus.app")
-            }
-            .popover(isPresented: $showingCatalogue) {
-                CataloguePicker { appID in
-                    add(appID: appID)
-                    showingCatalogue = false
+        var id: String { rawValue }
+    }
+
+    /// The sidebar is an inspector over a library. The inspector answers
+    /// "what am I editing right now" - a tile, a picture, or the scene itself
+    /// when nothing is selected - so the controls that matter are always at
+    /// the top instead of below the fold of one long column.
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            inspector
+
+            Rectangle().fill(StudioTheme.headerEdge).frame(height: 1)
+
+            // A trough with a raised chip on the selected tab, the way the
+            // mockup draws it - a system segmented control reads as a form
+            // field rather than a place to live.
+            HStack(spacing: 2) {
+                ForEach(LibraryTab.allCases) { tab in
+                    Text(tab.rawValue)
+                        .font(StudioTheme.body)
+                        .foregroundStyle(libraryTab == tab ? StudioTheme.textBright : StudioTheme.textTertiary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                        .background(
+                            libraryTab == tab ? StudioTheme.controlFill : .clear,
+                            in: RoundedRectangle(cornerRadius: StudioTheme.radius, style: .continuous)
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture { libraryTab = tab }
                 }
             }
+            .padding(2)
+            .background(StudioTheme.well, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-            assetsSection
+            switch libraryTab {
+            case .apps:
+                catalogueSection
+                placedTilesSection
+            case .looks:
+                skinSetsSection
+            case .pictures:
+                assetsSection
+            case .live:
+                readoutsSection
+            case .clips:
+                variantsSection
+            }
+        }
+    }
 
-            variantsSection
+    @ViewBuilder
+    private var inspector: some View {
+        if selection.count > 1 {
+            VStack(alignment: .leading, spacing: 8) {
+                inspectorHeading("\(selection.count) tiles", detail: "aligning together")
+                Text("Use the align buttons in the toolbar, or Make a row. Command-click a tile to add or remove it.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else if let singleSelection, let index = design.tiles.firstIndex(where: { $0.id == singleSelection }) {
+            selected(index: index)
+        } else if let asset = selectedAsset {
+            VStack(alignment: .leading, spacing: 10) {
+                inspectorHeading("Picture", detail: asset.fileName)
+                positionFields(
+                    center: asset.center,
+                    setCenter: { center in
+                        guard let index = design.assets.firstIndex(where: { $0.id == asset.id })
+                        else { return }
+                        design.assets[index].center = center
+                    }
+                )
+                assetInspector(asset)
+            }
+        } else if let readout = selectedReadout {
+            VStack(alignment: .leading, spacing: 10) {
+                inspectorHeading("Live text", detail: readout.source.title)
+                positionFields(
+                    center: readout.center,
+                    setCenter: { center in
+                        guard let index = design.readouts.firstIndex(where: { $0.id == readout.id })
+                        else { return }
+                        design.readouts[index].center = center
+                    }
+                )
+                readoutInspector(readout)
+            }
+        } else {
+            sceneInspector
+        }
+    }
+
+    private var selectedReadout: PlacedReadout? {
+        guard let singleSelection else { return nil }
+        return design.readouts.first { $0.id == singleSelection }
+    }
+
+    /// "Editing / Tile — opens Music": what is selected, and the one fact
+    /// about it worth reading before anything else.
+    func inspectorHeading(_ title: String, detail: String?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            StudioTheme.eyebrow("Editing")
+                .foregroundStyle(StudioTheme.accent)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(StudioTheme.textBright)
+                if let detail {
+                    Text(detail)
+                        .font(StudioTheme.body)
+                        .foregroundStyle(StudioTheme.textTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 11)
+        .background(StudioTheme.headerFill)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(StudioTheme.headerEdge).frame(height: 1)
+        }
+        // Bleeds to the panel's edges: it is a header strip, not a card.
+        .padding(.horizontal, -15)
+        .padding(.top, -12)
+    }
+
+    /// Typed position, because a drag cannot hit an exact pixel and reading
+    /// one back is half of lining things up.
+    private func positionFields(
+        center: CGPoint,
+        setCenter: @escaping (CGPoint) -> Void
+    ) -> some View {
+        HStack(spacing: 6) {
+            Text("X · Y").font(.caption).foregroundStyle(.secondary)
+            TextField("x", value: Binding(
+                get: { Int(center.x.rounded()) },
+                set: { setCenter(CGPoint(x: CGFloat($0), y: center.y)) }
+            ), format: .number)
+                .frame(width: 54)
+            TextField("y", value: Binding(
+                get: { Int(center.y.rounded()) },
+                set: { setCenter(CGPoint(x: center.x, y: CGFloat($0))) }
+            ), format: .number)
+                .frame(width: 54)
+            Text("px").font(.caption2).foregroundStyle(.secondary)
+            Spacer()
+        }
+        .textFieldStyle(StudioFieldStyle())
+        .font(.system(size: 11, design: .monospaced))
+    }
+
+    /// Nothing selected means the scene itself is selected. It is never blank.
+    private var sceneInspector: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            inspectorHeading("Scene", detail: "wallpaper, frame, clip")
+
+            VStack(alignment: .leading, spacing: 4) {
+                StudioTheme.eyebrow("Tile grid").foregroundStyle(StudioTheme.textTertiary)
+                HStack(spacing: 6) {
+                    Stepper(
+                        "\(design.grid.columns) across",
+                        value: Binding(
+                            get: { design.grid.columns },
+                            set: { design.grid.columns = max(1, min(8, $0)) }
+                        ),
+                        in: 1 ... 8
+                    )
+                    .controlSize(.small)
+                }
+                HStack(spacing: 6) {
+                    Stepper(
+                        "\(design.grid.rows) down",
+                        value: Binding(
+                            get: { design.grid.rows },
+                            set: { design.grid.rows = max(1, min(8, $0)) }
+                        ),
+                        in: 1 ... 8
+                    )
+                    .controlSize(.small)
+                }
+                Text("\(design.tiles.compactMap(\.cell).count) of \(design.grid.cellCount) cells used. New tiles fill the next free one.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.caption)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("Size")
+                    Text("Clip size")
                     Spacer()
                     Text(String(format: "%.0f%%", design.mediaTransform.scale * 100))
                         .monospacedDigit()
@@ -1063,12 +1988,23 @@ struct LayoutEditor: View {
                     ),
                     in: 0.1 ... 4
                 )
-                Button("Fit to widget") {
-                    design.mediaTransform = MediaTransform.fitting(
-                        sourceSize: sourceSize,
-                        inside: design.widgetRect,
-                        screenSize: model.screenPixelSize
-                    )
+                HStack(spacing: 10) {
+                    Button("Fit to widget") {
+                        design.mediaTransform = MediaTransform.fitting(
+                            sourceSize: sourceSize,
+                            inside: design.widgetRect,
+                            screenSize: model.screenPixelSize
+                        )
+                    }
+                    Button("Centre") {
+                        design.mediaTransform = design.mediaTransform.centred(
+                            inside: design.widgetRect,
+                            screenSize: model.screenPixelSize
+                        )
+                    }
+                    Button("Fill screen") {
+                        design.mediaTransform = .identity
+                    }
                 }
                 .buttonStyle(.link)
             }
@@ -1117,6 +2053,17 @@ struct LayoutEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Toggle("Snap to grid", isOn: $design.snapEnabled)
+
+            Toggle("Icon labels", isOn: Binding(
+                get: { design.tiles.allSatisfy(\.showsLabel) && !design.tiles.isEmpty },
+                set: { on in
+                    labelsDefault = on
+                    for index in design.tiles.indices { design.tiles[index].showsLabel = on }
+                }
+            ))
+            .disabled(design.tiles.isEmpty)
+
             let outside = design.tiles.filter { !SnapEngine.isFullyInside($0, frame: design.widgetRect) }
             if !outside.isEmpty {
                 Text("""
@@ -1129,70 +2076,229 @@ struct LayoutEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            skinPicker
-
-            skinSetsSection
-
-            Toggle("Snap to grid", isOn: $design.snapEnabled)
-
-            Toggle("Icon labels", isOn: Binding(
-                get: { design.tiles.allSatisfy(\.showsLabel) && !design.tiles.isEmpty },
-                set: { on in
-                    labelsDefault = on
-                    for index in design.tiles.indices { design.tiles[index].showsLabel = on }
-                }
-            ))
-            .disabled(design.tiles.isEmpty)
-
-            if let selection, let index = design.tiles.firstIndex(where: { $0.id == selection }) {
-                Divider()
-                selected(index: index)
-            } else {
-                Text("Drag the picture to move it, pinch or use the slider to size it. Tap a tile to adjust it.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Text("The dashed frame is the widget. Only what falls inside it animates and answers a tap; the rest becomes the wallpaper, tiles included.")
+            Text("The dashed frame is the widget: only what falls inside it animates and answers a tap. Click anything on the canvas to edit it here.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if let skinNote {
+                Text(skinNote)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
+    }
+
+    /// The catalogue lives in the sidebar rather than behind a button: adding
+    /// apps is the editor's most common act, and a popover made it a hunt.
+    private var catalogueSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            StudioTheme.eyebrow("Add an app").foregroundStyle(StudioTheme.textTertiary)
+            CatalogueList(height: 200) { appID in
+                add(appID: appID)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var placedTilesSection: some View {
+        if !design.tiles.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                StudioTheme.eyebrow("Placed").foregroundStyle(StudioTheme.textTertiary)
+                ForEach(design.tiles) { tile in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(AppCatalog.app(id: tile.appID)?.tint ?? .gray)
+                            .frame(width: 10, height: 10)
+                        Text(AppCatalog.app(id: tile.appID)?.name ?? tile.appID)
+                            .font(.caption)
+                            .foregroundStyle(selection.contains(tile.id) ? Color.accentColor : .primary)
+                        if !tile.alternates.isEmpty {
+                            Text("+\(tile.alternates.count)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { select(tile.id) }
+                }
+            }
+        }
+    }
+
+    // MARK: - Alignment
+
+    /// Where the align row puts a selected thing's edge, always against the
+    /// widget frame: it is the region a launcher lives in, and the edge the
+    /// eye lines things up against.
+    private func alignRow(
+        extent: CGSize,
+        set: @escaping (CGPoint) -> Void,
+        current: @escaping () -> CGPoint
+    ) -> some View {
+        let frame = design.widgetRect
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("Align in widget").font(.caption.weight(.semibold))
+            HStack(spacing: 4) {
+                alignButton("align.horizontal.left", "Left edge") {
+                    set(CGPoint(x: frame.minX + extent.width / 2, y: current().y))
+                }
+                alignButton("align.horizontal.center", "Centre") {
+                    set(CGPoint(x: frame.midX, y: current().y))
+                }
+                alignButton("align.horizontal.right", "Right edge") {
+                    set(CGPoint(x: frame.maxX - extent.width / 2, y: current().y))
+                }
+                Divider().frame(height: 14)
+                alignButton("align.vertical.top", "Top edge") {
+                    set(CGPoint(x: current().x, y: frame.minY + extent.height / 2))
+                }
+                alignButton("align.vertical.center", "Middle") {
+                    set(CGPoint(x: current().x, y: frame.midY))
+                }
+                alignButton("align.vertical.bottom", "Bottom edge") {
+                    set(CGPoint(x: current().x, y: frame.maxY - extent.height / 2))
+                }
+            }
+        }
+    }
+
+    private func alignButton(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).frame(width: 22, height: 18)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help(help)
+    }
+
+    private func positionReadout(center: CGPoint) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("x \(Int(center.x))  y \(Int(center.y)) px")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            Text("Arrow keys nudge 1 px; hold Shift for 10.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Moves whatever is selected by whole pixels, clamped like a drag is.
+    private func nudgeSelection(dx: CGFloat, dy: CGFloat) -> Bool {
+        let engine = snapEngine
+        if let singleSelection, let index = design.tiles.firstIndex(where: { $0.id == singleSelection }) {
+            let moved = CGPoint(
+                x: design.tiles[index].center.x + dx,
+                y: design.tiles[index].center.y + dy
+            )
+            design.tiles[index].center = engine.clamp(
+                center: moved,
+                tileSize: design.tiles[index].boundingExtent
+            )
+            return true
+        }
+        if let singleSelection, let index = design.assets.firstIndex(where: { $0.id == singleSelection }) {
+            let asset = design.assets[index]
+            let moved = CGPoint(x: asset.center.x + dx, y: asset.center.y + dy)
+            design.assets[index].center = engine.clamp(
+                center: moved,
+                tileSize: max(asset.size.width, asset.size.height)
+            )
+            return true
+        }
+        return false
     }
 
     private func selected(index: Int) -> some View {
         let tile = design.tiles[index]
+        let app = AppCatalog.app(id: tile.appID)
         return VStack(alignment: .leading, spacing: 10) {
-            Text(AppCatalog.app(id: tile.appID)?.name ?? tile.appID)
-                .font(.subheadline.weight(.semibold))
-            if AppCatalog.app(id: tile.appID)?.canLaunch == false {
-                Text("Cannot be opened from a widget - no URL scheme exists for it. It still draws.")
+            inspectorHeading("Tile", detail: "opens \(tile.displayName)")
+
+            // What the tile opens and what it looks like are separate choices:
+            // the artwork comes from the Looks tab, and this is only the app a
+            // tap reaches. A sheet's names are a starting point, not a binding.
+            Picker("Opens", selection: Binding(
+                get: { design.tiles[index].custom == nil ? design.tiles[index].appID : Self.customTag },
+                set: { chosen in
+                    guard chosen != Self.customTag else {
+                        design.tiles[index].custom = CustomTarget(
+                            name: design.tiles[index].displayName,
+                            scheme: ""
+                        )
+                        return
+                    }
+                    design.tiles[index].custom = nil
+                    design.tiles[index].appID = chosen
+                    // A slot cannot offer a swap to the app it already shows.
+                    design.tiles[index].alternates.removeAll { $0.appID == chosen }
+                }
+            )) {
+                ForEach(AppCatalog.all) { entry in
+                    Text(entry.name).tag(entry.id)
+                }
+                Divider()
+                Text("Another app...").tag(Self.customTag)
+            }
+            .controlSize(.small)
+
+            if design.tiles[index].custom != nil {
+                customTargetFields(index: index)
+            } else if app?.canLaunch == false {
+                Text("\(app?.name ?? tile.appID) publishes no URL scheme, so a tap cannot open it. The tile still draws.")
                     .font(.caption2)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            LabeledContent("Size") {
-                Slider(
-                    value: Binding(
-                        get: { design.tiles[index].size },
-                        set: { size in
-                            design.tiles[index].size = max(40, size)
-                            // Growing a tile can push it off the screen just as
-                            // dragging can.
-                            design.tiles[index].center = SnapEngine(
-                                screenSize: model.screenPixelSize,
-                                widgetRect: design.widgetRect
-                            ).clamp(
-                                center: design.tiles[index].center,
-                                tileSize: design.tiles[index].boundingExtent
-                            )
-                        }
-                    ),
-                    in: 40 ... 400
-                )
+            Toggle("Caption", isOn: Binding(
+                get: { design.tiles[index].showsLabel },
+                set: { design.tiles[index].showsLabel = $0 }
+            ))
+            .controlSize(.small)
+
+            Divider()
+
+            StudioTheme.eyebrow("Position").foregroundStyle(StudioTheme.textTertiary)
+            positionFields(center: tile.center) { center in
+                guard design.tiles.indices.contains(index) else { return }
+                design.tiles[index].center = center
+                design.tiles[index].cell = nil
             }
+
+            HStack(spacing: 6) {
+                Text("Size").font(.caption).foregroundStyle(.secondary)
+                TextField("size", value: Binding(
+                    get: { Int(design.tiles[index].size.rounded()) },
+                    set: { newSize in
+                        design.tiles[index].size = max(40, CGFloat(newSize))
+                        // Growing a tile can push it off the screen just as
+                        // dragging can.
+                        design.tiles[index].center = snapEngine.clamp(
+                            center: design.tiles[index].center,
+                            tileSize: design.tiles[index].boundingExtent
+                        )
+                    }
+                ), format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 54)
+                Text("px square").font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+            }
+            .font(.caption.monospacedDigit())
+
+            HStack(spacing: 6) {
+                Text("Cell").font(.caption).foregroundStyle(.secondary)
+                Text(tile.cell?.label ?? "off grid")
+                    .font(.caption.monospaced())
+                Spacer()
+                Button("Snap to cell") { snapToCell(index: index) }
+                    .buttonStyle(.studioCompact)
+                    .disabled(design.grid.firstFreeCell(occupied: occupiedCells) == nil && tile.cell == nil)
+            }
+
             LabeledContent("Angle") {
                 Slider(
                     value: Binding(
@@ -1202,20 +2308,97 @@ struct LayoutEditor: View {
                     in: -45 ... 45
                 )
             }
-            Toggle("Label", isOn: Binding(
-                get: { design.tiles[index].showsLabel },
-                set: { design.tiles[index].showsLabel = $0 }
-            ))
+            .controlSize(.small)
+
+            customIconRow(index: index)
 
             alternatesSection(index: index)
 
             HStack {
-                Button("Remove", role: .destructive) {
+                Button("Duplicate") { duplicate(index: index) }
+                    .controlSize(.small)
+                Button("Remove tile", role: .destructive) {
                     design.tiles.removeAll { $0.id == tile.id }
-                    selection = nil
+                    selection = []
                 }
+                .controlSize(.small)
             }
         }
+    }
+
+    /// Sentinel for the "another app" row, which is not an app id.
+    static let customTag = "\u{0000}custom"
+
+    /// Name and URL for an app the catalogue does not carry.
+    ///
+    /// Anything on the phone can be opened this way: the widget hands the tap
+    /// to the app and the app opens the URL, so the catalogue is a shortcut
+    /// rather than the limit.
+    @ViewBuilder
+    private func customTargetFields(index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Name", text: Binding(
+                get: { design.tiles[index].custom?.name ?? "" },
+                set: { design.tiles[index].custom?.name = $0 }
+            ))
+            .textFieldStyle(StudioFieldStyle())
+
+            TextField("scheme:// or https://", text: Binding(
+                get: { design.tiles[index].custom?.scheme ?? "" },
+                set: { design.tiles[index].custom?.scheme = $0 }
+            ))
+            .textFieldStyle(StudioFieldStyle())
+            .font(.system(size: 11, design: .monospaced))
+
+            if design.tiles[index].canLaunch {
+                Text("Opens \(design.tiles[index].custom?.launchCandidates.first?.absoluteString ?? "")")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(StudioTheme.textDim)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } else {
+                Text("Type the app's URL scheme - spotify, things, bear. Most apps have one; a web address works too.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(StudioTheme.textDim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// Puts a tile on the nearest free cell, or on the first free one when it
+    /// is nowhere near a cell at all.
+    private func snapToCell(index: Int) {
+        guard design.tiles.indices.contains(index) else { return }
+        let frame = design.widgetRect
+        let tile = design.tiles[index]
+        let taken = Set(design.tiles.filter { $0.id != tile.id }.compactMap(\.cell))
+
+        let nearest = design.grid.nearestCell(to: tile.center)
+        let target = (nearest.map { !taken.contains($0) } ?? false)
+            ? nearest
+            : design.grid.firstFreeCell(occupied: taken)
+        guard let target else {
+            skinNote = "All \(design.grid.cellCount) cells are taken. Make the grid bigger in Scene, or remove a tile."
+            return
+        }
+        design.tiles[index].center = design.grid.cellCenter(target)
+        design.tiles[index].cell = target
+    }
+
+    private func duplicate(index: Int) {
+        guard design.tiles.indices.contains(index) else { return }
+        var copy = design.tiles[index]
+        copy.id = UUID()
+        copy.cell = nil
+        // Offset by a quarter tile so the copy is visibly its own thing rather
+        // than hidden exactly behind the original.
+        let step = copy.size * 0.25
+        copy.center = snapEngine.clamp(
+            center: CGPoint(x: copy.center.x + step, y: copy.center.y + step),
+            tileSize: copy.boundingExtent
+        )
+        design.tiles.append(copy)
+        selection = [copy.id]
     }
 
     /// The rest of the slot's list: apps the phone may swap in for this one.
@@ -1230,7 +2413,7 @@ struct LayoutEditor: View {
         Divider()
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Phone can swap to").font(.caption.weight(.semibold))
+                StudioTheme.eyebrow("Phone can swap to").foregroundStyle(StudioTheme.textTertiary)
                 Spacer()
                 Button("Add...") { addingAlternate = true }
                     .buttonStyle(.link)
@@ -1249,7 +2432,7 @@ struct LayoutEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            ForEach(tile.alternates) { alternate in
+            ForEach(tile.offeredAlternates) { alternate in
                 HStack(spacing: 6) {
                     Circle()
                         .fill(AppCatalog.app(id: alternate.appID)?.tint ?? .gray)
@@ -1309,22 +2492,38 @@ struct LayoutEditor: View {
     }
 
     private func add(appID: String) {
-        // Dropped into the middle of the widget frame rather than the middle of
-        // the screen: outside that frame a tile is only a picture on the
-        // wallpaper, and a new tile should land somewhere it can be tapped.
-        let frame = design.widgetRect
-        var tile = PlacedTile(
-            appID: appID,
-            center: CGPoint(x: frame.midX, y: frame.midY),
-            size: 180
-        )
+        // On a free spot inside the widget frame - outside it a tile is only a
+        // picture on the wallpaper - and never on top of a tile already
+        // placed, which is what made adding four apps start with un-stacking.
+        let size: CGFloat = 180
+        let center = SnapEngine(
+            screenSize: model.screenPixelSize,
+            widgetRect: design.widgetRect
+        ).freePlacement(size: size, avoiding: design.tiles)
+        var tile = PlacedTile(appID: appID, center: center, size: size)
         tile.showsLabel = labelsDefault
         design.tiles.append(tile)
-        selection = tile.id
+        selection = [tile.id]
     }
 }
 
+/// The popover shape of the catalogue, for flows that collect one app - a
+/// slot's alternates. The sidebar embeds `CatalogueList` directly instead.
 private struct CataloguePicker: View {
+    let onPick: (String) -> Void
+
+    var body: some View {
+        CatalogueList(onPick: onPick)
+            .padding(12)
+            .frame(width: 240)
+    }
+}
+
+/// The catalogue as the mockup draws it: a grid of plates, four across, each
+/// with the app's tint and its name under it. A list of names reads as a form;
+/// this reads as the thing being placed.
+private struct CatalogueList: View {
+    var height: CGFloat = 240
     let onPick: (String) -> Void
 
     @State private var query = ""
@@ -1335,37 +2534,69 @@ private struct CataloguePicker: View {
         return all.filter { $0.name.localizedCaseInsensitiveContains(query) }
     }
 
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 4)
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField("Search", text: $query)
-                .textFieldStyle(.roundedBorder)
+            TextField("Search apps", text: $query)
+                .textFieldStyle(StudioFieldStyle())
+
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
+                LazyVGrid(columns: columns, spacing: 8) {
                     ForEach(matches) { app in
                         Button { onPick(app.id) } label: {
-                            HStack {
-                                Circle().fill(app.tint).frame(width: 14, height: 14)
-                                Text(app.name)
-                                Spacer()
-                                // Some Apple apps publish no URL scheme, so a
-                                // tile for one can never open anything. Better
-                                // said here than discovered by tapping it.
-                                if !app.canLaunch {
-                                    Image(systemName: "hand.raised.slash")
-                                        .foregroundStyle(.secondary)
-                                        .help("\(app.name) cannot be opened from a widget: it publishes no URL scheme.")
+                            VStack(spacing: 4) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(StudioTheme.controlFill)
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(app.tint.opacity(0.35))
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .strokeBorder(StudioTheme.controlEdge, lineWidth: 1)
+                                    Image(systemName: app.symbol)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(StudioTheme.text)
+                                    // Some Apple apps publish no URL scheme, so
+                                    // a tile for one can never open anything.
+                                    // Better said here than found by tapping it.
+                                    if !app.canLaunch {
+                                        Image(systemName: "hand.raised.slash")
+                                            .font(.system(size: 8))
+                                            .foregroundStyle(StudioTheme.textDim)
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                                            .padding(3)
+                                    }
                                 }
+                                .frame(height: 36)
+                                Text(app.name)
+                                    .font(.system(size: 9.5))
+                                    .foregroundStyle(StudioTheme.textTertiary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
                             }
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .help(app.canLaunch
+                            ? "Add \(app.name)"
+                            : "\(app.name) cannot be opened from a widget: it publishes no URL scheme.")
                     }
                 }
+                if matches.isEmpty {
+                    Text("Nothing named \"\(query)\". Try another name.")
+                        .font(StudioTheme.small)
+                        .foregroundStyle(StudioTheme.textDim)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 8)
+                }
             }
-            .frame(height: 260)
+            .frame(height: height)
+
+            Text("Click an app to add it. New tiles fill the next free cell.")
+                .font(.system(size: 10))
+                .foregroundStyle(StudioTheme.textDim)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(12)
-        .frame(width: 240)
     }
 }
 
@@ -1393,3 +2624,22 @@ private struct AsyncSkinThumbnail: View {
 }
 
 
+
+/// Steps through a decoded loop on the canvas.
+///
+/// Driven by the clock rather than by a timer that counts frames: the picture
+/// is a function of the time, which is how the widget's own animation works,
+/// so a slow redraw drops a frame instead of falling behind.
+private struct PlayingClip: View {
+    let frames: [CGImage]
+    let framesPerSecond: Int
+
+    var body: some View {
+        let rate = Double(max(framesPerSecond, 1))
+        TimelineView(.periodic(from: .now, by: 1 / rate)) { context in
+            let step = Int(context.date.timeIntervalSince1970 * rate)
+            Image(decorative: frames[((step % frames.count) + frames.count) % frames.count], scale: 1)
+                .resizable()
+        }
+    }
+}

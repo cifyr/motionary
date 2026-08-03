@@ -70,6 +70,23 @@ struct DeviceModel: Identifiable, Hashable, Sendable {
     /// where the background should be. Adjustable per design for that reason.
     var widgetCornerRadius: CGFloat = 78
 
+    /// Side of a Home Screen app icon, in screen pixels.
+    let iconSide: CGFloat
+    /// Top left of the first icon - row 1, column 1 - in screen pixels.
+    let iconGridOrigin: CGPoint
+    /// Centre-to-centre spacing of the icon grid, in screen pixels.
+    let iconGridPitch: CGSize
+
+    /// Where an app icon sits on the Home Screen, in screen pixels.
+    func iconRect(row: Int, column: Int) -> CGRect {
+        CGRect(
+            x: iconGridOrigin.x + iconGridPitch.width * CGFloat(column),
+            y: iconGridOrigin.y + iconGridPitch.height * CGFloat(row),
+            width: iconSide,
+            height: iconSide
+        )
+    }
+
     var widgetRect: CGRect { CGRect(origin: widgetOrigin, size: widgetPixelSize) }
 
     var widgetRenderedRect: CGRect {
@@ -104,6 +121,18 @@ struct DeviceModel: Identifiable, Hashable, Sendable {
     /// is not simply the cut frame re-centred - the left and right margins come
     /// out 64 and 63 - and there is no known reason for that asymmetry, only the
     /// measurement.
+    ///
+    /// The icon grid was read off a 1206x2622 Home Screen screenshot from the
+    /// phone: icons are 192px square, the first starts at (91, 270), column
+    /// lefts run 91, 368, 647, 924 and row tops 270, 571, 872, 1173, 1474,
+    /// 1775. So the row pitch is exactly 301 and the column pitch averages
+    /// 277.67 - iOS distributes the column rounding as 277, 279, 277, which a
+    /// single number cannot reproduce, so columns 2 and 3 land within a pixel
+    /// rather than dead on.
+    ///
+    /// The grid had been divided out of the widget frame instead, at a 272 row
+    /// pitch, which drifted from 40px below the real icons at row 1 to 105px
+    /// above them at row 6.
     static let iPhone17Pro = DeviceModel(
         id: "iphone17pro",
         name: "iPhone 17 Pro",
@@ -113,7 +142,10 @@ struct DeviceModel: Identifiable, Hashable, Sendable {
         widgetPixelSize: CGSize(width: 1074, height: 1632),
         widgetRenderedOrigin: CGPoint(x: 64, y: 270),
         widgetRenderedPixelSize: CGSize(width: 1079, height: 1645),
-        widgetCornerRadius: 78
+        widgetCornerRadius: 78,
+        iconSide: 192,
+        iconGridOrigin: CGPoint(x: 91, y: 270),
+        iconGridPitch: CGSize(width: 833.0 / 3, height: 301)
     )
 
     static let all: [DeviceModel] = [.iPhone17Pro]

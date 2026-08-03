@@ -57,6 +57,210 @@ final class MediaImportTests: XCTestCase {
         CGColor(red: r, green: g, blue: b, alpha: 1)
     }
 
+    /// A source that is transparent everywhere but a small centred block — the
+    /// shape a cut-out clip has, and the one the dimmed blow-up gets wrong.
+    private func writeTransparentGIF(
+        named name: String,
+        frames: [CGColor],
+        size: CGSize = CGSize(width: 40, height: 40)
+    ) throws -> URL {
+        let url = directory.appendingPathComponent(name)
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.gif.identifier as CFString, frames.count, nil
+        ))
+        for colour in frames {
+            let context = try XCTUnwrap(CGContext(
+                data: nil, width: Int(size.width), height: Int(size.height),
+                bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            context.clear(CGRect(origin: .zero, size: size))
+            context.setFillColor(colour)
+            context.fill(CGRect(x: size.width / 4, y: size.height / 4, width: size.width / 2, height: size.height / 2))
+            let image = try XCTUnwrap(context.makeImage())
+            CGImageDestinationAddImage(destination, image, [
+                kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.1],
+            ] as CFDictionary)
+        }
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return url
+    }
+
+    // MARK: - Transparent sources
+
+    /// An alpha channel is not the same as a transparent pixel: a GIF decodes
+    /// to an alpha format whatever it contains, so only the samples can decide.
+    func testOnlyActualTransparencyCountsAsACutOut() throws {
+        func image(_ alpha: CGImageAlphaInfo, clear: Bool) throws -> CGImage {
+            let context = try XCTUnwrap(CGContext(
+                data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: alpha.rawValue
+            ))
+            context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: clear ? 32 : 64))
+            return try XCTUnwrap(context.makeImage())
+        }
+        XCTAssertTrue(MediaFrameExtractor.isCutOut(try image(.premultipliedLast, clear: true)))
+        XCTAssertFalse(
+            MediaFrameExtractor.isCutOut(try image(.premultipliedLast, clear: false)),
+            "an opaque frame in an alpha format is not a cut-out"
+        )
+        XCTAssertFalse(MediaFrameExtractor.isCutOut(try image(.noneSkipLast, clear: true)))
+    }
+
+    /// The blow-up exists to hide behind an opaque clip and only show past its
+    /// edges. A cut-out clip lets all of it through, which put a second, fainter
+    /// copy of the subject on screen somewhere else entirely.
+    func testTransparentSourceGetsNoDimmedBlowUpBehindIt() async throws {
+        let url = try writeTransparentGIF(named: "cutout.gif", frames: [colour(1, 0, 0), colour(0, 1, 0)])
+        let frame = try await MediaFrameExtractor(
+            url: url,
+            transform: MediaTransform(scale: 0.4, offset: .zero, fillsBackground: true)
+        ).composedFrames(startFrame: 0, count: 1, frameRate: 16)[0]
+
+        // Where the aspect-filled blow-up would have painted the block, but the
+        // shrunken clip does not reach.
+        let screen = DeviceGeometry.screenPixelSize
+        let ghost = CGPoint(x: screen.width / 2, y: screen.height * 0.3)
+        XCTAssertEqual(pixel(at: ghost, in: frame), [0, 0, 0], "a cut-out clip must not be echoed behind itself")
+    }
+
+    func testOpaqueSourceKeepsTheDimmedBlowUp() async throws {
+        let url = try writeGIF(named: "opaque.gif", frames: [colour(1, 0, 0), colour(0, 1, 0)])
+        let frame = try await MediaFrameExtractor(
+            url: url,
+            transform: MediaTransform(scale: 0.4, offset: .zero, fillsBackground: true)
+        ).composedFrames(startFrame: 0, count: 1, frameRate: 16)[0]
+
+        let corner = CGPoint(x: 20, y: 20)
+        XCTAssertGreaterThan(pixel(at: corner, in: frame)[0], 40, "an opaque clip still fills the uncovered screen")
+    }
+
+    // MARK: - Loop length
+
+    /// The cap used to be 96 frames, which is three seconds at 32fps: a ten
+    /// second clip came out as its first third and the rest was never seen.
+    func testTenSecondClipKeepsMoreThanItsFirstThreeSeconds() {
+        var design = DesignDocument.new(name: "long", sourceVideoName: "long.mov")
+        design.smoothness = MotionSmoothness.standard
+        design.sourceDuration = 10.6
+        design.retuneLoop()
+
+        XCTAssertGreaterThan(design.loopDuration, 9, "a ten second clip must not be cut to three")
+        XCTAssertTrue(
+            design.spec.divides(loopFrameCount: design.loopFrameCount),
+            "the loop still has to tile the 30s cycle"
+        )
+    }
+
+    /// The cap bounds peak build memory, so every smoothness has to respect it
+    /// while still landing on a length that tiles its own cycle.
+    func testEverySmoothnessStaysWithinTheLoopCap() {
+        for smoothness in MotionSmoothness.allCases {
+            var design = DesignDocument.new(name: "long", sourceVideoName: "long.mov")
+            design.smoothness = smoothness
+            design.sourceDuration = 60
+            design.retuneLoop()
+
+            XCTAssertLessThanOrEqual(
+                design.loopFrameCount, TimerFontSpec.maximumLoopFrames, "\(smoothness)"
+            )
+            XCTAssertTrue(design.spec.divides(loopFrameCount: design.loopFrameCount), "\(smoothness)")
+        }
+    }
+
+    /// The whole point of the fit: a clip whose length falls between two
+    /// seamless loops should be sped up onto the nearer one rather than have
+    /// its tail dropped.
+    func testLoopSizingSpeedsUpToKeepTheWholeClip() {
+        var design = DesignDocument.new(name: "fit", sourceVideoName: "fit.mov")
+        design.smoothness = MotionSmoothness.standard
+        design.sourceDuration = 10.6
+        design.retuneLoop()
+
+        let covered = design.sourceDuration / design.playbackSpeed
+        XCTAssertEqual(covered, design.loopDuration, accuracy: 0.001, "the loop must hold the whole clip")
+        XCTAssertEqual(design.playbackSpeed, 1.06, accuracy: 0.01, "and only just faster")
+    }
+
+    /// A clip far longer than any loop must be cut, not run at six times speed.
+    func testLoopSizingWillNotRaceAClipItCannotHold() {
+        var design = DesignDocument.new(name: "epic", sourceVideoName: "epic.mov")
+        design.smoothness = MotionSmoothness.standard
+        design.sourceDuration = 60
+        design.retuneLoop()
+
+        XCTAssertEqual(design.playbackSpeed, 1, accuracy: 0.0001, "speed is left alone")
+    }
+
+    /// A speed chosen on purpose is a setting, not a starting point: fitting
+    /// may nudge it onto the loop but must not undo it.
+    func testLoopSizingKeepsADeliberateSpeed() {
+        var design = DesignDocument.new(name: "fast", sourceVideoName: "fast.mov")
+        design.smoothness = MotionSmoothness.standard
+        design.sourceDuration = 10.6
+        design.playbackSpeed = 2
+        design.retuneLoop()
+
+        XCTAssertGreaterThan(design.playbackSpeed, 1.8)
+        let covered = design.sourceDuration / design.playbackSpeed
+        XCTAssertEqual(covered, design.loopDuration, accuracy: 0.001)
+    }
+
+    /// Sizing twice must land in the same place, or every rebuild would drift
+    /// the speed a little further.
+    func testLoopSizingIsStableAcrossRepeatedRetunes() {
+        var design = DesignDocument.new(name: "stable", sourceVideoName: "stable.mov")
+        design.smoothness = MotionSmoothness.standard
+        design.sourceDuration = 10.6
+        design.retuneLoop()
+        let speed = design.playbackSpeed
+        let loop = design.loopFrameCount
+
+        design.retuneLoop()
+        XCTAssertEqual(design.playbackSpeed, speed, accuracy: 0.0001)
+        XCTAssertEqual(design.loopFrameCount, loop)
+    }
+
+    /// The build sizes the loop, samples that many frames to find the crop,
+    /// then sizes it again because the planner may have changed the frame rate.
+    /// Both sizings have to describe the same span of clip, or the crop was
+    /// measured over one stretch and the animation encoded from another.
+    func testResizingAfterASmoothnessChangeCoversTheSameSpan() {
+        var design = DesignDocument.new(name: "span", sourceVideoName: "span.mov")
+        design.smoothness = MotionSmoothness.standard
+        design.sourceDuration = 10.6
+        design.retuneLoop()
+        let before = design.loopDuration
+
+        design.smoothness = MotionSmoothness.light
+        design.retuneLoop()
+
+        XCTAssertEqual(design.loopDuration, before, accuracy: 0.001, "same seconds, different frame rate")
+        XCTAssertNotEqual(design.loopFrameCount, 0)
+    }
+
+    // MARK: - Centring
+
+    func testCentringMovesTheClipOntoTheWidgetWithoutResizing() {
+        let screen = CGSize(width: 1206, height: 2622)
+        let widget = CGRect(x: 66, y: 270, width: 1074, height: 1632)
+        let start = MediaTransform(scale: 0.5, offset: CGPoint(x: 400, y: -900), fillsBackground: true)
+        let centred = start.centred(inside: widget, screenSize: screen)
+
+        XCTAssertEqual(centred.scale, start.scale, "centring must not resize")
+        XCTAssertTrue(centred.fillsBackground)
+
+        let placed = MediaFrameExtractor.placement(
+            sourceSize: CGSize(width: 400, height: 400),
+            screenSize: screen,
+            transform: centred
+        )
+        XCTAssertEqual(placed.midX, widget.midX, accuracy: 0.01)
+        XCTAssertEqual(placed.midY, widget.midY, accuracy: 0.01)
+    }
+
     // MARK: - Kind detection
 
     func testGIFIsDetectedByContentNotExtension() throws {
@@ -414,7 +618,7 @@ final class MediaImportTests: XCTestCase {
     /// would replay part of the source twice.
     func testLoopSizingFollowsSpeed() {
         var design = DesignDocument.new(name: "t", sourceVideoName: "source.gif")
-        design.smoothness = .standard
+        design.smoothness = MotionSmoothness.standard
         design.sourceDuration = 1.2
 
         design.playbackSpeed = 1
@@ -624,5 +828,76 @@ final class QualityPlanTests: XCTestCase {
         if let plan = PayloadBudget.bestPlan(samples: [image], crop: crop) {
             XCTAssertLessThanOrEqual(plan.estimatedBytes, PayloadBudget.recommendedMaximumBytes)
         }
+    }
+}
+
+/// A preview renders the same composition against a smaller screen. The clip
+/// has to land in the same place proportionally, or what plays on the canvas
+/// stands somewhere the built one will not - which is exactly what a preview
+/// exists to rule out.
+final class ScaledTransformTests: XCTestCase {
+    private let source = CGSize(width: 1080, height: 1916)
+    private let screen = CGSize(width: 1290, height: 2796)
+    /// The design this came out of: shifted a long way up the screen.
+    private let transform = MediaTransform(
+        scale: 1.147911931818182,
+        offset: CGPoint(x: -1.0015828530907810, y: -165.35448267745141)
+    )
+
+    private func reduced(_ factor: Double) -> CGSize {
+        CGSize(width: (screen.width * factor).rounded(), height: (screen.height * factor).rounded())
+    }
+
+    /// The multiplier is on the aspect-fill baseline, which means the same
+    /// thing at any size, so it must not move.
+    func testTheScaleIsUntouched() {
+        XCTAssertEqual(transform.scaled(by: 0.2).scale, transform.scale)
+        XCTAssertEqual(transform.scaled(by: 5).scale, transform.scale)
+    }
+
+    func testTheOffsetFollowsTheScreen() {
+        let scaled = transform.scaled(by: 0.2)
+        XCTAssertEqual(scaled.offset.x, transform.offset.x * 0.2, accuracy: 1e-9)
+        XCTAssertEqual(scaled.offset.y, transform.offset.y * 0.2, accuracy: 1e-9)
+    }
+
+    func testFullSizeIsUnchanged() {
+        XCTAssertEqual(transform.scaled(by: 1), transform)
+    }
+
+    /// The point of the whole thing: the clip lands on the same fraction of
+    /// the picture whatever size the picture is rendered at.
+    func testAReducedRenderPlacesTheClipInTheSameFraction() {
+        let factor = 560.0 / max(screen.width, screen.height)
+        let full = MediaFrameExtractor.placement(
+            sourceSize: source, screenSize: screen, transform: transform
+        )
+        let small = MediaFrameExtractor.placement(
+            sourceSize: source, screenSize: reduced(factor), transform: transform.scaled(by: factor)
+        )
+
+        // Loose by a fraction of a percent because the reduced screen rounds
+        // its two dimensions independently, so its aspect - and the aspect-fill
+        // baseline with it - is a hair off the real screen's.
+        XCTAssertEqual(small.minX / reduced(factor).width, full.minX / screen.width, accuracy: 0.005)
+        XCTAssertEqual(small.minY / reduced(factor).height, full.minY / screen.height, accuracy: 0.005)
+        XCTAssertEqual(small.width / reduced(factor).width, full.width / screen.width, accuracy: 0.005)
+    }
+
+    /// And what it was before: the offset left alone pushes the clip five
+    /// times too far up, which is the picture jumping when you press play.
+    func testAnUnscaledOffsetLandsInTheWrongPlace() {
+        let factor = 560.0 / max(screen.width, screen.height)
+        let full = MediaFrameExtractor.placement(
+            sourceSize: source, screenSize: screen, transform: transform
+        )
+        let wrong = MediaFrameExtractor.placement(
+            sourceSize: source, screenSize: reduced(factor), transform: transform
+        )
+        XCTAssertGreaterThan(
+            abs(full.minY / screen.height - wrong.minY / reduced(factor).height),
+            0.2,
+            "the bug this guards against would have to be reintroduced to fail here"
+        )
     }
 }

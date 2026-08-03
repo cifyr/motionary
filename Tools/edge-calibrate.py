@@ -60,9 +60,10 @@ DEVICES = {
         "corner_radius": 78,
     },
 }
-# Shared/Pipeline/WidgetTint.swift. Needed only to reconstruct what the pipeline
-# had to subtract from, for the headroom test.
-TINT_GAIN = (0.984, 1.035, 1.096)
+# Shared/Pipeline/WidgetTint.swift, and has to track it. Needed only to
+# reconstruct what the pipeline had to subtract from, for the headroom test.
+# Identity since the difference it was correcting turned out not to exist.
+TINT_GAIN = (1.0, 1.0, 1.0)
 # Rows inside the band whose residual is the local colour baseline. Far enough in
 # that the rim has faded (the profile is 9 rows), close enough that the drift down
 # the widget has not moved.
@@ -73,6 +74,9 @@ BINS = 9
 # agreed within three - writing that over a nine-bin fit is a downgrade, not a
 # refinement. Calibrate that edge from a design that does not sit on it.
 MIN_BINS_TO_WRITE = 5
+# Columns a bin needs before it is measured at all. The point of binning across
+# the width is that each bin is a wide sample, and a sliver is not.
+MIN_BIN_COLUMNS = 12
 # A bin needs this much more content than the correction subtracted before its
 # residual is trusted, so a bin that only just cleared zero is not fitted.
 HEADROOM_MARGIN = 6.0
@@ -254,18 +258,30 @@ def bin_edges(device):
 
 
 def usable_bins(device, manifest, edge_row):
-    """The column bins, with tile-covered columns dropped.
+    """Bins of equal size cut from the columns no tile covers.
 
-    A bin that loses more than a third of its columns to a tile is dropped
-    outright rather than measured on what is left: the point of binning across the
-    width is that each bin is a wide sample, and a sliver is not.
+    This used to bin by geometry and then throw away whichever bins had lost a
+    third of their columns to a tile. That stopped being able to measure
+    anything once tiles started landing on the real Home Screen grid, whose
+    first row begins on the widget's own top row and whose last runs past its
+    bottom: every fixed bin lost columns to a tile, so every edge came back
+    "0 of 9 bins usable" and no design could calibrate either edge.
+
+    Splitting the free columns instead keeps each bin a wide sample. What it
+    gives up is even spacing - the bins now cluster into the gaps between icon
+    columns rather than spreading evenly - so bins still disagreeing means the
+    same thing, but they no longer sample the width uniformly.
     """
+    x, _, w, _ = device["rendered"]
+    radius = device["corner_radius"]
+    lo, hi = x + radius, x + w - radius
+    allowed = [c for c in tile_free_columns(manifest, edge_row, device) if lo <= c < hi]
+
     bins = []
-    allowed = set(tile_free_columns(manifest, edge_row, device))
-    for lo, hi in bin_edges(device):
-        columns = sorted(c for c in range(lo, hi) if c in allowed)
-        if len(columns) >= (hi - lo) * 2 // 3:
-            bins.append((lo, hi, np.array(columns)))
+    for index in range(BINS):
+        chunk = allowed[len(allowed) * index // BINS:len(allowed) * (index + 1) // BINS]
+        if len(chunk) >= MIN_BIN_COLUMNS:
+            bins.append((chunk[0], chunk[-1] + 1, np.array(chunk)))
     return bins
 
 

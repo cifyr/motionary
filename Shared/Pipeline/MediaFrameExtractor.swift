@@ -75,6 +75,21 @@ struct MediaTransform: Codable, Equatable, Sendable {
 
     var isIdentity: Bool { self == .identity }
 
+    /// The same placement against a screen of a different size.
+    ///
+    /// `scale` is a multiplier on the aspect-fill baseline, so it means the
+    /// same thing at any size and does not move. `offset` is screen pixels, and
+    /// does: rendering a preview at a fifth of the screen with the offset left
+    /// alone puts the clip five times too far from centre - which is a picture
+    /// standing somewhere the built one will not.
+    func scaled(by factor: Double) -> MediaTransform {
+        MediaTransform(
+            scale: scale,
+            offset: CGPoint(x: offset.x * factor, y: offset.y * factor),
+            fillsBackground: fillsBackground
+        )
+    }
+
     /// Fraction of the source that aspect-filling would crop away.
     static func croppedFraction(sourceSize: CGSize, screenSize: CGSize) -> Double {
         guard sourceSize.width > 0, sourceSize.height > 0 else { return 0 }
@@ -110,6 +125,18 @@ struct MediaTransform: Codable, Equatable, Sendable {
             offset: CGPoint(x: target.midX - screenSize.width / 2, y: target.midY - screenSize.height / 2),
             fillsBackground: true
         )
+    }
+
+    /// The same size and fill, moved so the source sits centred on a target
+    /// rect — the widget frame — rather than on the screen.
+    func centred(inside target: CGRect, screenSize: CGSize) -> MediaTransform {
+        guard !target.isEmpty else { return self }
+        var moved = self
+        moved.offset = CGPoint(
+            x: target.midX - screenSize.width / 2,
+            y: target.midY - screenSize.height / 2
+        )
+        return moved
     }
 
     /// Chosen at import. A phone-shaped clip should fill the screen, but a
@@ -262,6 +289,48 @@ struct MediaFrameExtractor {
     /// How strongly the backdrop shows through behind a shrunken source.
     static let backdropOpacity: CGFloat = 0.45
 
+    /// Whether a decoded frame is a cut-out: transparent somewhere, not merely
+    /// carrying an alpha channel.
+    ///
+    /// The dimmed blow-up below is meant to hide behind an opaque clip and only
+    /// show past its edges. A cut-out lets all of it through, so the subject
+    /// appears a second time — larger, fainter, and somewhere else.
+    ///
+    /// The channel alone cannot decide this: GIF decodes to an alpha format
+    /// whether or not any pixel uses it, so testing that suppressed the fill
+    /// for every GIF. The alpha is sampled instead, at a size small enough that
+    /// doing it per frame costs nothing.
+    static func isCutOut(_ image: CGImage) -> Bool {
+        switch image.alphaInfo {
+        case .none, .noneSkipFirst, .noneSkipLast: return false
+        default: break
+        }
+
+        let side = 32
+        var pixels = [UInt8](repeating: 255, count: side * side * 4)
+        let drawn = pixels.withUnsafeMutableBytes { raw -> Bool in
+            guard let context = CGContext(
+                data: raw.baseAddress,
+                width: side,
+                height: side,
+                bitsPerComponent: 8,
+                bytesPerRow: side * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            context.interpolationQuality = .none
+            // Copy rather than blend, so the source's own alpha lands in the
+            // buffer instead of being composited against the opaque fill.
+            context.setBlendMode(.copy)
+            context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+            return true
+        }
+        // A frame that could not be sampled is treated as opaque, which keeps
+        // the long-standing behaviour rather than silently dropping the fill.
+        guard drawn else { return false }
+        return stride(from: 3, to: pixels.count, by: 4).contains { pixels[$0] < 250 }
+    }
+
     /// The aspect-fill rect used behind a shrunken source, in screen pixels.
     static func backdropPlacement(sourceSize: CGSize, screenSize: CGSize) -> CGRect {
         placement(
@@ -358,6 +427,7 @@ struct MediaFrameExtractor {
                 Self.logger.error("frame \(index) at \(time.seconds)s failed: \(String(describing: error), privacy: .public)")
                 break
             }
+            try Task.checkCancellation()
             progress?(Double(index + 1) / Double(count))
         }
         return frames
@@ -494,6 +564,7 @@ struct MediaFrameExtractor {
                 screenSize: screenSize
             )))
         } else if transform.fillsBackground,
+                  !Self.isCutOut(image),
                   placed.width < screenSize.width || placed.height < screenSize.height {
             // A scaled-down source leaves the screen uncovered; a dim blow-up
             // of the same frame reads better behind it than a black band.

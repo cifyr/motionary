@@ -86,13 +86,23 @@ targets:
       # at all, and it is plain Foundation, so it is covered here rather than
       # needing a second test target.
       - path: Mac/Install/BundleWriter.swift
+      # A locked phone is reported as "exited 70" under a wall of build
+      # settings, and turning that into something actionable is plain string
+      # work - the installer around it shells out and cannot be tested.
+      - path: Mac/Install/InstallerHints.swift
       - path: Mac/Library/SkinLibrary.swift
       # Applying a set decides what a slot can show on the phone, so the pure
       # apply rules are covered with the rest of the tile logic.
       - path: Mac/Library/SkinSets.swift
+      # A names table that parses to the wrong shape pairs every icon in a
+      # sheet with the wrong label, and nothing about that looks wrong.
+      - path: Mac/Library/SpriteSheet.swift
       # Undo is snapshots with hand-rolled redo bookkeeping, which is exactly
       # the kind of state machine that breaks quietly.
       - path: Mac/Studio/UndoCoordinator.swift
+      # Alignment decides where a row of launchers actually lands, and it is
+      # pure geometry, so it is covered here rather than by eye on a canvas.
+      - path: Mac/Studio/LayoutActions.swift
       # Resolving a tile's artwork decides what the wallpaper bakes as well as
       # what the bundle installs, so it belongs to the same coverage.
       - path: Mac/Library/TileArtwork.swift
@@ -103,6 +113,10 @@ targets:
       # here, it is plain AVFoundation, and it is invisible from any screenshot,
       # so it is covered here rather than needing an App test target.
       - path: App/AudioSessionPolicy.swift
+      # Whether the in-app preview keeps step with the widget is decided by the
+      # drift maths here, and the two only disagree after minutes of playing -
+      # which is exactly what nobody notices by watching.
+      - path: App/LoopingCompositionView.swift
       - path: Resources
         buildPhase: resources
     settings:
@@ -155,6 +169,8 @@ targets:
       - path: Shared/Model/AppCatalog.swift
       - path: Shared/Storage/ImageLoader.swift
       - path: Shared/Model/SnapEngine.swift
+      - path: Shared/Model/Readout.swift
+      - path: Shared/Rendering/ReadoutView.swift
       - path: Shared/Rendering/CompositionView.swift
       # The animation layer is shared so there is one renderer, not two. The
       # studio does not build runtime-frame designs - the phone does - but it

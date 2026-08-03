@@ -18,6 +18,11 @@ struct HomeView: View {
     /// Bumped by the slots sheet so the composition re-reads the choices; the
     /// store itself is UserDefaults, which SwiftUI does not observe.
     @State private var slotsEdition = 0
+    /// Taps change a slot rather than open an app, and a blanked slot comes
+    /// back as a target so it can be changed again.
+    @State private var isEditing = false
+    @State private var editingTile: PlacedTile?
+    @Environment(\.displayScale) private var displayScale
 
     /// Whatever there is to say right now, from either source.
     private var message: String? { note ?? router.lastFailure }
@@ -30,21 +35,32 @@ struct HomeView: View {
             Color.black.ignoresSafeArea()
 
             if let entry, let manifest = entry.manifest {
-                // Identity includes the chosen variant so picking another one
-                // rebuilds the player rather than looping the old clip.
+                // Identity is the scene, not the clip within it. Including the
+                // clip tore the player down and built a new one on every
+                // change, which blanked the screen to the wallpaper - baked
+                // from the scene's own clip - for as long as the next one took
+                // to load. The player swaps its own clip in place instead.
                 composition(entry: entry, manifest: manifest)
-                    .id("\(entry.id.uuidString)-\(VariantChoice.resolved(in: manifest)?.id.uuidString ?? "primary")")
+                    .id(entry.id)
             } else {
                 EmptyDesignView()
             }
 
-            if entries.count > 1 { PageDots(count: entries.count, index: index) }
+            if entries.count > 1, !isEditing { PageDots(count: entries.count, index: index) }
 
-            SaveButton(saving: saving) { save() }
-            // Anything to choose at all: slot occupants, or a clip variant.
-            if let manifest = entry?.manifest,
-               !manifest.placedTiles.isEmpty || !manifest.builtVariants.isEmpty {
-                SlotsButton { choosingSlots = true }
+            if isEditing {
+                EditingBar(
+                    hasBackgrounds: !(entry?.manifest?.builtVariants.isEmpty ?? true),
+                    onOptions: { choosingSlots = true },
+                    onDone: { isEditing = false }
+                )
+            } else {
+                SaveButton(saving: saving) { save() }
+                // Anything to change at all: a slot, or a clip variant.
+                if let manifest = entry?.manifest,
+                   !manifest.placedTiles.isEmpty || !manifest.builtVariants.isEmpty {
+                    SlotsButton { isEditing = true }
+                }
             }
             // A tap that opens nothing has to say why. Rewriting this view
             // dropped the alert that used to report it, so a tile with no
@@ -67,13 +83,29 @@ struct HomeView: View {
                 SlotSettingsView(manifest: manifest) { slotsEdition += 1 }
             }
         }
+        .sheet(item: $editingTile) { tile in
+            if let manifest = entry?.manifest {
+                SlotEditorView(manifest: manifest, tile: tile) { slotsEdition += 1 }
+            }
+        }
         // A swipe rather than any chrome: the whole point of this screen is to
         // be the Home Screen, and a switcher on top of it would spoil that.
+        //
+        // What it moves through is whatever is being worked on. Editing a
+        // scene, it steps through that scene's backgrounds; otherwise through
+        // the scenes themselves. Across the background only, so a drag that
+        // starts on an icon belongs to that icon.
         .gesture(
             DragGesture(minimumDistance: 40)
                 .onEnded { value in
                     guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                    switchDesign(by: value.translation.width < 0 ? 1 : -1)
+                    guard !isOnASlot(value.startLocation) else { return }
+                    let step = value.translation.width < 0 ? 1 : -1
+                    if isEditing {
+                        switchBackground(by: step)
+                    } else {
+                        switchDesign(by: step)
+                    }
                 }
         )
     }
@@ -109,10 +141,14 @@ struct HomeView: View {
         // the variant's own - lengths need not match across variants.
         let variant = VariantChoice.resolved(in: manifest)
         let loop = variant?.loopFrameCount ?? manifest.loopFrameCount
+        // Blanked slots come back while editing: one that draws nothing would
+        // otherwise be unreachable, and blanking it would be a one-way door.
+        let blanked = isEditing ? SlotChoices.blankedTiles(manifest: manifest) : []
+        let blankIDs = Set(blanked.map(\.id))
         return LoopingCompositionView(
             screenSize: manifest.screenSize,
             viewport: CGRect(origin: .zero, size: manifest.screenSize),
-            tiles: SlotChoices.apply(to: manifest.placedTiles, designID: manifest.designID),
+            tiles: SlotChoices.effectiveTiles(manifest: manifest) + blanked,
             videoURL: variant.flatMap { entry.previewURL(variant: $0.id) } ?? entry.previewURL,
             // The tile-free variant when the build has one: the live tiles
             // drawn over it are the occupants the phone chose, and a swapped
@@ -124,28 +160,90 @@ struct HomeView: View {
             // Both this and the widget's glyph choice are pure functions of
             // wall clock time, so opening the app continues the loop rather
             // than restarting it.
-            startTime: { spec.videoTime(loopFrameCount: loop) }
+            startTime: { spec.videoTime(loopFrameCount: loop) },
+            assets: manifest.placedAssets,
+            assetImage: { asset in
+                PrebuiltDesign.pictureURL(assetID: asset.id)
+                    .flatMap {
+                        ImageLoader.load(
+                            at: $0,
+                            maxPixelSize: Int(max(asset.size.width, asset.size.height))
+                        )
+                    }
+                    .map { Image(decorative: $0, scale: 1) }
+            }
         ) { tile, side in
             Button {
-                router.launch(appID: tile.appID)
+                guard !isEditing else {
+                    // The authored tile, not the effective one: the editor
+                    // offers the slot's own set and its own default, both of
+                    // which the phone's choice has already written over.
+                    editingTile = manifest.placedTiles.first { $0.id == tile.id } ?? tile
+                    return
+                }
+                router.launch(tile: tile)
             } label: {
-                TileView(
-                    tile: tile,
-                    side: side,
-                    iconImage: PrebuiltDesign.iconURL(
-                        tileID: tile.id,
-                        appID: tile.appID,
-                        authoredAppID: authored[tile.id] ?? tile.appID
+                if blankIDs.contains(tile.id) {
+                    BlankSlot(side: side)
+                } else {
+                    TileView(
+                        tile: tile,
+                        side: side,
+                        isSelected: isEditing,
+                        iconImage: SlotArtwork.image(
+                            for: tile,
+                            designID: manifest.designID,
+                            authoredAppID: authored[tile.id] ?? tile.appID,
+                            side: side
+                        ) ?? icons.image(for: tile)
                     )
-                        .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(side * 3)) }
-                        .map { Image(decorative: $0, scale: 1) }
-                        ?? icons.image(for: tile)
-                )
+                }
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Open \(AppCatalog.app(id: tile.appID)?.name ?? tile.appID)")
+            .accessibilityLabel(label(for: tile, isBlank: blankIDs.contains(tile.id)))
         }
         .ignoresSafeArea()
+    }
+
+    private func label(for tile: PlacedTile, isBlank: Bool) -> String {
+        if isBlank { return "Fill the blank spot" }
+        return isEditing ? "Change \(tile.displayName)" : "Open \(tile.displayName)"
+    }
+
+    /// Whether a drag began on an icon. A slot is a button, and a swipe that
+    /// starts inside one belongs to it rather than to the background.
+    private func isOnASlot(_ point: CGPoint) -> Bool {
+        guard let manifest = entry?.manifest else { return false }
+        let scale = 1 / max(displayScale, 1)
+        return (SlotChoices.effectiveTiles(manifest: manifest) + SlotChoices.blankedTiles(manifest: manifest))
+            .contains { tile in
+                CGRect(
+                    x: tile.rect.minX * scale,
+                    y: tile.rect.minY * scale,
+                    width: tile.size * scale,
+                    height: tile.size * scale
+                ).contains(point)
+            }
+    }
+
+    /// Steps through this scene's backgrounds, its own clip included.
+    ///
+    /// Editing only. Out of edit mode the same swipe changes scene, so a scene
+    /// with one background simply does nothing here rather than quietly
+    /// changing something else - a swipe that means two things depending on
+    /// what this design happens to carry is worse than one that means nothing.
+    private func switchBackground(by step: Int) {
+        guard let manifest = entry?.manifest, !manifest.builtVariants.isEmpty else { return }
+        // Alphabetical from the clip this scene leads with, so a swipe walks
+        // the same order the options sheet lists.
+        let options = manifest.clipSequence
+        let current = VariantChoice.resolved(in: manifest)?.id
+        let position = options.firstIndex { $0.variantID == current } ?? 0
+        let next = options[(position + step + options.count) % options.count]
+        VariantChoice.set(next.variantID, designID: manifest.designID)
+        WidgetCenterBridge.reloadAll()
+        slotsEdition += 1
+        note = next.name
     }
 
     private func save() {
@@ -198,17 +296,22 @@ struct HomeView: View {
         )
         let composed = await WallpaperComposer.compose(
             frame: base,
-            tiles: SlotChoices.apply(to: manifest.placedTiles, designID: manifest.designID),
+            tiles: SlotChoices.effectiveTiles(manifest: manifest),
             // Already baked into the plain wallpaper; they are not slot-dependent.
             assets: [],
             screenSize: manifest.screenSize,
+            // The skin the phone chose first, exactly as the widget resolves
+            // it: a wallpaper baked from the authored icon would continue the
+            // wrong artwork past the widget's edge, which is the one thing
+            // baking the tiles into it is for.
             artwork: { tile in
-                PrebuiltDesign.iconURL(
-                    tileID: tile.id,
-                    appID: tile.appID,
-                    authoredAppID: authored[tile.id] ?? tile.appID
-                )
-                .flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(tile.size)) }
+                let url = tile.skin.flatMap { PrebuiltDesign.skinURL(designID: manifest.designID, skin: $0) }
+                    ?? PrebuiltDesign.iconURL(
+                        tileID: tile.id,
+                        appID: tile.appID,
+                        authoredAppID: authored[tile.id] ?? tile.appID
+                    )
+                return url.flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(tile.size)) }
             }
         )
         try await WallpaperExporter.saveToPhotos(image: composed)
@@ -272,6 +375,61 @@ private struct SaveButton: View {
     }
 }
 
+/// A slot the phone blanked.
+///
+/// It draws nothing on the Home Screen at all - the widget simply leaves it out
+/// - but while editing it has to be here and obviously tappable, or blanking a
+/// slot would be the one change that cannot be undone from the screen it was
+/// made on.
+private struct BlankSlot: View {
+    let side: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: side * 0.22, style: .continuous)
+            .fill(.black.opacity(0.25))
+            .overlay {
+                RoundedRectangle(cornerRadius: side * 0.22, style: .continuous)
+                    .strokeBorder(Color.accentColor, lineWidth: max(1.5, side * 0.03))
+            }
+            .frame(width: side, height: side)
+    }
+}
+
+/// What edit mode replaces the corner buttons with: what tapping does now, a
+/// way to the settings that are not per spot, and a way out.
+private struct EditingBar: View {
+    /// Whether this scene has more than one background, which is what the
+    /// swipe does here - saying so on a scene with one would be a lie.
+    let hasBackgrounds: Bool
+    let onOptions: () -> Void
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 10) {
+                Button("Options", systemImage: "slider.horizontal.3", action: onOptions)
+                    .labelStyle(.titleAndIcon)
+                Spacer()
+                Text(hasBackgrounds ? "Tap a spot, swipe for backgrounds" : "Tap a spot to change it")
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.85))
+                Spacer()
+                Button("Done", action: onDone)
+                    .fontWeight(.semibold)
+            }
+            .font(.callout)
+            .tint(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
+            .padding(.horizontal, 16)
+            .padding(.bottom, 34)
+        }
+    }
+}
+
 /// Opens the slot settings, mirroring the save button on the other corner.
 private struct SlotsButton: View {
     let action: () -> Void
@@ -289,7 +447,7 @@ private struct SlotsButton: View {
                         .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
                         .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
                 }
-                .accessibilityLabel("Design options: choose the animation and which apps fill the slots")
+                .accessibilityLabel("Edit the spots: change an icon, fill an empty one, choose what it opens")
                 Spacer()
             }
         }
