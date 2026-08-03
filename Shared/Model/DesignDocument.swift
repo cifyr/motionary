@@ -520,6 +520,25 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     mutating func retuneLoop(maximum: Int = TimerFontSpec.maximumLoopFrames) {
         guard sourceDuration > 0 else { return }
         loopFrameCount = spec.seamlessLoopLength(nearest: naturalLoopFrames, maximum: maximum)
+        fitSpeedToLoop()
+    }
+
+    /// Nudges playback speed so the whole clip lands on the chosen loop.
+    ///
+    /// A loop has to divide the timer cycle, so it rarely equals a source's own
+    /// length: a 10.6s clip at 32fps wants 339 frames, the nearest seamless
+    /// length is 320, and the last 0.6s is never encoded. Running 6% faster
+    /// fits all of it and is not visible.
+    ///
+    /// Only small corrections, measured against whatever speed is already set:
+    /// a clip far longer than any available loop should be cut rather than
+    /// played at several times speed, and a speed chosen on purpose should
+    /// survive being fitted.
+    mutating func fitSpeedToLoop(tolerance: Double = 0.15) {
+        guard sourceDuration > 0, loopFrameCount > 0, playbackSpeed > 0 else { return }
+        let wanted = sourceDuration * Double(spec.framesPerSecond) / Double(loopFrameCount)
+        guard abs(wanted / playbackSpeed - 1) <= tolerance else { return }
+        playbackSpeed = wanted
     }
 
     /// How long the built loop runs on screen.

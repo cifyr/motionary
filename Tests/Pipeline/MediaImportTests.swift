@@ -170,6 +170,59 @@ final class MediaImportTests: XCTestCase {
         }
     }
 
+    /// The whole point of the fit: a clip whose length falls between two
+    /// seamless loops should be sped up onto the nearer one rather than have
+    /// its tail dropped.
+    func testLoopSizingSpeedsUpToKeepTheWholeClip() {
+        var design = DesignDocument.new(name: "fit", sourceVideoName: "fit.mov")
+        design.smoothness = MotionSmoothness.standard
+        design.sourceDuration = 10.6
+        design.retuneLoop()
+
+        let covered = design.sourceDuration / design.playbackSpeed
+        XCTAssertEqual(covered, design.loopDuration, accuracy: 0.001, "the loop must hold the whole clip")
+        XCTAssertEqual(design.playbackSpeed, 1.06, accuracy: 0.01, "and only just faster")
+    }
+
+    /// A clip far longer than any loop must be cut, not run at six times speed.
+    func testLoopSizingWillNotRaceAClipItCannotHold() {
+        var design = DesignDocument.new(name: "epic", sourceVideoName: "epic.mov")
+        design.smoothness = MotionSmoothness.standard
+        design.sourceDuration = 60
+        design.retuneLoop()
+
+        XCTAssertEqual(design.playbackSpeed, 1, accuracy: 0.0001, "speed is left alone")
+    }
+
+    /// A speed chosen on purpose is a setting, not a starting point: fitting
+    /// may nudge it onto the loop but must not undo it.
+    func testLoopSizingKeepsADeliberateSpeed() {
+        var design = DesignDocument.new(name: "fast", sourceVideoName: "fast.mov")
+        design.smoothness = MotionSmoothness.standard
+        design.sourceDuration = 10.6
+        design.playbackSpeed = 2
+        design.retuneLoop()
+
+        XCTAssertGreaterThan(design.playbackSpeed, 1.8)
+        let covered = design.sourceDuration / design.playbackSpeed
+        XCTAssertEqual(covered, design.loopDuration, accuracy: 0.001)
+    }
+
+    /// Sizing twice must land in the same place, or every rebuild would drift
+    /// the speed a little further.
+    func testLoopSizingIsStableAcrossRepeatedRetunes() {
+        var design = DesignDocument.new(name: "stable", sourceVideoName: "stable.mov")
+        design.smoothness = MotionSmoothness.standard
+        design.sourceDuration = 10.6
+        design.retuneLoop()
+        let speed = design.playbackSpeed
+        let loop = design.loopFrameCount
+
+        design.retuneLoop()
+        XCTAssertEqual(design.playbackSpeed, speed, accuracy: 0.0001)
+        XCTAssertEqual(design.loopFrameCount, loop)
+    }
+
     // MARK: - Centring
 
     func testCentringMovesTheClipOntoTheWidgetWithoutResizing() {
