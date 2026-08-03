@@ -124,7 +124,9 @@ struct BundleWriter {
 
             let key = design.manifest.designID.uuidString.lowercased()
             try copy(design.folder.appendingPathComponent("manifest.json"), to: "prebuilt-\(key)-manifest.json")
-            try copy(design.folder.appendingPathComponent("widget-backdrop.jpg"), to: "prebuilt-\(key)-backdrop.jpg")
+            // Whichever extension the build settled on, kept: the phone looks
+            // for both, but only if the one that exists is what got copied.
+            try copyBackdrop(named: "widget-backdrop", from: design.folder, to: "prebuilt-\(key)-backdrop")
             try copy(design.folder.appendingPathComponent("wallpaper.png"), to: "prebuilt-\(key)-wallpaper.png")
             // Tile-free, so the phone can bake whichever occupants its slots
             // hold at export time. `copy` skips it for designs built before it
@@ -137,9 +139,10 @@ struct BundleWriter {
             // the lane glob above, since every clip writes into one folder.
             for variant in design.manifest.builtVariants {
                 let vid = variant.id.uuidString.lowercased()
-                try copy(
-                    design.folder.appendingPathComponent("widget-backdrop-\(vid).jpg"),
-                    to: "prebuilt-\(key)-backdrop-\(vid).jpg"
+                try copyBackdrop(
+                    named: "widget-backdrop-\(vid)",
+                    from: design.folder,
+                    to: "prebuilt-\(key)-backdrop-\(vid)"
                 )
                 try copy(
                     design.folder.appendingPathComponent("preview-\(vid).mp4"),
@@ -274,6 +277,19 @@ struct BundleWriter {
             ),
             options: .atomic
         )
+    }
+
+    /// Copies a backdrop under whatever extension the build gave it, keeping
+    /// that extension. Copying only `.jpg` shipped nothing at all once flat
+    /// backgrounds started coming out as PNG, which reads on the phone as a
+    /// widget with no backdrop behind its animation.
+    private func copyBackdrop(named source: String, from folder: URL, to name: String) throws {
+        for ext in DesignStore.backdropExtensions {
+            let file = folder.appendingPathComponent("\(source).\(ext)")
+            guard FileManager.default.fileExists(atPath: file.path) else { continue }
+            try copy(file, to: "\(name).\(ext)")
+            return
+        }
     }
 
     private func copy(_ source: URL, to name: String) throws {

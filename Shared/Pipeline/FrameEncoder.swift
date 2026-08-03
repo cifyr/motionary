@@ -77,6 +77,35 @@ struct FrameEncoder {
         guard CGImageDestinationFinalize(destination) else { throw FrameEncoderError.pngEncodeFailed }
         return output as Data
     }
+
+    /// The backdrop, in whichever of PNG and JPEG comes out smaller, with the
+    /// extension that names what it is.
+    ///
+    /// Only the backdrop gets the choice: it is one still, where the animation
+    /// is `lanes x 15` copies of a frame and has to stay lossy to fit at all.
+    ///
+    /// A flat or synthetic background encodes exactly and about seven times
+    /// smaller as PNG - measured on a grey gradient, 8.5KB against 60KB - while
+    /// a photograph does not, so the smaller file is the lossless one exactly
+    /// when lossless is affordable. It matters beyond the bytes: JPEG at 0.95
+    /// was leaving the backdrop about two levels off the wallpaper it has to be
+    /// continuous with, and up to thirteen in places, and quantisation eats the
+    /// edge correction, whose whole shape is a step of up to 79 units across
+    /// two or three rows.
+    static func backdropData(_ image: CGImage, quality: Double) throws -> (data: Data, ext: String) {
+        let png = try? pngData(image)
+        let jpeg = jpegData(image, quality: quality)
+        switch (png, jpeg) {
+        case let (png?, jpeg?):
+            return png.count <= jpeg.count ? (png, "png") : (jpeg, "jpg")
+        case let (png?, nil):
+            return (png, "png")
+        case let (nil, jpeg?):
+            return (jpeg, "jpg")
+        case (nil, nil):
+            throw FrameEncoderError.pngEncodeFailed
+        }
+    }
 }
 
 /// Predicts what a build will cost before it runs.

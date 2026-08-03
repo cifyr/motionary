@@ -206,16 +206,48 @@ struct DesignStore {
         folder(for: id).appendingPathComponent("wallpaper-plain.png")
     }
 
+    /// Extensions a backdrop can carry, best first. It is written in whichever
+    /// of the two encodes smaller, so its name is not known before it is made
+    /// and a reader has to look for both.
+    static let backdropExtensions = ["png", "jpg"]
+
     /// The wallpaper cropped to the widget's frame, so the extension decodes
     /// only the pixels it draws.
-    func widgetBackdropURL(for id: UUID) -> URL {
-        folder(for: id).appendingPathComponent("widget-backdrop.jpg")
+    func widgetBackdropURL(for id: UUID, ext: String) -> URL {
+        folder(for: id).appendingPathComponent("widget-backdrop.\(ext)")
     }
 
     /// A variant's own backdrop: the clips differ inside the widget frame, and
     /// that frame is exactly what the backdrop is.
-    func widgetBackdropURL(for id: UUID, variant: UUID) -> URL {
-        folder(for: id).appendingPathComponent("widget-backdrop-\(variant.uuidString.lowercased()).jpg")
+    func widgetBackdropURL(for id: UUID, variant: UUID, ext: String) -> URL {
+        folder(for: id)
+            .appendingPathComponent("widget-backdrop-\(variant.uuidString.lowercased()).\(ext)")
+    }
+
+    /// The backdrop that exists, however it was encoded. Nil when the design
+    /// has none, which is what a build from before backdrops existed looks like
+    /// and what the migration is there to fix.
+    func existingWidgetBackdropURL(for id: UUID, variant: UUID? = nil) -> URL? {
+        Self.backdropExtensions
+            .map { ext in backdropURL(for: id, variant: variant, ext: ext) }
+            .first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    /// Writes a backdrop and removes any left in the other format.
+    ///
+    /// Without the removal, a design that switches format keeps both and the
+    /// reader takes whichever it prefers rather than the one just built - a
+    /// stale backdrop under a live design.
+    func writeWidgetBackdrop(_ data: Data, ext: String, for id: UUID, variant: UUID? = nil) throws {
+        try data.write(to: backdropURL(for: id, variant: variant, ext: ext), options: Self.writingOptions)
+        for stale in Self.backdropExtensions where stale != ext {
+            try? FileManager.default.removeItem(at: backdropURL(for: id, variant: variant, ext: stale))
+        }
+    }
+
+    private func backdropURL(for id: UUID, variant: UUID?, ext: String) -> URL {
+        variant.map { widgetBackdropURL(for: id, variant: $0, ext: ext) }
+            ?? widgetBackdropURL(for: id, ext: ext)
     }
 
     func previewVideoURL(for id: UUID) -> URL {
