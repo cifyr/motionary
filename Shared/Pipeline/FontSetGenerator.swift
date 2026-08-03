@@ -233,7 +233,7 @@ struct FontSetGenerator {
         let natural = max(1, Int((
             duration * Double(spec.framesPerSecond) / max(playbackSpeed, 0.01)
         ).rounded(.down)))
-        return spec.seamlessLoopLength(nearest: natural, maximum: min(96, natural))
+        return spec.seamlessLoopLength(nearest: natural, maximum: min(TimerFontSpec.maximumLoopFrames, natural))
     }
 
     /// One clip's full output: fonts, backdrop, preview - and for the primary

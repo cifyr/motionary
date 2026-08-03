@@ -137,6 +137,39 @@ final class MediaImportTests: XCTestCase {
         XCTAssertGreaterThan(pixel(at: corner, in: frame)[0], 40, "an opaque clip still fills the uncovered screen")
     }
 
+    // MARK: - Loop length
+
+    /// The cap used to be 96 frames, which is three seconds at 32fps: a ten
+    /// second clip came out as its first third and the rest was never seen.
+    func testTenSecondClipKeepsMoreThanItsFirstThreeSeconds() {
+        var design = DesignDocument.new(name: "long", sourceVideoName: "long.mov")
+        design.smoothness = MotionSmoothness.standard
+        design.sourceDuration = 10.6
+        design.retuneLoop()
+
+        XCTAssertGreaterThan(design.loopDuration, 9, "a ten second clip must not be cut to three")
+        XCTAssertTrue(
+            design.spec.divides(loopFrameCount: design.loopFrameCount),
+            "the loop still has to tile the 30s cycle"
+        )
+    }
+
+    /// The cap bounds peak build memory, so every smoothness has to respect it
+    /// while still landing on a length that tiles its own cycle.
+    func testEverySmoothnessStaysWithinTheLoopCap() {
+        for smoothness in MotionSmoothness.allCases {
+            var design = DesignDocument.new(name: "long", sourceVideoName: "long.mov")
+            design.smoothness = smoothness
+            design.sourceDuration = 60
+            design.retuneLoop()
+
+            XCTAssertLessThanOrEqual(
+                design.loopFrameCount, TimerFontSpec.maximumLoopFrames, "\(smoothness)"
+            )
+            XCTAssertTrue(design.spec.divides(loopFrameCount: design.loopFrameCount), "\(smoothness)")
+        }
+    }
+
     // MARK: - Centring
 
     func testCentringMovesTheClipOntoTheWidgetWithoutResizing() {
@@ -514,7 +547,7 @@ final class MediaImportTests: XCTestCase {
     /// would replay part of the source twice.
     func testLoopSizingFollowsSpeed() {
         var design = DesignDocument.new(name: "t", sourceVideoName: "source.gif")
-        design.smoothness = .standard
+        design.smoothness = MotionSmoothness.standard
         design.sourceDuration = 1.2
 
         design.playbackSpeed = 1
