@@ -208,7 +208,7 @@ struct StudioPipeline: Sendable {
 
         let spec = design.spec
         let natural = max(1, Int((summary.duration * Double(spec.framesPerSecond)).rounded()))
-        design.loopFrameCount = spec.seamlessLoopLength(nearest: natural, maximum: 96)
+        design.loopFrameCount = spec.seamlessLoopLength(nearest: natural, maximum: TimerFontSpec.maximumLoopFrames)
         try store.save(design)
 
         let poster = try? await extractor.posterFrame()
@@ -277,7 +277,7 @@ struct StudioPipeline: Sendable {
         if let loopSeconds, loopSeconds > 0 {
             design.loopFrameCount = design.spec.seamlessLoopLength(
                 nearest: max(1, Int((loopSeconds * Double(design.spec.framesPerSecond)).rounded())),
-                maximum: 96
+                maximum: TimerFontSpec.maximumLoopFrames
             )
         }
         try store.save(design)

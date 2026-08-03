@@ -107,6 +107,20 @@ struct TimerFontSpec: Equatable, Sendable {
         loopFrameCount > 0 && totalFrames % loopFrameCount == 0
     }
 
+    /// The longest loop a build sizes itself to.
+    ///
+    /// Not a payload limit: every lane font embeds `framesPerLane` frames
+    /// whichever loop is chosen, because the glyph table indexes the loop
+    /// modulo its length — a 320-frame loop and a 96-frame one ship the same
+    /// bytes. What it bounds is peak memory while building, since the whole
+    /// loop is decoded to full-screen RGBA at once: about 12.6MB a frame on the
+    /// calibrated screen, so 320 frames is ~4GB and has been built, where the
+    /// 960 the cycle would otherwise allow is ~12GB.
+    ///
+    /// It was 96, which is three seconds at 32fps and silently truncated
+    /// anything longer.
+    static let maximumLoopFrames = 320
+
     /// Loop lengths that tile the cycle cleanly, for the trim UI to snap to.
     func seamlessLoopLengths(maximum: Int) -> [Int] {
         (1 ... max(1, maximum)).filter { totalFrames % $0 == 0 }
