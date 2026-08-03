@@ -206,9 +206,10 @@ struct StudioPipeline: Sendable {
             screenSize: model.screenPixelSize
         )
 
-        let spec = design.spec
-        let natural = max(1, Int((summary.duration * Double(spec.framesPerSecond)).rounded()))
-        design.loopFrameCount = spec.seamlessLoopLength(nearest: natural, maximum: TimerFontSpec.maximumLoopFrames)
+        // The same sizing a rebuild does, rather than a second copy of it: an
+        // import that sized the loop its own way disagreed with every later
+        // retune about how much of the clip there was.
+        design.retuneLoop()
         try store.save(design)
 
         let poster = try? await extractor.posterFrame()
