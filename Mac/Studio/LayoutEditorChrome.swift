@@ -107,9 +107,11 @@ extension LayoutEditor {
 
     /// Everything on the canvas, in the order it draws.
     ///
-    /// The order is fixed by the compositor - wallpaper, clip, pictures, tiles
-    /// - so this list is for finding and selecting things, not for restacking
-    /// them. It is also the only place a tile's cell is visible at a glance.
+    /// The order is fixed by the compositor - wallpaper, then any picture
+    /// marked to draw behind the animation, then the clip, then the rest of
+    /// the pictures, then tiles - so this list is for finding and selecting
+    /// things, not for restacking them. It is also the only place a tile's
+    /// cell is visible at a glance.
     var layersPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
             StudioTheme.eyebrow("Layers")
@@ -142,7 +144,7 @@ extension LayoutEditor {
                         ForEach(design.assets.sorted { $0.zIndex < $1.zIndex }) { asset in
                             layerRow(
                                 title: asset.fileName,
-                                detail: nil,
+                                detail: asset.drawsBehindAnimation ? "behind animation" : nil,
                                 isSelected: selection.contains(asset.id)
                             ) { select(asset.id) }
                         }
