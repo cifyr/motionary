@@ -403,15 +403,13 @@ struct FontSetGenerator {
                 will still show across \(Int(crop.width))px of it
                 """)
             }
-            // 0.95 rather than 0.9: the correction above is a step of up to 79
-            // units across two or three rows, and quantisation smooths exactly
-            // that. Measured, 0.9 gave back 2-6 units of the line and 0.95 under
-            // 3, for about 130KB.
-            let data = try FrameEncoder.jpegData(corrected, quality: 0.95)
-                ?? FrameEncoder.pngData(corrected)
-            let destination = variantID.map { store.widgetBackdropURL(for: design.id, variant: $0) }
-                ?? store.widgetBackdropURL(for: design.id)
-            try data.write(to: destination, options: DesignStore.writingOptions)
+            // Lossless whenever lossless is also the smaller file, which a flat
+            // background is. The quality below only decides the other case: 0.95
+            // rather than 0.9 because the correction above is a step of up to 79
+            // units across two or three rows and quantisation smooths exactly
+            // that - measured, 0.9 gave back 2-6 units of the line, 0.95 under 3.
+            let (data, ext) = try FrameEncoder.backdropData(corrected, quality: 0.95)
+            try store.writeWidgetBackdrop(data, ext: ext, for: design.id, variant: variantID)
             bakedBackdrop = backdropRect
             Self.logger.info("""
             widget backdrop \(Int(backdropRect.width))x\(Int(backdropRect.height)), \

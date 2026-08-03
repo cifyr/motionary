@@ -41,7 +41,7 @@ enum PrebuiltDesign {
         }
 
         var manifestName: String { resource("manifest") }
-        var backdropURL: URL? { PrebuiltDesign.resource(named: resource("backdrop"), extension: "jpg") }
+        var backdropURL: URL? { PrebuiltDesign.resolvedBackdrop(named: resource("backdrop")) }
         var wallpaperURL: URL? { PrebuiltDesign.resource(named: resource("wallpaper"), extension: "png") }
         /// The wallpaper without the tiles, when this build shipped one. The
         /// phone bakes its own occupants onto it at export time; nil means the
@@ -52,9 +52,8 @@ enum PrebuiltDesign {
 
         /// A clip variant's own backdrop and preview, addressed by variant id.
         func backdropURL(variant: UUID) -> URL? {
-            PrebuiltDesign.resource(
-                named: resource("backdrop-\(variant.uuidString.lowercased())"),
-                extension: "jpg"
+            PrebuiltDesign.resolvedBackdrop(
+                named: resource("backdrop-\(variant.uuidString.lowercased())")
             )
         }
 
@@ -176,8 +175,18 @@ enum PrebuiltDesign {
             ?? Bundle(for: BundleMarker.self).url(forResource: name, withExtension: ext)
     }
 
+    /// A backdrop under whichever extension it was bundled with. The build
+    /// writes PNG or JPEG depending on which came out smaller, so the name on
+    /// its own does not say which is there.
+    static func resolvedBackdrop(named name: String) -> URL? {
+        DesignStore.backdropExtensions
+            .lazy
+            .compactMap { resource(named: name, extension: $0) }
+            .first
+    }
+
     static var backdropURL: URL? {
-        PrebuiltDesign.resource(named: backdropResource, extension: "jpg")
+        resolvedBackdrop(named: backdropResource)
     }
 
     static var wallpaperURL: URL? {
