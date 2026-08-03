@@ -18,10 +18,9 @@ struct GridCell: Codable, Equatable, Hashable, Sendable {
 /// without measuring.
 struct WidgetGrid: Codable, Equatable, Sendable {
     var columns: Int = 4
-    var rows: Int = 2
-    /// Inset from the widget frame's edges, in screen pixels.
-    var margin: CGFloat = 56
-    /// Gutter between cells, in screen pixels.
+    var rows: Int = 6
+    /// Gutter used when spacing tiles by hand, in screen pixels. Not what the
+    /// cells below are laid out on - those come from the device.
     var gap: CGFloat = 40
 
     var cellCount: Int { max(columns, 1) * max(rows, 1) }
@@ -32,35 +31,29 @@ struct WidgetGrid: Codable, Equatable, Sendable {
         }
     }
 
-    func cellRect(_ cell: GridCell, in frame: CGRect) -> CGRect {
-        let columns = max(self.columns, 1)
-        let rows = max(self.rows, 1)
-        // Clamped so a wide gutter on a narrow frame cannot invert the cell.
-        let width = max(1, (frame.width - margin * 2 - gap * CGFloat(columns - 1)) / CGFloat(columns))
-        let height = max(1, (frame.height - margin * 2 - gap * CGFloat(rows - 1)) / CGFloat(rows))
-        return CGRect(
-            x: frame.minX + margin + (width + gap) * CGFloat(cell.column),
-            y: frame.minY + margin + (height + gap) * CGFloat(cell.row),
-            width: width,
-            height: height
-        )
+    /// Where a cell sits on screen, in screen pixels.
+    ///
+    /// Read off the device's own icon grid rather than divided out of the
+    /// widget frame. The Home Screen's grid is anchored to the screen, and its
+    /// last two rows run past the widget's bottom edge, so no division of a
+    /// 1632-tall frame can reproduce it - which is why dividing it left every
+    /// row between 40px below and 105px above the icons it was meant to sit on.
+    func cellRect(_ cell: GridCell) -> CGRect {
+        DeviceGeometry.model.iconRect(row: cell.row, column: cell.column)
     }
 
-    func cellCenter(_ cell: GridCell, in frame: CGRect) -> CGPoint {
-        let rect = cellRect(cell, in: frame)
+    func cellCenter(_ cell: GridCell) -> CGPoint {
+        let rect = cellRect(cell)
         return CGPoint(x: rect.midX, y: rect.midY)
     }
 
-    /// A square that fits any cell, which is what a tile is sized to by
-    /// default - tiles are square and cells need not be.
-    func tileSide(in frame: CGRect) -> CGFloat {
-        let rect = cellRect(GridCell(row: 0, column: 0), in: frame)
-        return max(40, min(rect.width, rect.height))
-    }
+    /// What a tile is sized to by default: an app icon, because that is what a
+    /// tile stands in for.
+    var tileSide: CGFloat { DeviceGeometry.model.iconSide }
 
-    func nearestCell(to point: CGPoint, in frame: CGRect) -> GridCell? {
+    func nearestCell(to point: CGPoint) -> GridCell? {
         allCells.min {
-            cellCenter($0, in: frame).distance(to: point) < cellCenter($1, in: frame).distance(to: point)
+            cellCenter($0).distance(to: point) < cellCenter($1).distance(to: point)
         }
     }
 
