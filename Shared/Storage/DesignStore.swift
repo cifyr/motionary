@@ -258,6 +258,10 @@ struct DesignStore {
         folder(for: id).appendingPathComponent("preview-\(variant.uuidString.lowercased()).mp4")
     }
 
+    func programPreviewVideoURL(for id: UUID) -> URL {
+        folder(for: id).appendingPathComponent("preview-program.mp4")
+    }
+
     func sourceVideoURL(for design: DesignDocument) -> URL {
         folder(for: design.id).appendingPathComponent(design.sourceVideoName)
     }

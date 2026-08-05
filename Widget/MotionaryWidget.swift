@@ -35,13 +35,9 @@ struct DesignProvider: TimelineProvider {
         // than bisecting routes to rediscover a type list WidgetKit already
         // printed.
         ArchiverErrorLog.capture()
-        let now = Date()
-        let manifest = PrebuiltDesign.selected()?.manifest
-        let policy = manifest.flatMap { RandomClipRotation.nextTransition(after: now, in: $0) }
-            .map(TimelineReloadPolicy.after) ?? .never
         completion(Timeline(
-            entries: [DesignEntry(date: now, designID: nil, isPreview: context.isPreview)],
-            policy: policy
+            entries: [DesignEntry(date: .now, designID: nil, isPreview: context.isPreview)],
+            policy: .never
         ))
     }
 }

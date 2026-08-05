@@ -18,7 +18,7 @@ struct DesignWidgetView: View {
     let entry: DesignEntry
 
     var body: some View {
-        content(at: entry.date)
+        content
             .background {
                 GeometryReader { geometry in
                     Color.clear.onAppear { Self.lastRenderedSize = geometry.size }
@@ -47,7 +47,7 @@ struct DesignWidgetView: View {
     }
 
     @ViewBuilder
-    private func content(at date: Date) -> some View {
+    private var content: some View {
         if EdgeLab.isEnabled {
             // Filled to the widget's own bounds rather than cut from the screen
             // composition: the question it answers is what the system does to
@@ -55,7 +55,7 @@ struct DesignWidgetView: View {
             EdgeLabView()
         } else if FontLab.isEnabled, let lab = lab() {
             lab
-        } else if let source = bundled(at: date) {
+        } else if let source = bundled() {
             let _ = record(source: source)
             // The phone's slot choices, applied at render time: the occupant is
             // live SwiftUI over the frozen animation, so it is the one part of
@@ -158,7 +158,7 @@ struct DesignWidgetView: View {
     /// because its fonts were never bundled, and deaf to switching, because the
     /// selected id never matched anything in the store and the fallback always
     /// returned the same stale design.
-    private func bundled(at date: Date) -> Source? {
+    private func bundled() -> Source? {
         // Whichever the app last chose, so the Home Screen follows a swipe.
         guard let entry = PrebuiltDesign.selected(), var manifest = entry.manifest else { return nil }
         var backdropURL = entry.backdropURL
@@ -167,7 +167,8 @@ struct DesignWidgetView: View {
         // family and backdrop the same composition draws. Guarded on the
         // fonts actually being bundled: a stale choice must degrade to the
         // primary clip, not to a widget whose lanes resolve and draw nothing.
-        if let variant = VariantChoice.resolved(in: manifest, at: date),
+        if !manifest.hasShuffledClipProgram,
+           let variant = VariantChoice.resolved(in: manifest),
            PrebuiltDesign.fontsAreBundled(familyBase: variant.fontFamilyBase) {
             manifest.fontFamilyBase = variant.fontFamilyBase
             manifest.totalFontBytes = variant.totalFontBytes

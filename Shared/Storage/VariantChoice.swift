@@ -79,11 +79,8 @@ enum VariantChoice {
         resolved(in: manifest, stored: stored?.uuidString ?? primaryValue)
     }
 
-    static func resolved(in manifest: BuildManifest, at date: Date = Date()) -> BuildManifest.VariantBuild? {
-        if let automatic = RandomClipRotation.choice(in: manifest, at: date) {
-            return resolved(in: manifest, stored: automatic.variantID?.uuidString ?? primaryValue)
-        }
-        return resolved(in: manifest, stored: stored(designID: manifest.designID))
+    static func resolved(in manifest: BuildManifest) -> BuildManifest.VariantBuild? {
+        resolved(in: manifest, stored: stored(designID: manifest.designID))
     }
 
     /// What a clip is called, the design's own included.

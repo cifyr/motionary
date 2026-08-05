@@ -27,6 +27,10 @@ enum FrameEncoderError: Error, CustomStringConvertible {
 struct FrameEncoder {
     let crop: CGRect
     let quality: Double
+    /// When present, apply the measured Home Screen edge correction to animated
+    /// pixels too. This matters when the motion crop reaches the widget's top or
+    /// bottom band: those pixels replace the corrected static backdrop.
+    var widgetRect: CGRect? = nil
 
     /// Base64 JPEG for every frame, ready to inline as a data URI.
     func encodedFrames(_ frames: [CGImage]) throws -> [String] {
@@ -49,7 +53,15 @@ struct FrameEncoder {
             // The animated region is most of what the widget shows, so it needs
             // the same colour match as the backdrop under it - otherwise the two
             // agree with each other and both disagree with the wallpaper.
-            guard let data = Self.jpegData(WidgetTint.applied(to: cropped), quality: quality) else {
+            var prepared = WidgetTint.applied(to: cropped)
+            if let widgetRect, EdgeCompensation.overlaps(crop, widgetRect: widgetRect) {
+                prepared = EdgeCompensation.applied(
+                    to: prepared,
+                    originY: Int(crop.minY),
+                    widgetRect: widgetRect
+                )
+            }
+            guard let data = Self.jpegData(prepared, quality: quality) else {
                 throw FrameEncoderError.jpegEncodeFailed(frameIndex: index, cropSize: crop.size)
             }
             return data.base64EncodedString()

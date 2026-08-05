@@ -1582,14 +1582,21 @@ struct LayoutEditor: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Picker("Random clip", selection: $design.randomClipSchedule) {
-                    ForEach(RandomClipSchedule.allCases, id: \.self) { schedule in
-                        Text(schedule.title).tag(schedule)
+                Picker("Playback", selection: $design.clipPlaybackMode) {
+                    ForEach(ClipPlaybackMode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
                     }
                 }
                 .pickerStyle(.menu)
 
-                Text(design.randomClipSchedule.detail)
+                if design.clipPlaybackMode == .shuffled {
+                    Text("Plays every clip all the way through once, then reshuffles. Consecutive clips are always different. Studio fits clip speed so the complete bag loops cleanly; resolution, frame rate and quality stay unchanged.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Text("Other clips for the same design - like five idle animations of one scene. The phone chooses which plays. Each adds about 29MB of fonts to the install.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
