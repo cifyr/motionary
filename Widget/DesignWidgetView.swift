@@ -18,7 +18,7 @@ struct DesignWidgetView: View {
     let entry: DesignEntry
 
     var body: some View {
-        scheduledContent
+        content(at: entry.date)
             .background {
                 GeometryReader { geometry in
                     Color.clear.onAppear { Self.lastRenderedSize = geometry.size }
@@ -34,21 +34,6 @@ struct DesignWidgetView: View {
             // build ran it against per-icon Links on a physical iPhone. Nil
             // leaves the gaps dead, which is the default.
             .widgetURL(BackgroundTap.widgetDestination)
-    }
-
-    /// Widget timelines are sparse, so this asks for a render at the next
-    /// deterministic rotation boundary rather than relying on whichever of
-    /// the app or extension happened to wake first.
-    @ViewBuilder
-    private var scheduledContent: some View {
-        if let manifest = PrebuiltDesign.selected()?.manifest,
-           let first = RandomClipRotation.nextTransition(after: Date(), in: manifest) {
-            TimelineView(.periodic(from: first, by: RandomClipRotation.interval(for: manifest))) { context in
-                content(at: context.date)
-            }
-        } else {
-            content(at: Date())
-        }
     }
 
     /// Where a renderable design came from, and everything needed to draw it.

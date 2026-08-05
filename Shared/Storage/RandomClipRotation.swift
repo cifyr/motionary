@@ -11,24 +11,27 @@ enum RandomClipRotation {
         let clips = manifest.clipSequence
         guard manifest.effectiveRandomClipSchedule != .off, clips.count > 1 else { return nil }
 
-        let bucket = bucket(for: manifest, at: date)
-        let selected = index(for: manifest.designID, bucket: bucket, count: clips.count)
-        let previous = index(for: manifest.designID, bucket: bucket - 1, count: clips.count)
-        // A random sequence is allowed to repeat mathematically, but seeing
-        // the same clip on consecutive boundaries feels broken. Move this
-        // bucket one or more places when its raw draw repeats the last one.
-        let adjusted = selected == previous
-            ? (selected + 1 + Int(hash(manifest.designID, bucket, salt: 1) % UInt64(clips.count - 1))) % clips.count
-            : selected
-        return clips[adjusted]
+        switch manifest.effectiveRandomClipSchedule {
+        case .off:
+            return nil
+        case .hour:
+            return clips[hourlyChoiceIndex(in: manifest, bucket: hourBucket(at: date))]
+        case .loopBoundary:
+            return loopRotation(in: manifest, at: date).clip
+        }
     }
 
     static func nextTransition(after date: Date, in manifest: BuildManifest) -> Date? {
         guard manifest.effectiveRandomClipSchedule != .off, manifest.clipSequence.count > 1 else { return nil }
-        let interval = interval(for: manifest)
-        let now = date.timeIntervalSince1970
-        let next = (floor(now / interval) + 1) * interval
-        return Date(timeIntervalSince1970: next)
+        switch manifest.effectiveRandomClipSchedule {
+        case .off:
+            return nil
+        case .hour:
+            let next = (floor(date.timeIntervalSince1970 / 3_600) + 1) * 3_600
+            return Date(timeIntervalSince1970: next)
+        case .loopBoundary:
+            return loopRotation(in: manifest, at: date).nextTransition
+        }
     }
 
     static func interval(for manifest: BuildManifest) -> TimeInterval {
@@ -38,26 +41,97 @@ enum RandomClipRotation {
         case .loopBoundary:
             let frames = ([manifest.loopFrameCount] + manifest.builtVariants.compactMap(\.loopFrameCount))
                 .filter { $0 > 0 }
-            let shared = frames.reduce(1) { partial, frame in
-                let divisor = gcd(partial, frame)
-                let candidate = partial / divisor * frame
-                // A least common multiple can explode for unrelated clips.
-                // Five minutes is still a meaningful shared boundary; beyond
-                // that, the longest loop is a predictable and safe cadence.
-                return candidate <= manifest.framesPerSecond * 300 ? candidate : max(partial, frame)
-            }
-            return Double(max(shared, 1)) / Double(max(manifest.framesPerSecond, 1))
+            return Double(frames.min() ?? 1) / Double(max(manifest.framesPerSecond, 1))
         }
     }
 
-    private static func bucket(for manifest: BuildManifest, at date: Date) -> Int64 {
-        let interval = interval(for: manifest)
-        guard interval.isFinite, interval > 0 else { return 0 }
-        return Int64(floor(date.timeIntervalSince1970 / interval))
+    /// A daily seed bounds the amount of replay necessary to recover the
+    /// current state, while every handoff inside the day still lands on the
+    /// end of the clip that was actually playing.
+    private static func loopRotation(in manifest: BuildManifest, at date: Date) -> LoopRotation {
+        let clips = manifest.clipSequence
+        let secondsPerDay: TimeInterval = 24 * 60 * 60
+        let now = date.timeIntervalSince1970
+        let dayBucket = Int64(floor(now / secondsPerDay))
+        var start = floor(now / secondsPerDay) * secondsPerDay
+        var previous: Int?
+        var sequence = 0
+
+        while true {
+            let index = choiceIndex(in: manifest, bucket: dayBucket, sequence: sequence, previous: previous)
+            let clip = clips[index]
+            let duration = clipDuration(clip, manifest: manifest)
+            let next = start + duration
+            if now < next {
+                return LoopRotation(
+                    clip: clip,
+                    nextTransition: Date(timeIntervalSince1970: next)
+                )
+            }
+            previous = index
+            sequence += 1
+            start = next
+        }
     }
 
-    private static func index(for id: UUID, bucket: Int64, count: Int) -> Int {
-        Int(hash(id, bucket, salt: 0) % UInt64(count))
+    private static func clipDuration(_ clip: BuildManifest.ClipChoice, manifest: BuildManifest) -> TimeInterval {
+        let frames = clip.variantID
+            .flatMap { id in manifest.builtVariants.first { $0.id == id }?.loopFrameCount }
+            ?? manifest.loopFrameCount
+        return Double(max(frames, 1)) / Double(max(manifest.framesPerSecond, 1))
+    }
+
+    private static func choiceIndex(
+        in manifest: BuildManifest,
+        bucket: Int64,
+        sequence: Int,
+        previous: Int?
+    ) -> Int {
+        let count = manifest.clipSequence.count
+        let selected = Int(hash(manifest.designID, bucket, salt: UInt64(sequence * 2)) % UInt64(count))
+        guard selected == previous, count > 1 else { return selected }
+        // A random sequence is allowed to repeat mathematically, but seeing
+        // the same clip on consecutive boundaries feels broken. Move this
+        // choice one or more places when its raw draw repeats the last one.
+        return (selected + 1 + Int(hash(manifest.designID, bucket, salt: UInt64(sequence * 2 + 1)) % UInt64(count - 1))) % count
+    }
+
+    private static func hourBucket(at date: Date) -> Int64 {
+        Int64(floor(date.timeIntervalSince1970 / 3_600))
+    }
+
+    /// A freshly shuffled order each group of hours. Rotating a shuffled group
+    /// instead of independently hashing every hour means a boundary can never
+    /// hand the user the same clip twice in a row.
+    private static func hourlyChoiceIndex(in manifest: BuildManifest, bucket: Int64) -> Int {
+        let count = manifest.clipSequence.count
+        let span = Int64(count)
+        let cycle = bucket / span
+        let position = Int(bucket % span)
+        return hourlyPermutation(in: manifest, cycle: cycle)[position]
+    }
+
+    private static func hourlyPermutation(in manifest: BuildManifest, cycle: Int64) -> [Int] {
+        var result = rawHourlyPermutation(in: manifest, cycle: cycle)
+        guard cycle > 0, result.count > 1 else { return result }
+        // Only the first two entries can be swapped below, so the previous
+        // cycle's last entry is its raw last entry too; no recursive replay is
+        // needed to compare the two groups.
+        let previousLast = rawHourlyPermutation(in: manifest, cycle: cycle - 1).last
+        if result.first == previousLast {
+            result.swapAt(0, 1)
+        }
+        return result
+    }
+
+    private static func rawHourlyPermutation(in manifest: BuildManifest, cycle: Int64) -> [Int] {
+        var result = Array(0 ..< manifest.clipSequence.count)
+        result.sort { lhs, rhs in
+            let left = hash(manifest.designID, cycle, salt: UInt64(lhs + 10_000))
+            let right = hash(manifest.designID, cycle, salt: UInt64(rhs + 10_000))
+            return left == right ? lhs < rhs : left < right
+        }
+        return result
     }
 
     private static func hash(_ id: UUID, _ bucket: Int64, salt: UInt64) -> UInt64 {
@@ -69,12 +143,8 @@ enum RandomClipRotation {
         return value
     }
 
-    private static func gcd(_ lhs: Int, _ rhs: Int) -> Int {
-        var a = abs(lhs)
-        var b = abs(rhs)
-        while b != 0 {
-            (a, b) = (b, a % b)
-        }
-        return max(a, 1)
+    private struct LoopRotation {
+        let clip: BuildManifest.ClipChoice
+        let nextTransition: Date
     }
 }

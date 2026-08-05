@@ -128,8 +128,8 @@ struct HomeView: View {
 
     @ViewBuilder
     private func composition(entry: PrebuiltDesign.Entry, manifest: BuildManifest) -> some View {
-        if let first = RandomClipRotation.nextTransition(after: Date(), in: manifest) {
-            TimelineView(.periodic(from: first, by: RandomClipRotation.interval(for: manifest))) { context in
+        if manifest.effectiveRandomClipSchedule != .off {
+            TimelineView(RandomClipTimelineSchedule(manifest: manifest)) { context in
                 composition(entry: entry, manifest: manifest, at: context.date)
             }
         } else {
@@ -326,6 +326,29 @@ struct HomeView: View {
             }
         )
         try await WallpaperExporter.saveToPhotos(image: composed)
+    }
+}
+
+/// Produces the actual end time of whichever randomly chosen clip is on
+/// screen. A fixed periodic schedule cannot do that when the clips have
+/// different durations: it would eventually switch part way through a loop.
+private struct RandomClipTimelineSchedule: TimelineSchedule {
+    let manifest: BuildManifest
+
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> [Date] {
+        var result: [Date] = []
+        var cursor = startDate
+        // The system asks again as it approaches the end of the supplied
+        // sequence. This gives it well over an hour of short Spidey clips
+        // without making a huge timeline for a very long video.
+        for _ in 0 ..< 512 {
+            guard let next = RandomClipRotation.nextTransition(after: cursor, in: manifest), next > cursor else {
+                break
+            }
+            result.append(next)
+            cursor = next.addingTimeInterval(0.001)
+        }
+        return result
     }
 }
 
