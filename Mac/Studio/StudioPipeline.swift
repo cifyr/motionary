@@ -263,7 +263,44 @@ struct StudioPipeline: Sendable {
         // can sit entirely outside the widget frame, where nothing is ever
         // drawn. A disjoint crop builds a design that cannot be built at all.
         let detection = MotionCropDetector().detect(frames: sample, screenSize: model.screenPixelSize)
-        design.animationCrop = DesignDocument.usableCrop(detection.crop, in: design.widgetRect)
+        var combinedCrop = detection.crop
+        if design.clipPlaybackMode == .shuffled {
+            // A crop measured from the primary alone freezes motion unique to
+            // another clip. Analyse each source with the same composition and
+            // take their union, so Spidey's right-side swings stay animated
+            // without paying for the entire widget at a lower frame rate.
+            for variant in design.variants {
+                let variantExtractor = MediaFrameExtractor(
+                    url: store.variantClipURL(for: design.id, name: variant.sourceVideoName),
+                    screenSize: model.screenPixelSize,
+                    transform: design.mediaTransform,
+                    background: design.backgroundName.flatMap {
+                        ImageLoader.load(
+                            at: store.backgroundURL(for: design.id, name: $0),
+                            maxPixelSize: Int(model.screenPixelSize.height)
+                        )
+                    },
+                    clipRect: design.backgroundName == nil ? nil : design.widgetRect,
+                    clipCornerRadius: design.effectiveCornerRadius
+                )
+                let summary = try await variantExtractor.summary()
+                let count = FontSetGenerator.variantLoopLength(
+                    duration: summary.duration,
+                    spec: design.spec,
+                    playbackSpeed: design.playbackSpeed
+                )
+                let frames = try await variantExtractor.composedFrames(
+                    startFrame: 0,
+                    count: count,
+                    frameRate: design.spec.framesPerSecond,
+                    speed: design.playbackSpeed
+                )
+                let variantCrop = MotionCropDetector()
+                    .detect(frames: frames, screenSize: model.screenPixelSize).crop
+                combinedCrop = combinedCrop.union(variantCrop)
+            }
+        }
+        design.animationCrop = DesignDocument.usableCrop(combinedCrop, in: design.widgetRect)
         // Worth saying out loud, because a loose box is invisible in the result
         // and expensive in every glyph: the pixels inside it are re-encoded into
         // all `lanes x 15` selections whether they move or not.

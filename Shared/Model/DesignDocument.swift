@@ -437,6 +437,7 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     /// Alternative clips for the animated part. The design's own clip is one of
     /// them; the phone chooses among all of them after install.
     var variants: [ClipVariant] = []
+    var clipPlaybackMode: ClipPlaybackMode = .manual
 
     /// What the design's own clip is called, when it has been named by hand.
     /// `primaryClipTitle` is what to show; this is only the override.
@@ -448,10 +449,6 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     /// A choice rather than a rebuild: every variant is fully built and in the
     /// bundle, so which one leads is a name in the manifest, not a re-encode.
     var defaultVariantID: UUID?
-
-    /// Optional automatic rotation among the primary clip and its variants.
-    /// Stored with the design so a rebuild cannot silently turn it off.
-    var randomClipSchedule: RandomClipSchedule = .off
 
     /// What the design's own clip is called in a list of clips.
     ///
@@ -619,9 +616,9 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         tiles = try container.decodeIfPresent([PlacedTile].self, forKey: .tiles) ?? []
         assets = try container.decodeIfPresent([PlacedAsset].self, forKey: .assets) ?? []
         variants = try container.decodeIfPresent([ClipVariant].self, forKey: .variants) ?? []
+        clipPlaybackMode = try container.decodeIfPresent(ClipPlaybackMode.self, forKey: .clipPlaybackMode) ?? .manual
         primaryClipName = try container.decodeIfPresent(String.self, forKey: .primaryClipName)
         defaultVariantID = try container.decodeIfPresent(UUID.self, forKey: .defaultVariantID)
-        randomClipSchedule = try container.decodeIfPresent(RandomClipSchedule.self, forKey: .randomClipSchedule) ?? .off
         grid = try container.decodeIfPresent(WidgetGrid.self, forKey: .grid) ?? WidgetGrid()
         snapEnabled = try container.decodeIfPresent(Bool.self, forKey: .snapEnabled) ?? true
         backgroundName = try container.decodeIfPresent(String.self, forKey: .backgroundName)
@@ -727,11 +724,10 @@ struct BuildManifest: Codable, Equatable, Sendable {
     /// pointing at fonts the bundle does not carry is a black widget.
     var defaultVariantID: UUID?
 
-    /// The automatic rotation policy compiled with this design. Optional so
-    /// builds from before clip rotation still decode and simply stay manual.
-    var randomClipSchedule: RandomClipSchedule?
+    /// Whole-clip segments compiled directly into `fontFamilyBase`.
+    var clipProgram: [ClipProgram.Segment]? = nil
 
-    var effectiveRandomClipSchedule: RandomClipSchedule { randomClipSchedule ?? .off }
+    var hasShuffledClipProgram: Bool { !(clipProgram?.isEmpty ?? true) }
 
     /// What to call the primary, ready to show.
     var primaryClipTitle: String { primaryClipName ?? "Standard" }

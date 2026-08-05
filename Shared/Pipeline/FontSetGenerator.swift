@@ -9,6 +9,7 @@ enum GeneratorError: Error, CustomStringConvertible {
     case payloadTooLarge(estimated: Int, limit: Int)
     case laneWriteFailed(lane: Int, path: String, underlying: Error)
     case variantFailed(name: String, underlying: Error)
+    case clipProgramImpossible
 
     var description: String {
         switch self {
@@ -25,6 +26,8 @@ enum GeneratorError: Error, CustomStringConvertible {
             "generate: could not write lane \(lane) to \(path): \(underlying)"
         case .variantFailed(let name, let underlying):
             "generate: variant \"\(name)\" failed: \(underlying)"
+        case .clipProgramImpossible:
+            "generate: these complete clip lengths cannot fill the animation cycle without cutting or immediately repeating a clip"
         }
     }
 }
@@ -129,6 +132,15 @@ struct FontSetGenerator {
         // previous one just wrote.
         try store.clearFonts(for: design.id)
 
+        let clipCount = design.variants.count + 1
+        let shuffledFrameCount: Int? = design.clipPlaybackMode == .shuffled && clipCount > 1
+            && spec.totalFrames.isMultiple(of: clipCount)
+            ? spec.totalFrames / clipCount
+            : nil
+        if design.clipPlaybackMode == .shuffled, clipCount > 1, shuffledFrameCount == nil {
+            throw GeneratorError.clipProgramImpossible
+        }
+
         // The primary clip is the default variant, and the only one that
         // writes the wallpapers - variants differ inside the widget frame, and
         // the wallpaper is everything outside it.
@@ -140,10 +152,12 @@ struct FontSetGenerator {
             source: store.sourceVideoURL(for: design),
             familyBase: design.fontFamilyBase,
             variantID: nil,
+            programFrameCount: shuffledFrameCount,
             onStage: onStage
         )
 
         var builtVariants: [BuildManifest.VariantBuild] = []
+        var clipBuilds: [(id: UUID?, build: ClipBuild)] = [(nil, primary)]
         for variant in design.variants {
             try Task.checkCancellation()
             onStage(.buildingVariant(name: variant.name))
@@ -156,6 +170,7 @@ struct FontSetGenerator {
                     source: store.variantClipURL(for: design.id, name: variant.sourceVideoName),
                     familyBase: design.fontFamilyBase(for: variant),
                     variantID: variant.id,
+                    programFrameCount: shuffledFrameCount,
                     onStage: onStage
                 )
                 builtVariants.append(.init(
@@ -165,6 +180,7 @@ struct FontSetGenerator {
                     totalFontBytes: result.totalBytes,
                     loopFrameCount: result.loopFrameCount
                 ))
+                clipBuilds.append((variant.id, result))
             } catch is CancellationError {
                 // Rethrown bare: wrapped in `variantFailed` a stopped build
                 // would be reported as a crash in whichever clip it reached.
@@ -174,6 +190,44 @@ struct FontSetGenerator {
                 // large" without a name points at the wrong one four times
                 // out of five.
                 throw GeneratorError.variantFailed(name: variant.name, underlying: error)
+            }
+        }
+
+        var program: [ClipProgram.Segment]?
+        var primaryBytes = primary.totalBytes
+        if design.clipPlaybackMode == .shuffled, clipBuilds.count > 1 {
+            program = ClipProgram.shuffled(
+                clips: clipBuilds.map { .init(id: $0.id, frameCount: $0.build.loopFrameCount) },
+                totalFrames: spec.totalFrames,
+                seed: design.id
+            )
+            guard let program else { throw GeneratorError.clipProgramImpossible }
+            do {
+                let framesByID = Dictionary(uniqueKeysWithValues: clipBuilds.map { ($0.id, $0.build.encodedFrames) })
+                let programmedFrames = program.flatMap { segment -> [String] in
+                    Array((framesByID[segment.clipID] ?? []).prefix(segment.frameCount))
+                }
+                primaryBytes = try await writeFonts(
+                    encodedFrames: programmedFrames,
+                    familyBase: design.fontFamilyBase,
+                    spec: spec,
+                    crop: crop,
+                    templateURL: templateURL,
+                    designID: design.id,
+                    onStage: onStage
+                )
+                let programmedPreview = store.programPreviewVideoURL(for: design.id)
+                try await ProgramPreviewWriter(framesPerSecond: spec.framesPerSecond).write(
+                    segments: program,
+                    source: { clipID in
+                        clipID.map { store.previewVideoURL(for: design.id, variant: $0) }
+                            ?? store.previewVideoURL(for: design.id)
+                    },
+                    to: programmedPreview
+                )
+                let ordinaryPreview = store.previewVideoURL(for: design.id)
+                try FileManager.default.removeItem(at: ordinaryPreview)
+                try FileManager.default.moveItem(at: programmedPreview, to: ordinaryPreview)
             }
         }
 
@@ -188,7 +242,7 @@ struct FontSetGenerator {
             widgetRect: design.widgetRect,
             screenSize: DeviceGeometry.screenPixelSize,
             wallpaperName: "wallpaper.png",
-            totalFontBytes: primary.totalBytes,
+            totalFontBytes: primaryBytes,
             builtAt: Date(),
             backdropRect: primary.bakedBackdrop,
             tiles: design.tiles,
@@ -205,7 +259,7 @@ struct FontSetGenerator {
             defaultVariantID: builtVariants.contains { $0.id == design.defaultVariantID }
                 ? design.defaultVariantID
                 : nil,
-            randomClipSchedule: design.randomClipSchedule
+            clipProgram: program
         )
         try store.save(manifest)
 
@@ -221,6 +275,7 @@ struct FontSetGenerator {
         let totalBytes: Int
         let loopFrameCount: Int
         let bakedBackdrop: CGRect?
+        let encodedFrames: [String]
     }
 
     /// A variant's loop, sized to its own clip - capped at the natural length,
@@ -248,6 +303,7 @@ struct FontSetGenerator {
         source: URL,
         familyBase: String,
         variantID: UUID?,
+        programFrameCount: Int?,
         onStage: @Sendable @escaping (Stage) -> Void
     ) async throws -> ClipBuild {
         onStage(.decoding(progress: 0))
@@ -266,28 +322,41 @@ struct FontSetGenerator {
 
         // A variant keeps its own length. The clips need not match: each loop
         // is sized to its own clip the way `retuneLoop` sizes the primary's.
+        let summary = programFrameCount == nil && variantID == nil ? nil : try await extractor.summary()
         let loopFrameCount: Int
-        if variantID == nil {
+        if let programFrameCount {
+            loopFrameCount = programFrameCount
+        } else if variantID == nil {
             loopFrameCount = design.loopFrameCount
         } else {
-            let summary = try await extractor.summary()
             loopFrameCount = Self.variantLoopLength(
-                duration: summary.duration,
+                duration: summary?.duration ?? 0,
                 spec: spec,
                 playbackSpeed: design.playbackSpeed
             )
         }
 
+        // A shuffled bag gives every clip an equal share of the fixed table.
+        // Sampling its complete duration into that share changes only playback
+        // speed; dimensions, output FPS and JPEG quality remain unchanged.
+        let samplingSpeed = programFrameCount.map { count in
+            (summary?.duration ?? design.sourceDuration) * Double(spec.framesPerSecond) / Double(count)
+        } ?? design.playbackSpeed
+
         let frames = try await extractor.composedFrames(
             startFrame: variantID == nil ? design.loopStartFrame : 0,
             count: loopFrameCount,
             frameRate: spec.framesPerSecond,
-            speed: design.playbackSpeed,
+            speed: samplingSpeed,
             progress: { onStage(.decoding(progress: $0)) }
         )
 
         onStage(.analysing)
-        let encoder = FrameEncoder(crop: crop, quality: design.jpegQuality)
+        let encoder = FrameEncoder(
+            crop: crop,
+            quality: design.jpegQuality,
+            widgetRect: design.widgetRect
+        )
 
         onStage(.encoding(progress: 0))
         let encodedFrames = try encoder.encodedFrames(frames)
@@ -395,15 +464,6 @@ struct FontSetGenerator {
                 originY: Int(backdropRect.minY),
                 widgetRect: design.widgetRect
             )
-            if EdgeCompensation.overlaps(crop, widgetRect: design.widgetRect) {
-                // Those rows are drawn from the glyphs rather than the backdrop,
-                // so the correction below cannot reach them and the line stays
-                // visible where the animation runs to the widget's edge.
-                Self.logger.warning("""
-                the animated crop reaches the widget's edge; the top or bottom line \
-                will still show across \(Int(crop.width))px of it
-                """)
-            }
             // Lossless whenever lossless is also the smaller file, which a flat
             // background is. The quality below only decides the other case: 0.95
             // rather than 0.9 because the correction above is a step of up to 79
@@ -435,6 +495,41 @@ struct FontSetGenerator {
         clip done family=\(familyBase, privacy: .public) \
         loop=\(loopFrameCount) bytes=\(totalBytes) estimated=\(budget.estimatedTotalBytes)
         """)
-        return ClipBuild(totalBytes: totalBytes, loopFrameCount: loopFrameCount, bakedBackdrop: bakedBackdrop)
+        return ClipBuild(
+            totalBytes: totalBytes,
+            loopFrameCount: loopFrameCount,
+            bakedBackdrop: bakedBackdrop,
+            encodedFrames: encodedFrames
+        )
+    }
+
+    private func writeFonts(
+        encodedFrames: [String],
+        familyBase: String,
+        spec: TimerFontSpec,
+        crop: CGRect,
+        templateURL: URL,
+        designID: UUID,
+        onStage: @Sendable @escaping (Stage) -> Void
+    ) async throws -> Int {
+        let builder = try LaneFontBuilder(
+            templateData: try Data(contentsOf: templateURL),
+            spec: spec,
+            factory: SVGGlyphFactory(cropRect: crop, screenSize: DeviceGeometry.screenPixelSize)
+        )
+        var totalBytes = 0
+        for lane in 0 ..< spec.laneCount {
+            onStage(.writingFonts(completed: lane, total: spec.laneCount))
+            let data = try builder.font(lane: lane, familyBase: familyBase, encodedFrames: encodedFrames)
+            try data.write(
+                to: store.fontURL(for: designID, familyBase: familyBase, lane: lane),
+                options: DesignStore.writingOptions
+            )
+            totalBytes += data.count
+            try Task.checkCancellation()
+            await Task.yield()
+        }
+        onStage(.writingFonts(completed: spec.laneCount, total: spec.laneCount))
+        return totalBytes
     }
 }
