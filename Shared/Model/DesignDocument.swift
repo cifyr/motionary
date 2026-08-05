@@ -449,6 +449,10 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     /// bundle, so which one leads is a name in the manifest, not a re-encode.
     var defaultVariantID: UUID?
 
+    /// Optional automatic rotation among the primary clip and its variants.
+    /// Stored with the design so a rebuild cannot silently turn it off.
+    var randomClipSchedule: RandomClipSchedule = .off
+
     /// What the design's own clip is called in a list of clips.
     ///
     /// Its own file's name when nothing has been typed, the same way an
@@ -617,6 +621,7 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         variants = try container.decodeIfPresent([ClipVariant].self, forKey: .variants) ?? []
         primaryClipName = try container.decodeIfPresent(String.self, forKey: .primaryClipName)
         defaultVariantID = try container.decodeIfPresent(UUID.self, forKey: .defaultVariantID)
+        randomClipSchedule = try container.decodeIfPresent(RandomClipSchedule.self, forKey: .randomClipSchedule) ?? .off
         grid = try container.decodeIfPresent(WidgetGrid.self, forKey: .grid) ?? WidgetGrid()
         snapEnabled = try container.decodeIfPresent(Bool.self, forKey: .snapEnabled) ?? true
         backgroundName = try container.decodeIfPresent(String.self, forKey: .backgroundName)
@@ -721,6 +726,12 @@ struct BuildManifest: Codable, Equatable, Sendable {
     /// design's own. Written only when that variant actually built - a default
     /// pointing at fonts the bundle does not carry is a black widget.
     var defaultVariantID: UUID?
+
+    /// The automatic rotation policy compiled with this design. Optional so
+    /// builds from before clip rotation still decode and simply stay manual.
+    var randomClipSchedule: RandomClipSchedule?
+
+    var effectiveRandomClipSchedule: RandomClipSchedule { randomClipSchedule ?? .off }
 
     /// What to call the primary, ready to show.
     var primaryClipTitle: String { primaryClipName ?? "Standard" }

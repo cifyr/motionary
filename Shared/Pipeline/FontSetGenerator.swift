@@ -204,7 +204,8 @@ struct FontSetGenerator {
             // which is the failure this project can least afford.
             defaultVariantID: builtVariants.contains { $0.id == design.defaultVariantID }
                 ? design.defaultVariantID
-                : nil
+                : nil,
+            randomClipSchedule: design.randomClipSchedule
         )
         try store.save(manifest)
 

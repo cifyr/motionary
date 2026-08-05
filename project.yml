@@ -156,6 +156,7 @@ targets:
       - Shared/Pipeline
       - Shared/SFNT
       - path: Shared/Model/DesignDocument.swift
+      - path: Shared/Model/RandomClipSchedule.swift
       - path: Shared/Storage/DesignStore.swift
       - path: Shared/Model/DeviceGeometry.swift
       - path: Shared/Model/TimerFontSpec.swift

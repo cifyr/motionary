@@ -1581,6 +1581,18 @@ struct LayoutEditor: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Picker("Random clip", selection: $design.randomClipSchedule) {
+                    ForEach(RandomClipSchedule.allCases, id: \.self) { schedule in
+                        Text(schedule.title).tag(schedule)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Text(design.randomClipSchedule.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             // The design's own clip is in the list because it is one of the
