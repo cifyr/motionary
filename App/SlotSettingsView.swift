@@ -34,14 +34,23 @@ struct SlotSettingsView: View {
                         }
                         .pickerStyle(.inline)
                         .labelsHidden()
+                        .disabled(manifest.effectiveRandomClipSchedule != .off)
                     } header: {
                         Text("Animation")
                     } footer: {
-                        Text("""
-                        The same design with a different clip in the animated \
-                        area. While editing, swiping sideways anywhere but an \
-                        icon steps through these too.
-                        """)
+                        if manifest.effectiveRandomClipSchedule == .off {
+                            Text("""
+                            The same design with a different clip in the animated \
+                            area. While editing, swiping sideways anywhere but an \
+                            icon steps through these too.
+                            """)
+                        } else {
+                            Text("""
+                            This design chooses a random animation \
+                            \(manifest.effectiveRandomClipSchedule.title.lowercased()). \
+                            Turn Random clip off in Studio to choose one here.
+                            """)
+                        }
                     }
                 }
 

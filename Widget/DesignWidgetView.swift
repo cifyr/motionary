@@ -18,7 +18,7 @@ struct DesignWidgetView: View {
     let entry: DesignEntry
 
     var body: some View {
-        content
+        scheduledContent
             .background {
                 GeometryReader { geometry in
                     Color.clear.onAppear { Self.lastRenderedSize = geometry.size }
@@ -36,6 +36,21 @@ struct DesignWidgetView: View {
             .widgetURL(BackgroundTap.widgetDestination)
     }
 
+    /// Widget timelines are sparse, so this asks for a render at the next
+    /// deterministic rotation boundary rather than relying on whichever of
+    /// the app or extension happened to wake first.
+    @ViewBuilder
+    private var scheduledContent: some View {
+        if let manifest = PrebuiltDesign.selected()?.manifest,
+           let first = RandomClipRotation.nextTransition(after: Date(), in: manifest) {
+            TimelineView(.periodic(from: first, by: RandomClipRotation.interval(for: manifest))) { context in
+                content(at: context.date)
+            }
+        } else {
+            content(at: Date())
+        }
+    }
+
     /// Where a renderable design came from, and everything needed to draw it.
     private struct Source {
         let manifest: BuildManifest
@@ -47,7 +62,7 @@ struct DesignWidgetView: View {
     }
 
     @ViewBuilder
-    private var content: some View {
+    private func content(at date: Date) -> some View {
         if EdgeLab.isEnabled {
             // Filled to the widget's own bounds rather than cut from the screen
             // composition: the question it answers is what the system does to
@@ -55,7 +70,7 @@ struct DesignWidgetView: View {
             EdgeLabView()
         } else if FontLab.isEnabled, let lab = lab() {
             lab
-        } else if let source = bundled() {
+        } else if let source = bundled(at: date) {
             let _ = record(source: source)
             // The phone's slot choices, applied at render time: the occupant is
             // live SwiftUI over the frozen animation, so it is the one part of
@@ -158,7 +173,7 @@ struct DesignWidgetView: View {
     /// because its fonts were never bundled, and deaf to switching, because the
     /// selected id never matched anything in the store and the fallback always
     /// returned the same stale design.
-    private func bundled() -> Source? {
+    private func bundled(at date: Date) -> Source? {
         // Whichever the app last chose, so the Home Screen follows a swipe.
         guard let entry = PrebuiltDesign.selected(), var manifest = entry.manifest else { return nil }
         var backdropURL = entry.backdropURL
@@ -167,7 +182,7 @@ struct DesignWidgetView: View {
         // family and backdrop the same composition draws. Guarded on the
         // fonts actually being bundled: a stale choice must degrade to the
         // primary clip, not to a widget whose lanes resolve and draw nothing.
-        if let variant = VariantChoice.resolved(in: manifest),
+        if let variant = VariantChoice.resolved(in: manifest, at: date),
            PrebuiltDesign.fontsAreBundled(familyBase: variant.fontFamilyBase) {
             manifest.fontFamilyBase = variant.fontFamilyBase
             manifest.totalFontBytes = variant.totalFontBytes

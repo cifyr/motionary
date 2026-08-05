@@ -126,7 +126,18 @@ struct HomeView: View {
         note = next.name
     }
 
+    @ViewBuilder
     private func composition(entry: PrebuiltDesign.Entry, manifest: BuildManifest) -> some View {
+        if let first = RandomClipRotation.nextTransition(after: Date(), in: manifest) {
+            TimelineView(.periodic(from: first, by: RandomClipRotation.interval(for: manifest))) { context in
+                composition(entry: entry, manifest: manifest, at: context.date)
+            }
+        } else {
+            composition(entry: entry, manifest: manifest, at: Date())
+        }
+    }
+
+    private func composition(entry: PrebuiltDesign.Entry, manifest: BuildManifest, at date: Date) -> some View {
         let spec = TimerFontSpec(laneCount: manifest.laneCount, framesPerSecond: manifest.framesPerSecond)
         // The same slot choices the widget applies, so the app never shows a
         // different set of apps than the Home Screen it imitates. slotsEdition
@@ -139,7 +150,7 @@ struct HomeView: View {
         // The chosen clip variant's preview; the wallpaper stays the design's,
         // because variants only differ inside the widget frame. The loop is
         // the variant's own - lengths need not match across variants.
-        let variant = VariantChoice.resolved(in: manifest)
+        let variant = VariantChoice.resolved(in: manifest, at: date)
         let loop = variant?.loopFrameCount ?? manifest.loopFrameCount
         // Blanked slots come back while editing: one that draws nothing would
         // otherwise be unreachable, and blanking it would be a one-way door.
