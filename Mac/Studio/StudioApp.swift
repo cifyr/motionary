@@ -289,12 +289,25 @@ struct StudioView: View {
                 .id(ready.design.id)
             } else {
                 ScrollView {
-                    workColumn.padding(24)
+                    workColumn
+                        .padding(24)
+                        .background(
+                            StudioTheme.panel.opacity(0.96),
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(StudioTheme.headerEdge, lineWidth: 1)
+                        }
+                        .padding(28)
                 }
+                .background(StudioTheme.canvasBackground)
                 .frame(minWidth: 480)
             }
         }
         .frame(minWidth: 880, minHeight: 700)
+        .preferredColorScheme(.dark)
+        .tint(StudioTheme.accent)
         // Escape stops a run wherever the focus happens to be.
         .onExitCommand { stopBuild() }
         .task {
@@ -326,6 +339,10 @@ struct StudioView: View {
                 }
             }
             .padding(20)
+            .foregroundStyle(StudioTheme.text)
+            .background(StudioTheme.panel)
+            .preferredColorScheme(.dark)
+            .tint(StudioTheme.accent)
             .onAppear { renamedTo = design.name }
         }
     }
@@ -344,9 +361,11 @@ struct StudioView: View {
             if let wallpaper {
                 HStack(spacing: 12) {
                     Button("Save wallpaper...") { exportWallpaper(wallpaper) }
+                        .buttonStyle(.studio)
                     Button("Show in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([wallpaper])
                     }
+                    .buttonStyle(.studio)
                 }
             }
             if let failure { message(failure, tint: .red) }
@@ -365,19 +384,20 @@ struct StudioView: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    Text("Designs").font(.headline)
+                    StudioTheme.eyebrow("Designs")
+                        .foregroundStyle(StudioTheme.textBright)
                     Text("\(saved.count)")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(StudioTheme.monoSmall).foregroundStyle(StudioTheme.accent)
                         .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(.secondary.opacity(0.15), in: Capsule())
+                        .background(StudioTheme.accent.opacity(0.12), in: Capsule())
                     Spacer()
-                    Button("Import...") { importDesign() }.buttonStyle(.link)
+                    Button("Import...") { importDesign() }.buttonStyle(.studioCompact)
                 }
                 // Only once the list is long enough to need it: a filter field
                 // over four designs is furniture.
                 if saved.count > 6 {
                     TextField("Filter", text: $designFilter)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(StudioFieldStyle())
                 }
             }
             .padding(.horizontal, 12)
@@ -402,6 +422,8 @@ struct StudioView: View {
                     }
                 }
                 .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
+                .background(StudioTheme.panel)
 
                 if filteredDesigns.isEmpty, !designFilter.isEmpty {
                     Text("Nothing matches \"\(designFilter)\".")
@@ -410,11 +432,13 @@ struct StudioView: View {
                 }
             }
 
-            Divider()
+            Rectangle().fill(StudioTheme.divider).frame(height: 1)
             Text("Starred designs are compiled into the app, and the phone switches between them. About 29MB each.")
-                .font(.caption2).foregroundStyle(.secondary)
+                .font(StudioTheme.monoSmall).foregroundStyle(StudioTheme.textDim)
                 .padding(12)
         }
+        .foregroundStyle(StudioTheme.text)
+        .background(StudioTheme.panel)
         .disabled(isBusy)
     }
 
@@ -424,7 +448,7 @@ struct StudioView: View {
                 toggleStar(design)
             } label: {
                 Image(systemName: design.isStarred ? "star.fill" : "star")
-                    .foregroundStyle(design.isStarred ? .yellow : .secondary)
+                    .foregroundStyle(design.isStarred ? StudioTheme.accent : StudioTheme.textDim)
             }
             .buttonStyle(.plain)
             .help("Compile this design into the app")
@@ -441,7 +465,7 @@ struct StudioView: View {
                         // The editor is a pane now, so the row is the only
                         // thing saying which design is in it.
                         .fontWeight(prepared?.design.id == design.id ? .semibold : .regular)
-                        .foregroundStyle(prepared?.design.id == design.id ? Color.accentColor : .primary)
+                        .foregroundStyle(prepared?.design.id == design.id ? StudioTheme.accent : StudioTheme.text)
                     HStack(spacing: 6) {
                         Text(count(design.tiles.count, "app"))
                         if !design.assets.isEmpty {
@@ -451,7 +475,7 @@ struct StudioView: View {
                         Text("·")
                         Text(design.updatedAt.formatted(date: .abbreviated, time: .shortened))
                     }
-                    .font(.caption2).foregroundStyle(.secondary)
+                    .font(StudioTheme.monoSmall).foregroundStyle(StudioTheme.textDim)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -473,9 +497,13 @@ struct StudioView: View {
             Button { duplicate(design) } label: { Image(systemName: "plus.square.on.square") }
                 .buttonStyle(.plain).help("Duplicate")
         }
-        .foregroundStyle(.secondary)
+        .foregroundStyle(StudioTheme.textSecondary)
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
+        .background(
+            prepared?.design.id == design.id ? StudioTheme.accent.opacity(0.1) : .clear,
+            in: RoundedRectangle(cornerRadius: StudioTheme.radius, style: .continuous)
+        )
         .contentShape(Rectangle())
         .contextMenu {
             Button(design.isStarred ? "Unstar" : "Star") { toggleStar(design) }
@@ -597,11 +625,15 @@ struct StudioView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Motionary Studio").font(.title2.bold())
+        VStack(alignment: .leading, spacing: 6) {
+            StudioTheme.eyebrow("Build workspace")
+                .foregroundStyle(StudioTheme.accent)
+            Text("Motionary Studio")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(StudioTheme.textBright)
             Text("A clip becomes a Home Screen widget. The fonts have to be compiled into the app, so this builds and installs it.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+                .font(StudioTheme.body)
+                .foregroundStyle(StudioTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -609,21 +641,22 @@ struct StudioView: View {
     private var dropTarget: some View {
         RoundedRectangle(cornerRadius: 12, style: .continuous)
             .strokeBorder(
-                targeting ? Color.accentColor : Color.secondary.opacity(0.4),
+                targeting ? StudioTheme.accent : StudioTheme.controlEdge,
                 style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
             )
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(targeting ? Color.accentColor.opacity(0.08) : Color.clear)
+                    .fill(targeting ? StudioTheme.accent.opacity(0.1) : StudioTheme.well.opacity(0.55))
             )
             .frame(height: 96)
             .overlay {
                 VStack(spacing: 6) {
                     Image(systemName: source == nil ? "square.and.arrow.down" : "film")
                         .font(.title2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(targeting ? StudioTheme.accent : StudioTheme.textSecondary)
                     Text(source?.lastPathComponent ?? "Drop a video or GIF")
-                        .font(.callout)
+                        .font(StudioTheme.bodyStrong)
+                        .foregroundStyle(StudioTheme.text)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -662,6 +695,7 @@ struct StudioView: View {
                     }
                     .labelsHidden()
                     Button("Refresh") { refreshDevices() }
+                        .buttonStyle(.studioCompact)
                 }
             }
             GridRow {
@@ -675,22 +709,26 @@ struct StudioView: View {
                 }
             }
         }
+        .font(StudioTheme.body)
+        .foregroundStyle(StudioTheme.text)
         .disabled(isBusy)
     }
 
     private var actions: some View {
         HStack {
             Button(prepared == nil ? "Edit layout" : "Editing...") { start() }
+                .buttonStyle(.studioProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(source == nil || isBusy)
             if projectRoot == nil {
                 Button("Choose project folder") { chooseProject() }
+                    .buttonStyle(.studio)
             }
             Spacer()
             if !log.isEmpty {
                 Text(log.last ?? "")
                     .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(StudioTheme.textDim)
                     .lineLimit(1)
                     .truncationMode(.head)
             }
@@ -700,10 +738,12 @@ struct StudioView: View {
     private func progress(_ stage: StudioPipeline.Stage) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             ProgressView(value: stage.fraction)
+                .tint(StudioTheme.accent)
             HStack {
-                Text(stage.caption).font(.callout).foregroundStyle(.secondary)
+                Text(stage.caption).font(StudioTheme.body).foregroundStyle(StudioTheme.textSecondary)
                 Spacer()
                 Button("Stop") { stopBuild() }
+                    .buttonStyle(.studioCompact)
                     .help("Stop the build (esc)")
             }
         }
