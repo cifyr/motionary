@@ -22,9 +22,6 @@ struct DesignProvider: TimelineProvider {
         completion(DesignEntry(date: .now, designID: nil, isPreview: context.isPreview))
     }
 
-    /// `.never` is right again now that the design ships with the extension.
-    /// It was a trap only while the widget depended on something that might
-    /// arrive later; nothing here can change without a new build.
     func getTimeline(in context: Context, completion: @escaping (Timeline<DesignEntry>) -> Void) {
         WidgetRenderLog.append("""
         ask  timeline    preview=\(context.isPreview) family=\(context.family.rawValue) \
@@ -38,9 +35,13 @@ struct DesignProvider: TimelineProvider {
         // than bisecting routes to rediscover a type list WidgetKit already
         // printed.
         ArchiverErrorLog.capture()
+        let now = Date()
+        let manifest = PrebuiltDesign.selected()?.manifest
+        let policy = manifest.flatMap { RandomClipRotation.nextTransition(after: now, in: $0) }
+            .map(TimelineReloadPolicy.after) ?? .never
         completion(Timeline(
-            entries: [DesignEntry(date: .now, designID: nil, isPreview: context.isPreview)],
-            policy: .never
+            entries: [DesignEntry(date: now, designID: nil, isPreview: context.isPreview)],
+            policy: policy
         ))
     }
 }

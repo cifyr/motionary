@@ -16,18 +16,14 @@ struct MotionaryApp: App {
         AudioSessionPolicy.configureForSilentPlayback()
 
         let arguments = ProcessInfo.processInfo.arguments
-        var changed = false
         if let routes = FontLab.launchRouteSelection(in: arguments), routes != FontLab.routeSelection {
             FontLab.routeSelection = routes
-            changed = true
         }
         if let wanted = FontLab.launchOverride(in: arguments), wanted != FontLab.isEnabled {
             FontLab.isEnabled = wanted
-            changed = true
         }
         if let wanted = EdgeLab.launchOverride(in: arguments), wanted != EdgeLab.isEnabled {
             EdgeLab.isEnabled = wanted
-            changed = true
         }
         // Switching designs is a swipe, which a test run cannot make without
         // driving somebody's screen. This is the same switch by argument, so
@@ -35,9 +31,11 @@ struct MotionaryApp: App {
         if let wanted = PrebuiltDesign.launchSelection(in: arguments),
            wanted != ActiveDesign.identifier {
             ActiveDesign.identifier = wanted
-            changed = true
         }
-        if changed { WidgetCenterBridge.reloadAll() }
+        // A fresh app launch is also the handoff after a Studio install. Ask
+        // WidgetKit for a new timeline here so a widget that was archived by
+        // the previous extension can immediately pick up its clip schedule.
+        WidgetCenterBridge.reloadAll()
     }
 
     @StateObject private var router = ExternalAppRouter()

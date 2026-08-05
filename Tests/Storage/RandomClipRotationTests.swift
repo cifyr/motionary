@@ -34,9 +34,22 @@ final class RandomClipRotationTests: XCTestCase {
         XCTAssertNil(RandomClipRotation.nextTransition(after: .now, in: manifest(schedule: .off, variants: [variant("A")])))
     }
 
-    func testLoopBoundaryUsesACommonClipBoundary() {
+    func testLoopBoundaryWaitsForTheCurrentClipToEnd() throws {
         let subject = manifest(schedule: .loopBoundary, variants: [variant("A", frames: 240)])
-        XCTAssertEqual(RandomClipRotation.interval(for: subject), 30, accuracy: 0.001)
+        let now = Date(timeIntervalSince1970: 1_728_000_000)
+        let current = try XCTUnwrap(RandomClipRotation.choice(in: subject, at: now))
+        let next = try XCTUnwrap(RandomClipRotation.nextTransition(after: now, in: subject))
+        let expectedDuration = Double(
+            current.variantID
+                .flatMap { id in subject.builtVariants.first { $0.id == id }?.loopFrameCount }
+                ?? subject.loopFrameCount
+        )
+            / Double(subject.framesPerSecond)
+        XCTAssertEqual(next.timeIntervalSince(now), expectedDuration, accuracy: 0.001)
+        XCTAssertNotEqual(
+            current.id,
+            try XCTUnwrap(RandomClipRotation.choice(in: subject, at: next)).id
+        )
     }
 
     func testHourlyChoiceStaysStableUntilTheNextHour() throws {

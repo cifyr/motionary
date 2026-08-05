@@ -13,7 +13,7 @@ enum RandomClipSchedule: String, Codable, CaseIterable, Sendable {
     var title: String {
         switch self {
         case .off: "Off"
-        case .loopBoundary: "At a shared loop boundary"
+        case .loopBoundary: "When the current clip ends"
         case .hour: "On the hour"
         }
     }
@@ -21,7 +21,7 @@ enum RandomClipSchedule: String, Codable, CaseIterable, Sendable {
     var detail: String {
         switch self {
         case .off: "Choose a clip yourself."
-        case .loopBoundary: "Each change waits for a frame where every bundled clip is at its own loop boundary."
+        case .loopBoundary: "Each change waits until the clip currently playing has finished."
         case .hour: "The same random clip plays for the whole clock hour."
         }
     }
