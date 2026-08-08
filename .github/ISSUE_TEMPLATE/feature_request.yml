@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest a change
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Two things are settled and unlikely to change, because the platform
+        forces them — see
+        `docs/HOW-IT-WORKS.md`:
+
+        - designs cannot be made on the phone;
+        - adding a design means a rebuild and a reinstall.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that you cannot do now?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything you already tried

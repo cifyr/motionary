@@ -1,0 +1,77 @@
+name: Bug report
+description: Something built, installed, or drew incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: a black widget is almost always fonts that were not in the
+        extension's bundle. Regenerate the project (`xcodegen generate`), rebuild
+        and reinstall first — see
+        `docs/USAGE.md` → "The widget is black".
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Built a design from <clip>
+        2. Installed with ...
+        3. Placed the widget and ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did it go wrong
+      options:
+        - Motionary Studio (building a design)
+        - Installing to a device
+        - The iPhone app
+        - The widget on the Home Screen
+        - Tests or tooling
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Device and iOS version
+      description: This project is only calibrated for iPhone 17 Pro. Say so if yours is different.
+      placeholder: iPhone 17 Pro, iOS 26.5
+    validations:
+      required: true
+
+  - type: input
+    id: mac
+    attributes:
+      label: macOS and Xcode version
+      placeholder: macOS 15.2, Xcode 26.1
+    validations:
+      required: true
+
+  - type: textarea
+    id: report
+    attributes:
+      label: Widget status report
+      description: >
+        For anything the widget drew wrongly, paste the status report the app
+        keeps in the app group. It records lanes requested vs resolved, whether
+        the backdrop loaded, and the memory footprint at render time.
+      render: text
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Build output
+      description: If it failed to build or install, paste the relevant lines.
+      render: shell

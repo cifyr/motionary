@@ -1,8 +1,17 @@
 # Contributing
 
-Read [README.md](README.md) first — particularly the constraint about bundled
-fonts, because it explains why the project is shaped the way it is and why a
-design cannot be made on the phone.
+Read [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) first — particularly [the
+constraint about bundled
+fonts](docs/HOW-IT-WORKS.md#the-constraint-everything-follows-from), because it
+explains why the project is shaped the way it is and why a design cannot be made
+on the phone.
+
+Then [docs/PITFALLS.md](docs/PITFALLS.md), which is the list of things that have
+already cost someone a day.
+
+By taking part you agree to the [Code of Conduct](CODE_OF_CONDUCT.md), and you
+accept that contributions are distributed under the project's
+[licence](LICENSE) — which is source-available, not open source.
 
 ## Getting a build running
 

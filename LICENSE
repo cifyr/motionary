@@ -1,0 +1,63 @@
+Motionary — Source-Available License
+
+Copyright (c) 2026 Caden Warren. All rights reserved.
+
+This software is source-available. It is published so that it can be read,
+studied, built and run. It is not open source, and the permissions below are
+narrower than an open-source licence would grant.
+
+1. GRANT
+
+   You are permitted, free of charge, to:
+
+   a. view, read and study this source code;
+   b. clone or download the repository and build it;
+   c. run your own builds on hardware you own or control, for personal,
+      educational or research purposes;
+   d. modify the source for those same purposes;
+   e. submit modifications back to this project.
+
+2. RESTRICTIONS
+
+   Without prior written permission from the copyright holder, you may not:
+
+   a. redistribute this source, or any derivative of it, in source or binary
+      form, whether modified or unmodified;
+   b. publish or distribute a build of this software, including to any app
+      store, enterprise distribution channel, or public download;
+   c. use this software or any derivative of it for commercial purposes, or in
+      the provision of a commercial product or service;
+   d. remove or alter this licence, the copyright notice, or the attributions in
+      THIRD_PARTY_NOTICES.md.
+
+3. CONTRIBUTIONS
+
+   By submitting a contribution you agree that it may be distributed as part of
+   this project under this licence, and you confirm that you have the right to
+   submit it.
+
+4. THIRD-PARTY COMPONENTS
+
+   This licence covers only the original work in this repository. Components
+   authored by others are governed by their own licences and are not restricted
+   by the terms above. In particular, the shaping template and blink-mask fonts
+   in Resources/ derive from an MIT-licensed project, and icons fetched at
+   runtime carry the licences of their originating sets. See
+   THIRD_PARTY_NOTICES.md.
+
+   Third-party names, logos and marks referenced by the app catalogue and by
+   brand icon sets remain the property of their owners and are not licensed by
+   this project.
+
+5. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+For permissions beyond this licence, open an issue or contact the copyright
+holder.
