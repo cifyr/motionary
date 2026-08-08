@@ -1,26 +1,26 @@
-## What this changes
+# What this changes
 
-<!-- One or two sentences. The diff shows the rest. -->
+<!-- One or two sentences. Why, not what - the diff says what. -->
 
-## Why
-
-<!-- What was wrong, or what this makes possible. -->
-
-## How it was verified
+# How it was verified
 
 <!--
-Most bugs here are invisible from inside the code: a widget that draws nothing
-looks identical to a widget that is broken. Say what you actually looked at.
+"Builds" is not a verification for anything that draws. Say what you actually
+ran and on what:
+
+- [ ] Unit tests pass (`-only-testing:MotionaryTests`)
+- [ ] Motionary Studio builds
+- [ ] Looked at a rendered widget (Tools/edge-shot.sh or Tools/lab-shot.sh) - attach the shot
+- [ ] Rebuilt designs (`--rebuild-starred`) if this touches the pipeline, because
+      a design's backdrop and wallpaper are written at build time
+- [ ] Ran on a physical device, with the owner's say-so
+- [ ] Couldn't verify X because Y  <- say this rather than leaving it implied
 -->
 
-- [ ] `xcodebuild -scheme Motionary -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:MotionaryTests test`
-- [ ] Tests added or updated for the behaviour that changed
-- [ ] Looked at a rendered widget, if this touches rendering (`Tools/lab-shot.sh`)
-- [ ] Rebuilt designs with `--rebuild-starred`, if this touches the pipeline
-
-## Notes
+# Anything measured
 
 <!--
-Anything a reviewer would otherwise have to rediscover: a measurement, a number
-that came from hardware, a route that was tried and did not work.
+If you changed a number - a profile, a geometry, a threshold - say where it came
+from. A measured number belongs in a comment next to it; a guessed one belongs in
+this box so a reviewer knows it is a guess.
 -->
