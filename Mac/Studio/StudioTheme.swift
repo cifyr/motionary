@@ -1,57 +1,79 @@
+import AppKit
 import SwiftUI
 
-/// The layout editor's palette and type, taken from the design mockup
+/// The studio's palette and type, taken from the design mockup
 /// (`Layout Editor.dc.html`) rather than approximated.
 ///
-/// A fixed dark theme on purpose: the canvas is a phone screen, and a panel
-/// that changes weight with the system appearance changes what the artwork
-/// next to it looks like. The mockup names IBM Plex with `-apple-system` and
-/// `monospace` behind it, which is what this uses - the system faces are the
-/// design's own declared fallback.
+/// **The canvas is always dark; the shell follows the system.** A panel that
+/// changes weight with the appearance changes what the artwork next to it looks
+/// like, which is why this was fixed dark to begin with — but that argument is
+/// about the canvas, not about the library, the welcome window or the guide.
+/// Every editing tool that shows artwork does the same thing: a neutral,
+/// unchanging viewing environment, inside an app that otherwise behaves.
+///
+/// So `canvas*` below is deliberately not adaptive, and everything else is.
+/// Names are unchanged from the fixed-dark version on purpose: the editor alone
+/// has thousands of lines referring to them, and a rename would have been a
+/// far larger and riskier diff than a change of value.
 enum StudioTheme {
+    /// One colour that resolves against whichever appearance is drawing it.
+    private static func adaptive(dark: UInt32, light: UInt32) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(hex: dark)
+                : NSColor(hex: light)
+        })
+    }
+
     // MARK: - Accent
 
+    /// The amber is the identity and does not change with appearance. It clears
+    /// contrast on both grounds because it is only ever a fill or a mark, never
+    /// small text on white — `accentInk` is for that.
     static let accent = Color(hex: 0xeb9a3e)
-    static let accentEdge = Color(hex: 0xd3862c)
-    static let accentHover = Color(hex: 0xf2a84f)
+    static let accentEdge = adaptive(dark: 0xd3862c, light: 0xbe7622)
+    static let accentHover = adaptive(dark: 0xf2a84f, light: 0xf0a442)
     /// Text on an accent fill. Near-black brown, not white: the amber is light.
     static let onAccent = Color(hex: 0x1a1206)
+    /// The accent as *text*, which needs to darken on a light ground to stay
+    /// legible where the fill does not.
+    static let accentInk = adaptive(dark: 0xeb9a3e, light: 0x9c5f13)
 
     // MARK: - Surfaces
 
-    /// Behind the canvas, under the radial wash.
+    /// Behind the canvas, under the radial wash. Fixed: see the note above.
     static let canvasWell = Color(hex: 0x0f0f13)
     static let canvasGlowTop = Color(hex: 0x17171f)
     static let canvasGlowBottom = Color(hex: 0x0d0d11)
     /// Layers and inspector.
-    static let panel = Color(hex: 0x1a1a20)
-    static let panelEdge = Color(hex: 0x101014)
+    static let panel = adaptive(dark: 0x1a1a20, light: 0xfdfcfa)
+    static let panelEdge = adaptive(dark: 0x101014, light: 0xe4e0da)
     /// The inspector's own header strip.
-    static let headerFill = Color(hex: 0x1f1f26)
-    static let headerEdge = Color(hex: 0x26262e)
-    static let toolbarTop = Color(hex: 0x2a2a33)
-    static let toolbarBottom = Color(hex: 0x232329)
-    static let toolbarEdge = Color(hex: 0x141419)
-    static let statusFill = Color(hex: 0x16161b)
-    static let statusEdge = Color(hex: 0x24242c)
-    static let divider = Color(hex: 0x2c2c35)
+    static let headerFill = adaptive(dark: 0x1f1f26, light: 0xf6f3ef)
+    static let headerEdge = adaptive(dark: 0x26262e, light: 0xe4e0da)
+    static let toolbarTop = adaptive(dark: 0x2a2a33, light: 0xfbf9f6)
+    static let toolbarBottom = adaptive(dark: 0x232329, light: 0xf2efea)
+    static let toolbarEdge = adaptive(dark: 0x141419, light: 0xdcd7d0)
+    static let statusFill = adaptive(dark: 0x16161b, light: 0xf2efea)
+    static let statusEdge = adaptive(dark: 0x24242c, light: 0xe0dbd4)
+    static let divider = adaptive(dark: 0x2c2c35, light: 0xe4e0da)
     /// Sunken wells: search fields, the tab strip's trough.
-    static let well = Color(hex: 0x24242c)
+    static let well = adaptive(dark: 0x24242c, light: 0xefebe5)
 
     // MARK: - Controls
 
-    static let controlFill = Color(hex: 0x31313b)
-    static let controlEdge = Color(hex: 0x3e3e4a)
-    static let controlHover = Color(hex: 0x3c3c47)
-    static let controlText = Color(hex: 0xdcdce6)
+    static let controlFill = adaptive(dark: 0x31313b, light: 0xffffff)
+    static let controlEdge = adaptive(dark: 0x3e3e4a, light: 0xd7d2cb)
+    static let controlHover = adaptive(dark: 0x3c3c47, light: 0xf6f3ef)
+    static let controlText = adaptive(dark: 0xdcdce6, light: 0x2b2823)
 
     // MARK: - Text
 
-    static let textBright = Color(hex: 0xf2f2f7)
-    static let text = Color(hex: 0xdcdce6)
-    static let textSecondary = Color(hex: 0x8e8e9c)
-    static let textTertiary = Color(hex: 0x757582)
-    static let textDim = Color(hex: 0x63636f)
+    static let textBright = adaptive(dark: 0xf2f2f7, light: 0x14120f)
+    static let text = adaptive(dark: 0xdcdce6, light: 0x2b2823)
+    static let textSecondary = adaptive(dark: 0x8e8e9c, light: 0x6b6660)
+    static let textTertiary = adaptive(dark: 0x757582, light: 0x847e76)
+    static let textDim = adaptive(dark: 0x63636f, light: 0x9a948c)
 
     // MARK: - Metrics
 
@@ -74,6 +96,10 @@ enum StudioTheme {
     static let monoSmall = Font.system(size: 9.5, design: .monospaced)
     static let title = Font.system(size: 13, weight: .semibold)
 
+    /// Behind the library's cards. Adaptive, unlike the canvas: this is a room
+    /// the cards sit in, not a surface artwork is judged against.
+    static let libraryBackground = adaptive(dark: 0x121217, light: 0xf4f1ec)
+
     /// The canvas well's wash, matching the mockup's radial gradient.
     static var canvasBackground: some View {
         RadialGradient(
@@ -91,6 +117,17 @@ extension Color {
             red: Double((hex >> 16) & 0xFF) / 255,
             green: Double((hex >> 8) & 0xFF) / 255,
             blue: Double(hex & 0xFF) / 255
+        )
+    }
+}
+
+extension NSColor {
+    convenience init(hex: UInt32) {
+        self.init(
+            srgbRed: Double((hex >> 16) & 0xFF) / 255,
+            green: Double((hex >> 8) & 0xFF) / 255,
+            blue: Double(hex & 0xFF) / 255,
+            alpha: 1
         )
     }
 }

@@ -28,9 +28,24 @@ struct MotionaryStudioApp: App {
         Window("Motionary Studio", id: "studio") {
             StudioView()
         }
+        .commands { StudioCommands() }
         // Was .contentSize, which pinned the window to a fixed-width column.
         // The split view needs to be draggable to be worth having.
         .windowResizability(.contentMinSize)
+        // A first launch opens at a size the library is actually usable at.
+        // Without it the window inherits whatever frame was last restored,
+        // which after one bad build was 146x151 and stayed there.
+        .defaultSize(width: 1280, height: 900)
+
+        Window("Welcome to Motionary Studio", id: StudioHelp.welcomeWindow) {
+            WelcomeView()
+        }
+        .windowResizability(.contentSize)
+
+        Window("Motionary Studio Guide", id: StudioHelp.guideWindow) {
+            GuideView()
+        }
+        .defaultSize(width: 820, height: 560)
     }
 }
 
@@ -253,7 +268,33 @@ struct StudioView: View {
     /// The run in flight, kept so Escape can stop it.
     @State private var buildTask: Task<Void, Never>?
 
+    @Environment(\.openWindow) private var openWindow
+    @AppStorage(StudioHelp.seenWelcomeKey) private var hasSeenWelcome = false
+
+    /// The card selected on the home screen. Distinct from `prepared`: picking
+    /// a design is not the same as opening it, and a single click should not
+    /// throw you into the editor.
+    @State private var homeSelection: UUID?
+    /// Held rather than remade per redraw: the home draws a card per design and
+    /// each one asks the store where its picture lives.
+    ///
+    /// `openStore()`, not `DesignStore()`. The plain initialiser roots itself in
+    /// the app group, which the studio has no entitlement for — and rather than
+    /// failing it quietly creates an empty container somewhere else, so every
+    /// card came back "no clip yet, not built" while the sidebar beside it
+    /// listed the same designs perfectly well.
+    @State private var library: DesignStore? = try? StudioPipeline.openStore()
+
     private var isBusy: Bool { stage != nil }
+
+    /// The designs that ship with Studio.
+    ///
+    /// Starred and built is what "compiled into the app" already meant, so the
+    /// starters are not a new concept bolted on — they are that rule, named.
+    /// Held as a set because every card asks.
+    private var starterIDs: Set<UUID> {
+        Set(saved.filter(\.isStarred).map(\.id))
+    }
 
     /// Library on the left, the design being worked on to the right.
     ///
@@ -287,7 +328,10 @@ struct StudioView: View {
                 // @State, and without this SwiftUI would reuse the view when a
                 // second design is opened and go on showing the first one's.
                 .id(ready.design.id)
-            } else {
+            } else if source != nil || isBusy {
+                // A clip is in hand, or a run is going: the workspace is what
+                // there is to say. Otherwise the library is a better landing
+                // place than an empty drop target.
                 ScrollView {
                     workColumn
                         .padding(24)
@@ -303,10 +347,33 @@ struct StudioView: View {
                 }
                 .background(StudioTheme.canvasBackground)
                 .frame(minWidth: 480)
+            } else if let library {
+                StudioHome(
+                    designs: saved,
+                    starterIDs: starterIDs,
+                    store: library,
+                    model: model,
+                    selection: $homeSelection,
+                    onOpen: { reopen($0) },
+                    onDuplicate: { duplicate($0) },
+                    onRename: {
+                        renaming = $0
+                        renamedTo = $0.name
+                    },
+                    onDelete: { deleting = $0 },
+                    onNew: { chooseFile() }
+                )
+                .frame(minWidth: 480)
+            } else {
+                ContentUnavailableView(
+                    "The design library is unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text("Studio could not open its container in Application Support.")
+                )
+                .frame(minWidth: 480)
             }
         }
         .frame(minWidth: 880, minHeight: 700)
-        .preferredColorScheme(.dark)
         .tint(StudioTheme.accent)
         // Escape stops a run wherever the focus happens to be.
         .onExitCommand { stopBuild() }
@@ -314,6 +381,12 @@ struct StudioView: View {
             refreshDevices()
             StudioPipeline.migrateLegacyDesigns()
             saved = StudioPipeline.saved()
+            // A greeting, not a thing to dismiss every launch.
+            if !hasSeenWelcome { openWindow(id: StudioHelp.welcomeWindow) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .studioNewDesign)) { _ in
+            guard !isBusy else { return }
+            chooseFile()
         }
         .alert(item: $deleting) { design in
             Alert(
@@ -341,7 +414,6 @@ struct StudioView: View {
             .padding(20)
             .foregroundStyle(StudioTheme.text)
             .background(StudioTheme.panel)
-            .preferredColorScheme(.dark)
             .tint(StudioTheme.accent)
             .onAppear { renamedTo = design.name }
         }
