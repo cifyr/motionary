@@ -394,6 +394,18 @@ That is a property of one font's substitution table, not of the mechanism.
 second in five or ten, without changing the file's length, and both resulting
 masks ship beside the original.
 
+**Periods that divide sixty can be written, since 2026-08-13.** The paragraph
+below describes how it used to be, and why: the generator *patched* the shipped
+table rather than building one, and the shipped table shares a single ligature
+set across all six coverage entries. `Tools/blink-font.py` now builds the lookup
+with fontTools - six sets, one per tens digit - so the tens digit can matter, and
+`Blnk15`, `Blnk20` and `Blnk30` ship beside the originals. A thirty-second mask
+is what lets several *whole* clips share one loop instead of each playing its
+opening, and it reads back correct on the phone: `mask=Blnk30-Regular period=30s
+solid=0,30`.
+
+The old constraint, and the failure that taught it:
+
 **Only periods that divide ten can be written.** The substitution's six coverage
 entries - one per tens digit - all point at the *same* ligature set in this font,
 because "solid on even seconds" depends only on the ones digit and the compiler

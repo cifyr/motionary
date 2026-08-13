@@ -9,17 +9,19 @@ import XCTest
 /// here is the choice: which mask a clip gets, and how many pictures that
 /// costs.
 final class BlinkPeriodTests: XCTestCase {
-    /// Every period has to divide *ten*, not sixty.
+    /// Every period has to divide sixty, because the substitution keys on the
+    /// timer's two seconds digits and those wrap there.
     ///
-    /// The substitution's six coverage entries - one per tens digit - all point
-    /// at one shared ligature set in this font, so the pattern can only depend
-    /// on the ones digit. A period of four or six or thirty needs the tens
-    /// digit to matter. Asked for one, the generator refuses; shipped anyway,
-    /// it produced a mask solid on nothing and a widget that drew black while
-    /// every report said ok.
-    func testEveryPeriodDividesTen() {
+    /// It used to have to divide *ten*. The generator patched one shared
+    /// ligature set - all six coverage entries, one per tens digit, pointed at
+    /// it - so the pattern could only depend on the ones digit, and asking for
+    /// thirty wrote the shared bytes six times over and produced a mask solid
+    /// on nothing: a black widget with every report saying ok. The generator
+    /// now builds six sets rather than patching one, so the tens digit can
+    /// matter, which is what a thirty-second loop needs.
+    func testEveryPeriodDividesSixty() {
         for period in FontSetGenerator.blinkPeriods {
-            XCTAssertEqual(10 % period.seconds, 0, "\(period.resource) needs the tens digit")
+            XCTAssertEqual(60 % period.seconds, 0, "\(period.resource) does not divide sixty")
             XCTAssertGreaterThanOrEqual(period.seconds, 2)
         }
         XCTAssertEqual(

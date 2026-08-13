@@ -59,10 +59,20 @@ struct FontSetGenerator {
     /// or thirty needs the tens digit to matter and cannot be written without
     /// rebuilding the table; asked for one anyway, the generator refuses rather
     /// than producing a mask that resolves, draws, and gates everything out.
+    /// Every period the substitution table can express, shortest first.
+    ///
+    /// Was 2, 5 and 10, because the generator patched one shared ligature set
+    /// and so could only write patterns that depend on the ones digit. It now
+    /// builds six sets, one per tens digit, so anything dividing 60 can be
+    /// written - which is what lets several whole clips share a loop instead of
+    /// each playing its opening.
     static let blinkPeriods: [(seconds: Int, resource: String)] = [
         (2, blinkFontResourceName),
         (5, "Blnk05-Regular"),
         (10, "Blnk10-Regular"),
+        (15, "Blnk15-Regular"),
+        (20, "Blnk20-Regular"),
+        (30, "Blnk30-Regular"),
     ]
 
     /// The shortest mask that covers a clip, because every second of period

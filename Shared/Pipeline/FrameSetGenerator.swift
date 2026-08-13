@@ -267,6 +267,7 @@ struct FrameSetGenerator {
         source: URL,
         isPrimary: Bool,
         count: Int,
+        speed: Double? = nil,
         onStage: @Sendable @escaping (Stage) -> Void
     ) async throws -> [CGImage] {
         let extractor = MediaFrameExtractor(
@@ -288,7 +289,7 @@ struct FrameSetGenerator {
             startFrame: isPrimary ? design.loopStartFrame : 0,
             count: max(1, count),
             frameRate: spec.framesPerSecond,
-            speed: design.playbackSpeed,
+            speed: speed ?? design.playbackSpeed,
             progress: { onStage(.decoding(progress: $0)) }
         )
     }
@@ -308,28 +309,32 @@ struct FrameSetGenerator {
     /// clip already repeats around the whole stack.
     private func programmedPictures(
         design: DesignDocument,
-        spec: TimerFontSpec,
+        fps: Int,
+        clips: [ProgramClip],
         program: [ClipProgram.Segment],
         onStage: @Sendable @escaping (Stage) -> Void
     ) async throws -> [CGImage] {
         var out: [CGImage] = []
         for segment in program {
             try Task.checkCancellation()
-            let source = segment.clipID
-                .flatMap { id in design.variants.first { $0.id == id } }
-                .map { store.variantClipURL(for: design.id, name: $0.sourceVideoName) }
-                ?? store.sourceVideoURL(for: design)
-            let cut = try await pictures(
-                design: design,
-                spec: spec,
-                source: source,
-                isPrimary: segment.clipID == nil,
-                count: segment.frameCount,
-                onStage: onStage
-            )
-            guard !cut.isEmpty else {
+            guard let clip = clips.first(where: { $0.id == segment.clipID }) else {
                 throw GeneratorError.emptyCrop(design: design.name)
             }
+            // The whole clip, fitted to its segment. `composedFrames` divides
+            // the sampling interval by `speed`, so `duration x fps / frames`
+            // walks the source end to end however many lanes it was given -
+            // which is what makes this play the clip out rather than cut it.
+            let speed = clip.duration * Double(fps) / Double(max(1, segment.frameCount))
+            let cut = try await pictures(
+                design: design,
+                spec: TimerFontSpec(laneCount: 1, framesPerSecond: fps),
+                source: clip.source,
+                isPrimary: segment.clipID == nil,
+                count: segment.frameCount,
+                speed: speed,
+                onStage: onStage
+            )
+            guard !cut.isEmpty else { throw GeneratorError.emptyCrop(design: design.name) }
             for index in 0 ..< segment.frameCount {
                 out.append(cut[index % cut.count])
             }
@@ -339,14 +344,70 @@ struct FrameSetGenerator {
 
     /// How the cycle is divided between the clips.
     ///
-    /// Evenly, with the remainder spread over the first few so the segments add
-    /// up to the whole stack exactly - a lane nobody drew into is a black flash
-    /// once per loop.
+    /// In proportion to how long each one runs, so every clip plays all the way
+    /// through rather than being cut to an equal share - three clips of 10.6,
+    /// 8.0 and 8.0 seconds are not thirds of anything. The largest remainders
+    /// take the leftover lanes so the segments add up to the whole stack
+    /// exactly: a lane nobody drew into is a black flash once per loop.
+    static func programShares(lanes: Int, weights: [Double]) -> [Int] {
+        guard lanes > 0, !weights.isEmpty else { return [] }
+        let total = weights.reduce(0, +)
+        guard total > 0 else { return programShares(lanes: lanes, clips: weights.count) }
+        // One lane each first, so a very short clip is never given none.
+        guard lanes >= weights.count else { return Array(repeating: 0, count: weights.count) }
+        var shares = weights.map { max(1, Int((Double(lanes) * $0 / total).rounded(.down))) }
+        var slack = lanes - shares.reduce(0, +)
+        let byRemainder = weights.indices.sorted {
+            let a = Double(lanes) * weights[$0] / total
+            let b = Double(lanes) * weights[$1] / total
+            return (a - a.rounded(.down)) > (b - b.rounded(.down))
+        }
+        var cursor = 0
+        while slack != 0 {
+            let index = byRemainder[cursor % byRemainder.count]
+            if slack > 0 {
+                shares[index] += 1; slack -= 1
+            } else if shares[index] > 1 {
+                shares[index] -= 1; slack += 1
+            }
+            cursor += 1
+        }
+        return shares
+    }
+
+    /// Equal shares, for clips whose lengths are not known.
     static func programShares(lanes: Int, clips: Int) -> [Int] {
         guard clips > 0, lanes > 0 else { return [] }
         let base = lanes / clips
         let remainder = lanes % clips
         return (0 ..< clips).map { base + ($0 < remainder ? 1 : 0) }
+    }
+
+    /// One clip in a shuffled programme, and how long it actually runs.
+    private struct ProgramClip {
+        let id: UUID?
+        let source: URL
+        /// Seconds of source material.
+        let duration: Double
+        /// Seconds it should occupy on screen, at the speed the design sets.
+        let wall: Double
+    }
+
+    private func programClips(design: DesignDocument, spec: TimerFontSpec) async -> [ProgramClip] {
+        var out: [ProgramClip] = []
+        let speed = max(0.01, design.playbackSpeed)
+        for (id, url) in [(UUID?.none, store.sourceVideoURL(for: design))]
+            + design.variants.map { ($0.id as UUID?, store.variantClipURL(for: design.id, name: $0.sourceVideoName)) }
+        {
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            guard let summary = try? await MediaFrameExtractor(
+                url: url, transform: design.mediaTransform
+            ).summary(), summary.duration > 0 else { continue }
+            out.append(ProgramClip(
+                id: id, source: url, duration: summary.duration, wall: summary.duration / speed
+            ))
+        }
+        return out
     }
 
     /// Everything a clip needs once its pictures exist: the artwork that shares
@@ -494,7 +555,7 @@ struct FrameSetGenerator {
         // clips are not separately selectable, and nothing else needs to know.
         if design.clipPlaybackMode == .shuffled, !design.variants.isEmpty,
            let manifest = try await buildShuffled(
-               design: design, spec: spec, crop: crop, plan: plan, onStage: onStage
+               design: design, spec: spec, crop: crop, onStage: onStage
            )
         {
             return manifest
@@ -623,53 +684,60 @@ struct FrameSetGenerator {
         design: DesignDocument,
         spec: TimerFontSpec,
         crop: CGRect,
-        plan: (period: Int, resource: String, frames: Int, framesPerSecond: Int),
         onStage: @Sendable @escaping (Stage) -> Void
     ) async throws -> BuildManifest? {
-        let usable = design.variants.filter {
-            FileManager.default.fileExists(
-                atPath: store.variantClipURL(for: design.id, name: $0.sourceVideoName).path
-            )
+        let clips = await programClips(design: design, spec: spec)
+        guard clips.count > 1 else {
+            Self.logger.warning("shuffle asked for but only \(clips.count) clip could be read; building one clip instead")
+            return nil
         }
-        let clipIDs: [UUID?] = [nil] + usable.map { $0.id as UUID? }
-        let shares = Self.programShares(lanes: plan.frames, clips: clipIDs.count)
-        guard clipIDs.count > 1, shares.allSatisfy({ $0 > 0 }) else {
-            Self.logger.warning("""
-            shuffle asked for on \(design.name, privacy: .public) but \(clipIDs.count) clips \
-            will not divide \(plan.frames) lanes; building one clip instead
-            """)
+
+        // The mask is chosen to hold every clip whole, which is the whole point
+        // of shuffling: three clips of 10.6, 8.0 and 8.0 seconds need thirty,
+        // and thirty is expressible now that each tens digit has its own
+        // ligature set. The frame rate is then whatever fits the lanes in the
+        // budget - 30s at 10fps is 300, against a ceiling of 320 photographed
+        // on the phone.
+        let wall = clips.reduce(0) { $0 + $1.wall }
+        let mask = FontSetGenerator.blinkPeriod(covering: wall)
+        let fps = max(1, min(spec.framesPerSecond, Self.laneBudget / mask.seconds))
+        let lanes = mask.seconds * fps
+        let shares = Self.programShares(lanes: lanes, weights: clips.map(\.wall))
+        guard shares.count == clips.count, shares.allSatisfy({ $0 > 0 }) else {
+            Self.logger.warning("\(clips.count) clips will not divide \(lanes) lanes; building one clip instead")
             return nil
         }
         guard let program = ClipProgram.shuffled(
-            clips: zip(clipIDs, shares).map { .init(id: $0, frameCount: $1) },
-            totalFrames: plan.frames,
+            clips: zip(clips, shares).map { .init(id: $0.id, frameCount: $1) },
+            totalFrames: lanes,
             seed: design.id
         ) else {
-            Self.logger.warning("no shuffled order fits \(plan.frames) lanes; building one clip instead")
+            Self.logger.warning("no shuffled order fits \(lanes) lanes; building one clip instead")
             return nil
         }
         Self.logger.info("""
-        shuffled \(program.count) segments over \(plan.frames) lanes: \
-        \(program.map { "\($0.frameCount)" }.joined(separator: "+"), privacy: .public)
+        shuffled \(program.count) clips over \(mask.seconds)s at \(fps)fps: \
+        \(zip(clips, shares).map { String(format: "%.1fs->%d", $0.wall, $1) }.joined(separator: " "), privacy: .public)
         """)
 
+        let programSpec = TimerFontSpec(laneCount: spec.laneCount, framesPerSecond: fps)
         let frames = try await programmedPictures(
-            design: design, spec: spec, program: program, onStage: onStage
+            design: design, fps: fps, clips: clips, program: program, onStage: onStage
         )
         let built = try await write(
-            frames: frames, design: design, spec: spec, crop: crop, variant: nil, onStage: onStage
+            frames: frames, design: design, spec: programSpec, crop: crop, variant: nil, onStage: onStage
         )
 
         let backdropRect = DesignArtWriter.backdropRect(widgetRect: design.widgetRect)
         // No `clipVariants`: with a programme there is nothing to switch
-        // between, and offering a switch that the widget ignores is how a
-        // stale choice used to survive a rebuild.
+        // between, and offering a switch the widget ignores is how a stale
+        // choice used to survive a rebuild.
         let manifest = BuildManifest(
             designID: design.id,
             buildGeneration: design.buildGeneration + 1,
             fontFamilyBase: design.fontFamilyBase,
-            laneCount: spec.laneCount,
-            framesPerSecond: spec.framesPerSecond,
+            laneCount: programSpec.laneCount,
+            framesPerSecond: fps,
             loopFrameCount: built.frameCount,
             animationCrop: crop,
             widgetRect: design.widgetRect,
@@ -679,7 +747,7 @@ struct FrameSetGenerator {
             builtAt: Date(),
             backdropRect: backdropRect.isNull ? nil : backdropRect,
             frameCount: built.frameCount,
-            maskPeriod: plan.period,
+            maskPeriod: mask.seconds,
             tiles: design.tiles,
             assets: design.assets,
             readouts: design.readouts,
@@ -690,7 +758,7 @@ struct FrameSetGenerator {
         try store.save(manifest)
         Self.logger.info("""
         shuffled build done design=\(design.id.uuidString, privacy: .public) \
-        clips=\(clipIDs.count) frames=\(built.frameCount) bytes=\(built.totalBytes)
+        clips=\(clips.count) period=\(mask.seconds)s fps=\(fps) frames=\(built.frameCount)
         """)
         return manifest
     }

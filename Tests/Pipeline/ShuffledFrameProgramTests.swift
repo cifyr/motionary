@@ -22,15 +22,41 @@ final class ShuffledFrameProgramTests: XCTestCase {
         }
     }
 
-    /// Spidey Swing, which is the design this was built for: three clips over a
-    /// ten-second stack at 32fps.
-    func testThreeClipsSplitTheTenSecondLoop() {
-        let shares = FrameSetGenerator.programShares(lanes: 320, clips: 3)
-        XCTAssertEqual(shares, [107, 107, 106])
-        for share in shares {
-            let seconds = Double(share) / 32
-            XCTAssertEqual(seconds, 3.33, accuracy: 0.02, "each clip gets about a third of ten seconds")
+    /// Spidey Swing, which is the design this was built for: clips of 10.6, 8.0
+    /// and 8.0 seconds over a thirty-second stack at 10fps.
+    ///
+    /// Split evenly they would get ten seconds each and the long one would be
+    /// cut - which is exactly what the first version did, and what it was
+    /// reported for. In proportion, every clip plays all the way through.
+    func testEachClipGetsRoomForTheWholeOfItself() {
+        let lengths = [10.6, 8.0, 8.0]
+        let shares = FrameSetGenerator.programShares(lanes: 300, weights: lengths)
+        XCTAssertEqual(shares, [120, 90, 90])
+        XCTAssertEqual(shares.reduce(0, +), 300)
+
+        // Every clip is stretched by the same factor, so nothing plays at a
+        // different speed from anything else - the stretch is what takes 26.6
+        // seconds of clip to a thirty-second loop with no gap at the end.
+        let stretch = zip(shares, lengths).map { Double($0) / 10 / $1 }
+        for factor in stretch {
+            XCTAssertEqual(factor, stretch[0], accuracy: 0.02)
+            XCTAssertEqual(factor, 30.0 / 26.6, accuracy: 0.02)
         }
+    }
+
+    /// Proportion must not starve a short clip: one lane is a frame, and zero
+    /// is a hole in the stack.
+    func testAVeryShortClipStillGetsALane() {
+        let shares = FrameSetGenerator.programShares(lanes: 300, weights: [29.0, 0.5, 0.5])
+        XCTAssertEqual(shares.reduce(0, +), 300)
+        XCTAssertTrue(shares.allSatisfy { $0 > 0 })
+    }
+
+    /// Weights that say nothing fall back to an even split rather than to a
+    /// stack of empty segments.
+    func testUnmeasurableClipsSplitEvenly() {
+        XCTAssertEqual(FrameSetGenerator.programShares(lanes: 300, weights: [0, 0, 0]).reduce(0, +), 300)
+        XCTAssertEqual(FrameSetGenerator.programShares(lanes: 0, weights: [1, 2]), [])
     }
 
     /// Asking for more clips than there are lanes cannot produce a segment of
