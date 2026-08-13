@@ -50,10 +50,31 @@ struct FrameSetGenerator {
     /// the whole cycle: every second of period costs `framesPerSecond` more
     /// pictures whether the clip fills them or not, and a second nothing was
     /// drawn into is a second of black once per loop.
+    /// The longest loop that has been seen to draw on real hardware.
+    ///
+    /// Two seconds, which is where this started. Longer masks are correct and
+    /// the widget archives them happily - it reports `ok` at 80 and 96 lanes -
+    /// but the picture is drawn by a separate process that this one cannot see
+    /// and does not log to, and above the two-second stack that process stops
+    /// producing a picture: WidgetKit asks for a timeline twice in four seconds
+    /// with no render either time, which is what it does when the renderer dies.
+    ///
+    /// Notably it survived 96 lanes this morning - with a mask that turned out
+    /// to gate everything out, so there was nothing to composite. The cost
+    /// arrived with the fix, not with the count.
+    ///
+    /// So this is a measured ceiling and the measurement is "two seconds
+    /// works". Raising it means measuring where the renderer actually stops,
+    /// not assuming - which is the mistake that put a black widget on a Home
+    /// Screen three times today.
+    static let provenLoopSeconds: TimeInterval = 2
+
     static func plan(for spec: TimerFontSpec, clipSeconds: TimeInterval)
         -> (period: Int, resource: String, frames: Int)
     {
-        let mask = FontSetGenerator.blinkPeriod(covering: clipSeconds)
+        let mask = FontSetGenerator.blinkPeriod(
+            covering: min(clipSeconds, provenLoopSeconds)
+        )
         return (mask.seconds, mask.resource, mask.seconds * spec.framesPerSecond)
     }
 
