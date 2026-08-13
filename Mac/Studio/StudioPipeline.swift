@@ -103,6 +103,29 @@ struct StudioPipeline: Sendable {
         store.root.deletingLastPathComponent().appendingPathComponent("Icons", isDirectory: true)
     }
 
+    /// The designs Studio ships with, by the names they were built under.
+    ///
+    /// Matched by name because they predate the flag that marks them. Only ever
+    /// consulted once per design: after the first run the flag is on disk, and
+    /// renaming one afterwards cannot un-starter it.
+    static let starterNames: Set<String> = ["Video Games", "Aethetic Photos", "Spidey Swing"]
+
+    /// Marks the shipped designs, once.
+    @discardableResult
+    static func markStarters() -> Int {
+        guard let store = try? openStore() else { return 0 }
+        var marked = 0
+        for design in store.loadAll() where !design.isStarter && starterNames.contains(design.name) {
+            var updated = design
+            updated.isStarter = true
+            // Not touched: flagging a design is not editing it, and the library
+            // sorts on updatedAt.
+            try? store.save(updated, touch: false)
+            marked += 1
+        }
+        return marked
+    }
+
     /// Brings designs over from the temp store the studio used to write to.
     ///
     /// Only the design and its source clip: the fonts, preview and wallpaper

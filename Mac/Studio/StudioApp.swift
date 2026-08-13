@@ -264,6 +264,13 @@ struct StudioView: View {
     @State private var designFilter = ""
     @State private var targeting = false
 
+    /// The job in flight, or the one that just finished and has not been
+    /// dismissed. Set for every long run so one of them can never be described
+    /// by whatever screen happens to be underneath it.
+    @State private var run: StudioRun?
+    /// Install all asks where it is going before it goes.
+    @State private var choosingInstall = false
+
     @State private var projectRoot: URL? = ProjectLocator.find()
     /// The run in flight, kept so Escape can stop it.
     @State private var buildTask: Task<Void, Never>?
@@ -287,13 +294,9 @@ struct StudioView: View {
 
     private var isBusy: Bool { stage != nil }
 
-    /// The designs that ship with Studio.
-    ///
-    /// Starred and built is what "compiled into the app" already meant, so the
-    /// starters are not a new concept bolted on — they are that rule, named.
-    /// Held as a set because every card asks.
+    /// The designs that ship with Studio. Held as a set because every card asks.
     private var starterIDs: Set<UUID> {
-        Set(saved.filter(\.isStarred).map(\.id))
+        Set(saved.filter(\.isStarter).map(\.id))
     }
 
     /// Library on the left, the design being worked on to the right.
@@ -307,7 +310,23 @@ struct StudioView: View {
             librarySidebar
                 .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 420)
         } detail: {
-            if let ready = prepared {
+            // First, so nothing in flight can fall through to a screen about
+            // some other job.
+            if let run {
+                StudioRunView(
+                    run: run,
+                    stage: stage,
+                    log: log,
+                    done: done,
+                    failure: failure,
+                    wallpaper: wallpaper,
+                    onStop: { stopBuild() },
+                    onSaveWallpaper: { exportWallpaper($0) },
+                    onRevealWallpaper: { NSWorkspace.shared.activateFileViewerSelecting([$0]) },
+                    onFinish: { clearRun() }
+                )
+                .frame(minWidth: 480)
+            } else if let ready = prepared {
                 EditorWindow(
                     prepared: ready,
                     model: model,
@@ -365,18 +384,14 @@ struct StudioView: View {
                     store: library,
                     model: model,
                     selection: $homeSelection,
-                    onOpen: { reopen($0) },
-                    onDuplicate: { duplicate($0) },
-                    onRename: {
-                        renaming = $0
-                        renamedTo = $0.name
-                    },
-                    onDelete: { deleting = $0 },
-                    onExport: { exportDesign($0) },
+                    actions: designActions,
                     onNew: { chooseFile() },
                     onImport: { importDesign() },
                     onImportFile: { importDesign(from: $0) },
-                    onInstallAll: { installStarred() },
+                    onInstallAll: {
+                        refreshDevices()
+                        choosingInstall = true
+                    },
                     installAllState: installAllState
                 )
                 .frame(minWidth: 480)
@@ -396,6 +411,7 @@ struct StudioView: View {
         .task {
             refreshDevices()
             StudioPipeline.migrateLegacyDesigns()
+            StudioPipeline.markStarters()
             saved = StudioPipeline.saved()
             // A greeting, not a thing to dismiss every launch.
             if !hasSeenWelcome { openWindow(id: StudioHelp.welcomeWindow) }
@@ -404,12 +420,36 @@ struct StudioView: View {
             guard !isBusy else { return }
             chooseFile()
         }
+        // Only when no editor is open. When one is, it answers this itself and
+        // saves its own copy of the design on the way out.
+        .onReceive(NotificationCenter.default.publisher(for: .studioGoHome)) { _ in
+            guard prepared == nil, !isBusy else { return }
+            source = nil
+            wallpaper = nil
+            done = nil
+            failure = nil
+        }
         .alert(item: $deleting) { design in
             Alert(
                 title: Text("Delete \"\(design.name)\"?"),
                 message: Text("It moves to the Archive folder rather than being erased, but it leaves the library."),
                 primaryButton: .destructive(Text("Delete")) { delete(design) },
                 secondaryButton: .cancel()
+            )
+        }
+        .sheet(isPresented: $choosingInstall) {
+            InstallSheet(
+                included: buildableStarred.included,
+                skipped: buildableStarred.skipped,
+                model: $model,
+                deviceID: $deviceID,
+                devices: devices,
+                onRefresh: { refreshDevices() },
+                onCancel: { choosingInstall = false },
+                onInstall: {
+                    choosingInstall = false
+                    installStarred()
+                }
             )
         }
         .sheet(item: $renaming) { design in
@@ -442,12 +482,7 @@ struct StudioView: View {
     /// was to finish a build or quit.
     private var workspaceBar: some View {
         HStack(spacing: 10) {
-            Button {
-                source = nil
-                wallpaper = nil
-                done = nil
-                failure = nil
-            } label: {
+            Button { goHome() } label: {
                 Label("Library", systemImage: "chevron.left")
             }
             .buttonStyle(.studioCompact)
@@ -500,19 +535,18 @@ struct StudioView: View {
         return saved.filter { $0.name.lowercased().contains(query) }
     }
 
+    /// A navigator, not a second library.
+    ///
+    /// It used to be both: its own Import button, its own per-row rename and
+    /// duplicate, its own footnote about what starring costs, and its own
+    /// context menu that let a starter be renamed and deleted while the
+    /// library's refused. Everything it offered twice is gone; what is left is
+    /// the one thing a sidebar is for, which is knowing where you are and
+    /// getting somewhere else in one click.
     private var librarySidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    StudioTheme.eyebrow("Designs")
-                        .foregroundStyle(StudioTheme.textBright)
-                    Text("\(saved.count)")
-                        .font(StudioTheme.monoSmall).foregroundStyle(StudioTheme.accent)
-                        .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(StudioTheme.accent.opacity(0.12), in: Capsule())
-                    Spacer()
-                    Button("Import...") { importDesign() }.buttonStyle(.studioCompact)
-                }
+                libraryRow
                 // Only once the list is long enough to need it: a filter field
                 // over four designs is furniture.
                 if saved.count > 6 {
@@ -526,15 +560,13 @@ struct StudioView: View {
 
             if saved.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("No designs yet.").font(.callout)
-                    Text("Drop a video or GIF on the right to make one.")
+                    Text("No designs yet").font(.callout)
+                    Text("Drop a video or GIF on the library to make one.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .padding(12)
                 Spacer()
             } else {
-                // Takes the column's whole height now, rather than the 190pt it
-                // could spare while sharing one column with everything else.
                 List {
                     ForEach(filteredDesigns) { design in
                         designRow(design)
@@ -551,29 +583,51 @@ struct StudioView: View {
                         .padding(12)
                 }
             }
-
-            Rectangle().fill(StudioTheme.divider).frame(height: 1)
-            Text("Starred designs are compiled into the app, and the phone switches between them. About 29MB each.")
-                .font(StudioTheme.monoSmall).foregroundStyle(StudioTheme.textDim)
-                .padding(12)
         }
         .foregroundStyle(StudioTheme.text)
         .background(StudioTheme.panel)
         .disabled(isBusy)
     }
 
-    private func designRow(_ design: DesignDocument) -> some View {
-        HStack(spacing: 8) {
-            Button {
-                toggleStar(design)
-            } label: {
-                Image(systemName: design.isStarred ? "star.fill" : "star")
-                    .foregroundStyle(design.isStarred ? StudioTheme.accent : StudioTheme.textDim)
+    /// The way back, in the place every Mac app puts it.
+    private var libraryRow: some View {
+        Button { goHome() } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 11))
+                Text("Library")
+                    .font(.callout)
+                Spacer()
+                Text("\(saved.count)")
+                    .font(StudioTheme.monoSmall)
             }
-            .buttonStyle(.plain)
-            .help("Compile this design into the app")
+            .foregroundStyle(isShowingLibrary ? StudioTheme.accentInk : StudioTheme.text)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .background(
+                isShowingLibrary ? StudioTheme.accent.opacity(0.12) : .clear,
+                in: RoundedRectangle(cornerRadius: StudioTheme.radius, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
+        .help("Show every design")
+    }
 
-            Button { reopen(design) } label: {
+    private var isShowingLibrary: Bool { prepared == nil && source == nil && !isBusy }
+
+    private func designRow(_ design: DesignDocument) -> some View {
+        let isOpen = prepared?.design.id == design.id
+        return Button { reopen(design) } label: {
+            HStack(spacing: 8) {
+                // The star is state here, not a control: it is the only thing
+                // saying which designs the next install will carry. Changing it
+                // is a menu item, so a mis-click cannot quietly resize the
+                // build.
+                Image(systemName: design.isStarred ? "star.fill" : "star")
+                    .font(.system(size: 10))
+                    .foregroundStyle(design.isStarred ? StudioTheme.accent : StudioTheme.textDim.opacity(0.5))
+
                 VStack(alignment: .leading, spacing: 1) {
                     // Truncated in the middle, not at the end: what tells two
                     // designs apart is the number on the tail, and clipping
@@ -584,8 +638,8 @@ struct StudioView: View {
                         .font(.callout)
                         // The editor is a pane now, so the row is the only
                         // thing saying which design is in it.
-                        .fontWeight(prepared?.design.id == design.id ? .semibold : .regular)
-                        .foregroundStyle(prepared?.design.id == design.id ? StudioTheme.accent : StudioTheme.text)
+                        .fontWeight(isOpen ? .semibold : .regular)
+                        .foregroundStyle(isOpen ? StudioTheme.accentInk : StudioTheme.text)
                     HStack(spacing: 6) {
                         Text(count(design.tiles.count, "app"))
                         if !design.assets.isEmpty {
@@ -598,41 +652,58 @@ struct StudioView: View {
                     .font(StudioTheme.monoSmall).foregroundStyle(StudioTheme.textDim)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .help("Open \(design.name)")
-
-            // Rename and duplicate are on the row because a right-click is not
-            // where anyone looks first, and neither can lose anything.
-            //
-            // Delete is deliberately NOT here. It was, as a third icon in this
-            // group, and one click per row with no confirmation: a repeated
-            // click at one point walked 18 designs out of the library, because
-            // each removal shifts the next row up under the pointer. A
-            // destructive action does not belong one pixel from a duplicate
-            // button, and it now asks first.
-            Button { renaming = design } label: { Image(systemName: "pencil") }
-                .buttonStyle(.plain).help("Rename")
-            Button { duplicate(design) } label: { Image(systemName: "plus.square.on.square") }
-                .buttonStyle(.plain).help("Duplicate")
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .background(
+                isOpen ? StudioTheme.accent.opacity(0.1) : .clear,
+                in: RoundedRectangle(cornerRadius: StudioTheme.radius, style: .continuous)
+            )
         }
-        .foregroundStyle(StudioTheme.textSecondary)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(
-            prepared?.design.id == design.id ? StudioTheme.accent.opacity(0.1) : .clear,
-            in: RoundedRectangle(cornerRadius: StudioTheme.radius, style: .continuous)
-        )
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+        .help("Open \(design.name)")
         .contextMenu {
-            Button(design.isStarred ? "Unstar" : "Star") { toggleStar(design) }
-            Button("Rename...") { renaming = design }
-            Button("Duplicate") { duplicate(design) }
-            Divider()
-            Button("Export...") { exportDesign(design) }
-            Button("Delete...", role: .destructive) { deleting = design }
+            DesignMenu(design: design, isStarter: starterIDs.contains(design.id), actions: designActions)
         }
+    }
+
+    /// One set of verbs, shared by the library and the sidebar.
+    private var designActions: DesignActions {
+        DesignActions(
+            open: { reopen($0) },
+            toggleStar: { toggleStar($0) },
+            duplicate: { duplicate($0) },
+            rename: {
+                renaming = $0
+                renamedTo = $0.name
+            },
+            export: { exportDesign($0) },
+            delete: { deleting = $0 }
+        )
+    }
+
+    /// Asks the detail pane to hand back to the library rather than clearing it
+    /// from here — see `studioGoHome` for why reaching past the editor loses
+    /// work.
+    private func goHome() {
+        guard !isBusy else { return }
+        if run != nil {
+            clearRun()
+            return
+        }
+        NotificationCenter.default.post(name: .studioGoHome, object: nil)
+    }
+
+    /// Dismisses a finished run. Its result goes with it: a wallpaper button
+    /// for a build two designs ago is worse than none.
+    private func clearRun() {
+        run = nil
+        source = nil
+        wallpaper = nil
+        done = nil
+        failure = nil
+        log = []
     }
 
     private func count(_ value: Int, _ noun: String) -> String {
@@ -718,14 +789,22 @@ struct StudioView: View {
         }
     }
 
-    /// What the Install all button can do right now.
-    private var installAllState: StudioHome.InstallAllState {
+    /// The starred designs, split by whether they have a build to install.
+    /// Starred and never built is the one case a count on its own hides.
+    private var buildableStarred: (included: [DesignDocument], skipped: [DesignDocument]) {
         let store = try? StudioPipeline.openStore()
         let starred = saved.filter(\.isStarred)
-        let buildable = starred.filter { (try? store?.loadManifest(id: $0.id)) != nil }
+        let included = starred.filter { (try? store?.loadManifest(id: $0.id)) != nil }
+        let includedIDs = Set(included.map(\.id))
+        return (included, starred.filter { !includedIDs.contains($0.id) })
+    }
+
+    /// What the Install all button can do right now.
+    private var installAllState: StudioHome.InstallAllState {
+        let starred = saved.filter(\.isStarred)
         return .init(
             starred: starred.count,
-            buildable: buildable.count,
+            buildable: buildableStarred.included.count,
             deviceName: devices.first { $0.id == deviceID }?.name,
             isBusy: isBusy
         )
@@ -764,7 +843,12 @@ struct StudioView: View {
         }
 
         let device = deviceID
-        stage = .preparing
+        done = nil
+        failure = nil
+        log = []
+        wallpaper = nil
+        run = .installing(count: bundled.count)
+        stage = .bundling
         buildTask = Task {
             do {
                 let writer = try BundleWriter(projectRoot: projectRoot)
@@ -774,11 +858,15 @@ struct StudioView: View {
                     store: store
                 )
                 let installer = DeviceInstaller(projectRoot: projectRoot)
+                // Reported rather than left on one stage for the whole run: the
+                // steps are the only thing making a four-minute wait legible.
+                await MainActor.run { self.stage = .installing("Regenerating the Xcode project") }
                 try installer.regenerateProject { caption in
                     Task { @MainActor in log.append(caption) }
                 }
                 var warning: String?
                 if let device {
+                    await MainActor.run { self.stage = .installing("Installing on the phone") }
                     warning = try installer.installAndLaunch(deviceID: device) { caption in
                         Task { @MainActor in log.append(caption) }
                     }
@@ -823,14 +911,23 @@ struct StudioView: View {
     private func reopen(_ design: DesignDocument) {
         done = nil
         failure = nil
+        run = .opening(design.name)
         stage = .preparing
         let pipeline = StudioPipeline(projectRoot: projectRoot, model: model)
-        Task {
+        // Held, not fired and forgotten: Stop and Escape both go through
+        // `buildTask`, so a run nobody kept was one nobody could get out of.
+        buildTask = Task {
             do {
                 let ready = try await pipeline.reopen(design)
                 await MainActor.run {
                     stage = nil
+                    run = nil
                     prepared = ready
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    stage = nil
+                    done = "Stopped. Nothing was changed."
                 }
             } catch {
                 await MainActor.run {
@@ -838,44 +935,69 @@ struct StudioView: View {
                     failure = String(describing: error)
                 }
             }
+            await MainActor.run { buildTask = nil }
         }
     }
 
+    /// Says what this screen is for, rather than what the app is called. The
+    /// window title and the workspace bar both already say that.
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            StudioTheme.eyebrow("Build workspace")
-                .foregroundStyle(StudioTheme.accent)
-            Text("Motionary Studio")
-                .font(.system(size: 22, weight: .semibold))
+            StudioTheme.eyebrow(source == nil ? "New design" : "Before you build")
+                .foregroundStyle(StudioTheme.accentInk)
+            Text(source == nil ? "Start from a clip" : "Choose a phone, then lay it out")
+                .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(StudioTheme.textBright)
-            Text("A clip becomes a Home Screen widget. The fonts have to be compiled into the app, so this builds and installs it.")
+            Text(source == nil
+                ? "Any short video or GIF. What lands inside the widget frame animates; the rest becomes the wallpaper behind it."
+                : "The crop and the placement are baked into the fonts, so they are settled in the editor before anything is compiled.")
                 .font(StudioTheme.body)
                 .foregroundStyle(StudioTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
+    /// The clip, shown rather than named.
+    ///
+    /// It was a dashed box with the filename in it, which is the one thing the
+    /// bar above it already said — and a clip is a picture, so there was
+    /// something truer to put here.
     private var dropTarget: some View {
         RoundedRectangle(cornerRadius: 12, style: .continuous)
             .strokeBorder(
                 targeting ? StudioTheme.accent : StudioTheme.controlEdge,
-                style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
+                style: StrokeStyle(lineWidth: 1.5, dash: source == nil || targeting ? [6, 4] : [])
             )
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(targeting ? StudioTheme.accent.opacity(0.1) : StudioTheme.well.opacity(0.55))
             )
-            .frame(height: 96)
+            .frame(height: source == nil ? 108 : 190)
             .overlay {
-                VStack(spacing: 6) {
-                    Image(systemName: source == nil ? "square.and.arrow.down" : "film")
-                        .font(.title2)
-                        .foregroundStyle(targeting ? StudioTheme.accent : StudioTheme.textSecondary)
-                    Text(source?.lastPathComponent ?? "Drop a video or GIF")
-                        .font(StudioTheme.bodyStrong)
-                        .foregroundStyle(StudioTheme.text)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                if let source, let poster = DesignThumbnail.firstFrame(of: source) {
+                    Image(nsImage: poster)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(alignment: .bottomLeading) { posterCaption(source) }
+                        .allowsHitTesting(false)
+                } else {
+                    VStack(spacing: 6) {
+                        Image(systemName: source == nil ? "square.and.arrow.down" : "film")
+                            .font(.title2)
+                            .foregroundStyle(targeting ? StudioTheme.accent : StudioTheme.textSecondary)
+                        Text(source?.lastPathComponent ?? "Drop a video or GIF")
+                            .font(StudioTheme.bodyStrong)
+                            .foregroundStyle(StudioTheme.text)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if source == nil {
+                            Text("or click to choose one")
+                                .font(StudioTheme.monoSmall)
+                                .foregroundStyle(StudioTheme.textDim)
+                        }
+                    }
                 }
             }
             .onDrop(of: [.fileURL], isTargeted: $targeting) { providers in
@@ -894,41 +1016,85 @@ struct StudioView: View {
             .disabled(isBusy)
     }
 
+    /// The clip's name over its own picture, so a dark frame does not swallow
+    /// it and a bright one does not either.
+    private func posterCaption(_ source: URL) -> some View {
+        Text(source.lastPathComponent)
+            .font(StudioTheme.monoSmall)
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.black.opacity(0.55), in: Capsule())
+            .padding(10)
+    }
+
+    /// Three rows that each answer a different question, so each says which.
+    ///
+    /// They were bare nouns in a grid — "iPhone", "Device", "Loop" — two of
+    /// which mean the same thing to anyone who has not read the pipeline: the
+    /// phone a design is *cut for* and the phone it *installs to* are separate
+    /// choices, and nothing on the screen said so.
     private var settings: some View {
-        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
-            GridRow {
-                Text("iPhone")
+        VStack(alignment: .leading, spacing: 14) {
+            settingRow("Cut for", note: "Only the iPhone 17 Pro is calibrated. The wrong one shows a seam.") {
                 Picker("", selection: $model) {
                     ForEach(DeviceModel.all) { Text($0.name).tag($0) }
                 }
                 .labelsHidden()
+                .frame(maxWidth: 220)
             }
-            GridRow {
-                Text("Device")
-                HStack {
+
+            settingRow("Install to", note: devices.isEmpty ? "Connect an iPhone by cable, then refresh." : nil) {
+                HStack(spacing: 8) {
                     Picker("", selection: $deviceID) {
-                        Text(devices.isEmpty ? "None connected" : "Choose").tag(String?.none)
+                        Text(devices.isEmpty ? "No phone connected" : "Choose").tag(String?.none)
                         ForEach(devices) { Text($0.name).tag(String?.some($0.id)) }
                     }
                     .labelsHidden()
+                    .frame(maxWidth: 220)
                     Button("Refresh") { refreshDevices() }
                         .buttonStyle(.studioCompact)
                 }
             }
-            GridRow {
-                Text("Loop")
-                HStack {
+
+            settingRow("Loop length", note: "The cycle is 30 seconds. A loop that divides it evenly is seamless.") {
+                HStack(spacing: 10) {
                     Slider(value: $loopSeconds, in: 0 ... 6, step: 0.1)
+                        .frame(maxWidth: 220)
                     Text(loopSeconds == 0 ? "As recorded" : String(format: "%.1fs", loopSeconds))
+                        .font(StudioTheme.mono)
                         .monospacedDigit()
-                        .frame(width: 90, alignment: .trailing)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(StudioTheme.textTertiary)
                 }
             }
         }
         .font(StudioTheme.body)
         .foregroundStyle(StudioTheme.text)
         .disabled(isBusy)
+    }
+
+    private func settingRow(
+        _ title: String,
+        note: String?,
+        @ViewBuilder control: () -> some View
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 14) {
+            Text(title)
+                .font(StudioTheme.bodyStrong)
+                .foregroundStyle(StudioTheme.text)
+                .frame(width: 84, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                control()
+                if let note {
+                    Text(note)
+                        .font(StudioTheme.monoSmall)
+                        .foregroundStyle(StudioTheme.textDim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 
     private var actions: some View {
@@ -1035,17 +1201,24 @@ struct StudioView: View {
         done = nil
         failure = nil
         log = []
+        run = .opening(source.lastPathComponent)
         stage = .preparing
 
         let pipeline = StudioPipeline(projectRoot: projectRoot, model: model)
-        Task {
+        buildTask = Task {
             do {
                 let ready = try await pipeline.prepare(source: source) { stage in
                     Task { @MainActor in self.stage = stage }
                 }
                 await MainActor.run {
                     self.stage = nil
+                    self.run = nil
                     self.prepared = ready
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    self.stage = nil
+                    self.done = "Stopped. Nothing was changed."
                 }
             } catch {
                 await MainActor.run {
@@ -1053,6 +1226,7 @@ struct StudioView: View {
                     self.failure = String(describing: error)
                 }
             }
+            await MainActor.run { self.buildTask = nil }
         }
     }
 
@@ -1066,6 +1240,11 @@ struct StudioView: View {
             failure = String(describing: StudioPipelineError.noProjectFolder)
             return
         }
+        done = nil
+        failure = nil
+        log = []
+        wallpaper = nil
+        run = .building(edited.design.name)
         stage = .preparing
         let pipeline = StudioPipeline(projectRoot: projectRoot, model: model)
         let loop = loopSeconds
@@ -1167,6 +1346,11 @@ private struct EditorWindow: View {
         }
         .onChange(of: prepared.design) { old, _ in
             undo.designChanged(from: old, undoManager: windowUndoManager)
+        }
+        // The sidebar's Library row, answered here so the working copy this
+        // view holds is the one that gets written.
+        .onReceive(NotificationCenter.default.publisher(for: .studioGoHome)) { _ in
+            onCancel(prepared)
         }
         // Autosave, debounced: the id restarts this on every change, so only a
         // pause in editing writes. An afternoon's placement should not depend

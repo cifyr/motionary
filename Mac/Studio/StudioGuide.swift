@@ -247,4 +247,12 @@ extension Notification.Name {
     /// because the command lives in the scene and the file picker lives in the
     /// view, and this is the narrowest thing that joins them.
     static let studioNewDesign = Notification.Name("StudioNewDesign")
+
+    /// Asks whatever is in the detail pane to stand down and show the library.
+    ///
+    /// A notification rather than clearing the state directly, because the
+    /// editor holds its own working copy of the design: anything that reached
+    /// past it to put the pane back would write the copy the editor started
+    /// from, over the newer one its autosave had already stored.
+    static let studioGoHome = Notification.Name("StudioGoHome")
 }

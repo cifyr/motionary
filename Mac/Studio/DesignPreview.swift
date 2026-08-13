@@ -46,13 +46,24 @@ enum DesignThumbnail {
         return NSImage(contentsOf: url)
     }
 
-    /// The first frame of the clip the design was made from.
-    ///
+    private static func firstFrame(for design: DesignDocument, store: DesignStore) -> NSImage? {
+        firstFrame(of: store.sourceVideoURL(for: design))
+    }
+
+    /// The first frame of a clip that has not become a design yet, so the
+    /// workspace can show what was dropped rather than repeat its filename.
+    static func firstFrame(of url: URL) -> NSImage? {
+        let key = "clip:\(url.path)" as NSString
+        if let cached = cache.object(forKey: key) { return cached }
+        guard let found = decodeFirstFrame(of: url) else { return nil }
+        cache.setObject(found, forKey: key)
+        return found
+    }
+
     /// Still images and GIFs load directly; anything else goes through
     /// AVFoundation, which also covers the GIF case on newer systems but costs
     /// a generator to set up.
-    private static func firstFrame(for design: DesignDocument, store: DesignStore) -> NSImage? {
-        let url = store.sourceVideoURL(for: design)
+    private static func decodeFirstFrame(of url: URL) -> NSImage? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
 
         if let direct = NSImage(contentsOf: url), direct.isValid, direct.size.width > 0 {
@@ -82,6 +93,10 @@ struct DesignCard: View {
     var isStarter = false
     var isSelected = false
     let onOpen: () -> Void
+    /// Whether this design is compiled into the phone build. The one thing the
+    /// old sidebar could do that the cards could not, which is most of why the
+    /// sidebar was still worth keeping open.
+    let onToggleStar: () -> Void
 
     @State private var hovering = false
 
@@ -186,6 +201,22 @@ struct DesignCard: View {
                     .foregroundStyle(StudioTheme.textBright)
                     .lineLimit(1)
                     .truncationMode(.middle)
+
+                Spacer(minLength: 4)
+
+                // Always drawn when on, only offered on hover when off, so a
+                // shelf of cards is not a field of grey stars.
+                if design.isStarred || hovering {
+                    Button(action: onToggleStar) {
+                        Image(systemName: design.isStarred ? "star.fill" : "star")
+                            .font(.system(size: 10))
+                            .foregroundStyle(design.isStarred ? StudioTheme.accent : StudioTheme.textDim)
+                    }
+                    .buttonStyle(.plain)
+                    .help(design.isStarred
+                        ? "In the phone build. Click to leave it out."
+                        : "Not in the phone build. Click to include it.")
+                }
             }
 
             // Counts and sizes in mono, names in the UI face. Everything this

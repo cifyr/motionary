@@ -1,5 +1,51 @@
 import SwiftUI
 
+/// Everything that can be done to a design, in one value.
+///
+/// Carried rather than passed one closure at a time because two places show
+/// designs — the library and the sidebar — and when each wired its own subset
+/// they drifted: the sidebar would rename and delete a starter that the library
+/// refused to touch, on the same right-click, one pane apart.
+struct DesignActions {
+    var open: (DesignDocument) -> Void
+    var toggleStar: (DesignDocument) -> Void
+    var duplicate: (DesignDocument) -> Void
+    var rename: (DesignDocument) -> Void
+    var export: (DesignDocument) -> Void
+    var delete: (DesignDocument) -> Void
+}
+
+/// The one menu. Both panes show this, so a design offers the same things
+/// wherever it is right-clicked.
+struct DesignMenu: View {
+    let design: DesignDocument
+    let isStarter: Bool
+    let actions: DesignActions
+
+    var body: some View {
+        Button("Open") { actions.open(design) }
+        // Named for what it does rather than for the star: the star is how it
+        // is drawn, not what it means.
+        Button(design.isStarred ? "Remove from the phone build" : "Include in the phone build") {
+            actions.toggleStar(design)
+        }
+        Divider()
+        Button("Duplicate") { actions.duplicate(design) }
+        // Export is how a design is shared: one archive carrying the clip, the
+        // background and the skins it uses, so it opens on someone else's Mac.
+        Button("Export…") { actions.export(design) }
+        Divider()
+        Button("Rename…") { actions.rename(design) }
+            .disabled(isStarter)
+        Button("Delete…", role: .destructive) { actions.delete(design) }
+            .disabled(isStarter)
+        if isStarter {
+            Divider()
+            Text("Starters cannot be renamed or deleted. Duplicate one to change it.")
+        }
+    }
+}
+
 /// The library, as pictures.
 ///
 /// What a design *is* is a picture on a phone, so that is what this shows. The
@@ -16,11 +62,7 @@ struct StudioHome: View {
     let store: DesignStore
     let model: DeviceModel
     @Binding var selection: UUID?
-    let onOpen: (DesignDocument) -> Void
-    let onDuplicate: (DesignDocument) -> Void
-    let onRename: (DesignDocument) -> Void
-    let onDelete: (DesignDocument) -> Void
-    let onExport: (DesignDocument) -> Void
+    let actions: DesignActions
     let onNew: () -> Void
     let onImport: () -> Void
     /// A file dropped on the library, rather than chosen through a panel.
@@ -36,19 +78,22 @@ struct StudioHome: View {
         let deviceName: String?
         let isBusy: Bool
 
-        var canRun: Bool { buildable > 0 && deviceName != nil && !isBusy }
+        /// A missing phone no longer blocks the button: choosing one is the
+        /// first thing the sheet behind it asks for.
+        var canRun: Bool { buildable > 0 && !isBusy }
 
         /// Says the next thing to do, not the state it is in.
         var explanation: String {
             if isBusy { return "Working…" }
             if starred == 0 { return "Star a design to include it" }
             if buildable == 0 { return "Build a starred design first" }
-            guard let deviceName else { return "Connect an iPhone to install" }
-            return "\(buildable) starred → \(deviceName)"
+            return "\(buildable) starred → \(deviceName ?? "choose a phone")"
         }
     }
 
-    private let columns = [GridItem(.adaptive(minimum: 190, maximum: 230), spacing: 18)]
+    // A phone is twice as tall as it is wide, so a 230pt card is 500pt of
+    // shelf. Narrower fits a real library on one screen and still reads.
+    private let columns = [GridItem(.adaptive(minimum: 148, maximum: 180), spacing: 16)]
 
     private var starters: [DesignDocument] { designs.filter { starterIDs.contains($0.id) } }
     private var mine: [DesignDocument] { designs.filter { !starterIDs.contains($0.id) } }
@@ -173,31 +218,15 @@ struct StudioHome: View {
                         model: model,
                         isStarter: areStarters,
                         isSelected: selection == design.id,
-                        onOpen: { onOpen(design) }
+                        onOpen: { actions.open(design) },
+                        onToggleStar: { actions.toggleStar(design) }
                     )
                     .onTapGesture { selection = design.id }
-                    .contextMenu { menu(for: design, isStarter: areStarters) }
+                    .contextMenu {
+                        DesignMenu(design: design, isStarter: areStarters, actions: actions)
+                    }
                 }
             }
-        }
-    }
-
-    @ViewBuilder
-    private func menu(for design: DesignDocument, isStarter: Bool) -> some View {
-        Button("Open") { onOpen(design) }
-        Button("Duplicate") { onDuplicate(design) }
-        Divider()
-        // Export is how a design is shared: one archive carrying the clip, the
-        // background and the skins it uses, so it opens on someone else's Mac.
-        Button("Export…") { onExport(design) }
-        Divider()
-        Button("Rename…") { onRename(design) }
-            .disabled(isStarter)
-        Button("Delete…", role: .destructive) { onDelete(design) }
-            .disabled(isStarter)
-        if isStarter {
-            Divider()
-            Text("Starters cannot be renamed or deleted. Duplicate one to change it.")
         }
     }
 

@@ -485,6 +485,14 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
     /// install, because a font has to be in the bundle to draw at all.
     var isStarred: Bool = false
 
+    /// Ships with Studio, so it is always there to open, copy and take apart.
+    ///
+    /// Deliberately not `isStarred`. The library read the two as one fact for a
+    /// while, which meant starring your own design filed it under Starters and
+    /// made it undeletable, and unstarring a real starter made it disposable —
+    /// "comes in the box" and "goes on the phone" are unrelated questions.
+    var isStarter: Bool = false
+
     /// Overrides the model's estimated widget corner radius, in screen pixels.
     /// Only the phone can settle this one, so it is adjustable.
     var widgetCornerRadius: CGFloat?
@@ -624,6 +632,7 @@ struct DesignDocument: Codable, Equatable, Identifiable, Sendable {
         backgroundName = try container.decodeIfPresent(String.self, forKey: .backgroundName)
         widgetCornerRadius = try container.decodeIfPresent(CGFloat.self, forKey: .widgetCornerRadius)
         isStarred = try container.decodeIfPresent(Bool.self, forKey: .isStarred) ?? false
+        isStarter = try container.decodeIfPresent(Bool.self, forKey: .isStarter) ?? false
         buildGeneration = try container.decodeIfPresent(Int.self, forKey: .buildGeneration) ?? 0
     }
 
