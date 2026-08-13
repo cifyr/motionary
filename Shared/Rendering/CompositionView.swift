@@ -251,7 +251,9 @@ struct SingleLaneGlyph: View {
     }
 }
 
-private struct BlinkMask: View {
+/// Not private: the mask lab draws the production masking rather than a
+/// restatement of it, so that a result there is a result about this.
+struct BlinkMask: View {
     /// Shared with the lane texts so both sides of the mask agree on phase.
     let reference: Date
     let blinkOffset: TimeInterval
