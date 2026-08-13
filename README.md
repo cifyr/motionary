@@ -86,12 +86,24 @@ Studio generates the lane fonts, copies them into `Resources/`, rewrites
 `UIAppFonts` in both `Info.plist`s, regenerates the project, builds for your
 phone and installs it.
 
+Or, for a phone that already has the app, press **Send to phone** instead of
+build: Studio builds the design as pictures and sends it over the local network,
+with nothing compiled and nothing installed. Motionary has to be open on the
+phone, which is what advertises it.
+
 The same pipeline runs headless, which is how it is tested:
 
 ```sh
 MotionaryStudio --build clip.mp4               # generate only
 MotionaryStudio --build clip.mp4 --bundle      # generate and compile in
 MotionaryStudio --build clip.mp4 --device UDID # the whole job
+MotionaryStudio --send                         # newest design, over the network
+MotionaryStudio --deliver out.motionary        # newest design, as a file
+```
+
+```sh
+Tools/deliver.sh "Spidey Swing"   # build as pictures and copy to a phone by cable
+Tools/pull-reports.sh             # read the widget's own report off the phone
 ```
 
 Every flag is documented in **[docs/USAGE.md](docs/USAGE.md)**.

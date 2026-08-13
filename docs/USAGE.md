@@ -51,6 +51,29 @@ the widget never touches the network.
 Tiles snap to the real Home Screen icon grid, which is measured, so a tile lands
 where an icon would.
 
+### Two ways to build
+
+A design has two possible bodies, and which one you want depends on whether it
+has to travel.
+
+**As fonts** - the default, and everything below. Its frames are colour glyphs,
+it gets a thirty-second loop, and it can only reach a phone by being compiled
+into the widget extension and installed. A font only draws in a widget if it
+shipped inside the extension, which is the constraint the whole project is
+shaped around.
+
+**As pictures** - `Send to phone`, `--send`, `--deliver`, `Tools/deliver.sh`.
+Its frames are JPEGs the widget stacks under the same masks, so it needs nothing
+installed and can be handed to a phone that already has the app. The price is
+the loop: one picture per lane makes it exactly `laneCount / fps` = **two
+seconds**, where fifteen glyphs per lane stretch the same cycle to thirty. Every
+clip a design has travels together, so variants can still be switched on the
+phone.
+
+Both bodies produce identical stills - one `DesignArtWriter` writes the
+wallpaper and the backdrop for both - so switching between them does not move
+the scene against the wallpaper behind it.
+
 ### Building
 
 Build does, in order: extract frames → measure the motion crop → choose a quality
@@ -80,6 +103,8 @@ STUDIO=~/Library/Developer/Xcode/DerivedData/Motionary-*/Build/Products/Debug/Mo
 | `--rebuild-starred [--device <UDID>]` | Regenerate every starred design from its source clip. |
 | `--roundtrip` | Export a design and import it back. A pipeline self-check. |
 | `--analyse-crop [--starred]` | Report what each design's animated area costs. Read-only. |
+| `--deliver <out.motionary> [--design <name\|uuid>]` | Build the design as pictures and pack every clip into one file. Installs nothing. |
+| `--send [--to <phone name>] [--design <name\|uuid>]` | The same, sent over the local network to a phone with Motionary open. |
 
 **`--rebuild-starred` is what to reach for after changing anything in the
 pipeline.** A design's backdrop and wallpaper are written at build time, so a
@@ -101,6 +126,8 @@ simulator via XCUITest, so a run needs nobody's screen:
 
 ```sh
 Tools/lab-shot.sh on|off  out.png     # the font lab, on the simulator
+Tools/mask-shot.sh dir n "32,4,240"   # the mask lab, as a burst of shots
+Tools/mask-sweep.sh "32,32,540 ..."   # what a frame stack costs, on the phone
 Tools/edge-shot.sh on|off out.png     # the edge calibration target
 Tools/edge-profile.py shot.png        # read the target back
 Tools/edge-calibrate.py shot.png --design <id> [--write]
@@ -113,10 +140,25 @@ same design and tries to deliver its lane fonts nine different ways, then report
 which routes produced a picture. If every route fails, the fonts are not in the
 bundle. If one works and the widget does not, the fault is in the composition.
 
+The **mask lab** answers the other question: whether a live timer mask gates a
+picture that arrived after the install. That is the finding the delivered engine
+rests on, and the lab draws it with the production masking rather than a
+restatement of it - see
+[the measurement](widget-animation-surface.md#411-measured-cost-of-a-runtime-frame-stack--device-2026-08-12).
+
 The app also keeps a status report and a render log in the app group, written on
 every widget render. That is what to read first when the widget is black —
 it records how many lanes were requested, how many resolved, whether the backdrop
 loaded, and the extension's memory footprint at the moment it drew.
+
+On a phone those used to be unreadable without holding it: `devicectl` will not
+read anything but `Library` out of an app group. The app mirrors them into its
+own Documents on every foreground, so a device run can end in a file instead of a
+photograph:
+
+```sh
+Tools/pull-reports.sh [out-dir]
+```
 
 ## Adding a device
 
