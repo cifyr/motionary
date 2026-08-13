@@ -156,6 +156,36 @@ struct FrameSetGenerator {
         return covered < 0.66
     }
 
+    /// The still scene exactly as the widget will draw it, laid out on a
+    /// screen-sized canvas so a crop of it lines up with a crop of a frame.
+    ///
+    /// Read back from the written file rather than rebuilt, because "the same
+    /// picture" and "the same bytes" are different things here: the backdrop
+    /// goes through its own colour match on the way to disk, and a patch cut
+    /// from anything else leaves a visible rectangle.
+    private func backdropPlate(design: DesignDocument, variant: UUID?) -> CGImage? {
+        guard let url = variant.flatMap({ store.existingWidgetBackdropURL(for: design.id, variant: $0) })
+            ?? store.existingWidgetBackdropURL(for: design.id),
+            let backdrop = ImageLoader.load(at: url, maxPixelSize: Int(max(
+                DeviceGeometry.screenPixelSize.width, DeviceGeometry.screenPixelSize.height
+            )))
+        else { return nil }
+        let rect = DesignArtWriter.backdropRect(widgetRect: design.widgetRect)
+        guard !rect.isNull else { return nil }
+        let size = DeviceGeometry.screenPixelSize
+        guard let context = CGContext(
+            data: nil, width: Int(size.width), height: Int(size.height),
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else { return nil }
+        // CGContext counts from the bottom; the rect is in screen order.
+        context.draw(backdrop, in: CGRect(
+            x: rect.minX, y: size.height - rect.maxY, width: rect.width, height: rect.height
+        ))
+        return context.makeImage()
+    }
+
     /// One sprite frame put back on the still scene, for anything that needs a
     /// picture rather than a layer - the app's preview, and the poster.
     static func flattened(_ image: CGImage, over plate: CGImage) -> CGImage {
@@ -204,7 +234,13 @@ struct FrameSetGenerator {
         // One second of lanes either side: that is how many are unmasked at
         // once, and the patch has to cover what they drew or they show through.
         let window = max(1, spec.framesPerSecond)
-        var sprites = try encoder.occludingPatches(frames, plate: plate, window: window)
+        // Cut from the backdrop the widget will actually draw, not from the
+        // poster it was made out of. A patch is opaque, so wherever it does not
+        // cover the figure it replaces the backdrop with its own idea of it -
+        // and the two only have to disagree by a level or two for every patch
+        // to show as a faint rectangle blinking on and off.
+        let ground = backdropPlate(design: design, variant: variant?.id) ?? plate
+        var sprites = try encoder.occludingPatches(frames, plate: ground, window: window)
         func measured() -> Int { sprites.reduce(0) { $0 + $1.data.count } }
         Self.logger.info("""
         \(sprites.count) sprites come to \(measured() / 1024)KB against a \(budget / 1024)KB budget \
@@ -214,7 +250,7 @@ struct FrameSetGenerator {
         let shrink = FramePayloadPlan.shrink(toFit: budget, measured: measured())
         if shrink < 1 {
             Self.logger.warning("shrinking sprites to \(Int(shrink * 100))% to fit the archive")
-            sprites = try encoder.occludingPatches(frames, plate: plate, window: window, shrink: shrink)
+            sprites = try encoder.occludingPatches(frames, plate: ground, window: window, shrink: shrink)
         }
         onStage(.encoding(progress: 1))
 
@@ -451,7 +487,7 @@ struct FrameSetGenerator {
             // anybody asked for - a clip that ends early is the better trade.
             // Short of its segment it repeats inside it, the same way a short
             // clip already repeats around the whole stack.
-            let own = max(1, Int((clip.wall * Double(fps)).rounded(.down)))
+            let own = max(1, Int((clip.wall * Double(fps)).rounded(.up)))
             let cut = try await pictures(
                 design: design,
                 spec: TimerFontSpec(laneCount: 1, framesPerSecond: fps),
@@ -695,7 +731,7 @@ struct FrameSetGenerator {
         onStage: @Sendable @escaping (Stage) -> Void
     ) async throws -> BuildManifest {
         var spec = design.spec
-        let crop = design.effectiveCrop
+        var crop = design.effectiveCrop
         guard crop.width >= 2, crop.height >= 2 else {
             throw GeneratorError.emptyCrop(design: design.name)
         }
@@ -723,6 +759,22 @@ struct FrameSetGenerator {
         // with the stack the widget will draw, or the clip plays at a speed
         // nobody chose.
         spec = TimerFontSpec(laneCount: spec.laneCount, framesPerSecond: plan.framesPerSecond)
+
+        // A patch-built design animates the whole widget frame rather than the
+        // authored crop. The crop exists because a flattened frame costs its
+        // own area, so it was drawn tight around the motion - and Spidey's
+        // swing leaves it, which clips the figure in 44% of frames. A patch
+        // costs what its contents cost wherever the crop's edges are, so there
+        // is no longer any reason to clip anything.
+        if await prefersSprites(
+            design: design, spec: spec, source: store.sourceVideoURL(for: design),
+            crop: design.effectiveCrop
+        ) {
+            crop = design.widgetRect.intersection(
+                CGRect(origin: .zero, size: DeviceGeometry.screenPixelSize)
+            )
+            Self.logger.info("patch-built: animating the whole widget frame \(String(describing: crop), privacy: .public)")
+        }
 
         // Shuffle turns every clip into one stack, so it replaces the whole
         // build rather than being applied after it: there is one frame set, the
@@ -880,7 +932,10 @@ struct FrameSetGenerator {
         // and whatever is left over goes to one segment rather than being
         // spread across all of them. The leftover is a clip playing its opening
         // again, and one hitch per loop is easier to watch than three.
-        let own = clips.map { max(1, Int(($0.wall * Double(fps)).rounded())) }
+        // Rounded up: rounding to nearest drops the last fraction of a second,
+        // which is a clip ending a moment early - and the end of a swing is
+        // exactly the part anybody watching is waiting for.
+        let own = clips.map { max(1, Int(($0.wall * Double(fps)).rounded(.up))) }
         var shares = own.reduce(0, +) <= lanes
             ? own
             : Self.programShares(lanes: lanes, weights: clips.map(\.wall))

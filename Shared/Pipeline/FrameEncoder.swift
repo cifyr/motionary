@@ -173,11 +173,12 @@ struct FrameEncoder {
                     crop: crop, imageSize: CGSize(width: frame.width, height: frame.height)
                 )
             }
-            var out = WidgetTint.applied(to: cropped)
-            if let widgetRect, EdgeCompensation.overlaps(crop, widgetRect: widgetRect) {
-                out = EdgeCompensation.applied(to: out, originY: Int(crop.minY), widgetRect: widgetRect)
-            }
-            return out
+            // Tint only. The edge correction is applied to the finished patch
+            // instead: it draws through an opaque context, so running it here
+            // would flatten the transparency this needs to find the box - which
+            // it silently did the moment the crop grew to touch the widget's
+            // edge bands, and every patch came back the size of the crop.
+            return WidgetTint.applied(to: cropped)
         }
         let boxes = prepared.map { Self.opaqueBounds(of: $0) }
         let count = prepared.count
@@ -197,7 +198,16 @@ struct FrameEncoder {
                   let ground = backdrop.cropping(to: box)
             else { throw FrameEncoderError.cropEmpty }
 
-            let flattened = Self.over(patch, ground: ground)
+            var flattened = Self.over(patch, ground: ground)
+            // Now that it is opaque, and against its own place in the widget
+            // rather than the crop's origin.
+            if let widgetRect, EdgeCompensation.overlaps(crop, widgetRect: widgetRect) {
+                flattened = EdgeCompensation.applied(
+                    to: flattened,
+                    originY: Int(crop.minY + box.minY),
+                    widgetRect: widgetRect
+                )
+            }
             let scaled = shrink < 1 ? (Self.resized(flattened, scale: shrink) ?? flattened) : flattened
             guard let data = Self.jpegData(scaled, quality: quality) else {
                 throw FrameEncoderError.jpegEncodeFailed(frameIndex: index, cropSize: box.size)
