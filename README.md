@@ -30,11 +30,18 @@ works](docs/HOW-IT-WORKS.md) explains the whole mechanism.
 This is a personal project published for reading and building, not a product.
 Some of its constraints are unusually sharp, and they are not bugs:
 
-- **A Mac is required.** Designs are compiled on macOS and shipped inside the
-  app. They cannot be made on the phone — see [the
+- **A Mac is required.** Designs are made on macOS. They cannot be made on the
+  phone — see [the
   constraint](docs/HOW-IT-WORKS.md#the-constraint-everything-follows-from).
-- **Adding or changing a design means a rebuild and a reinstall.** The phone app
-  is a viewer: no import, no settings, no generation.
+- **A design can be built two ways, and they are not equivalent.** Built as
+  fonts, its frames are colour glyphs, it gets a thirty-second loop, and it can
+  only reach a phone by being compiled into the widget extension and installed.
+  Built as pictures, it is a two-second loop that can be **delivered to a phone
+  that already has the app** — press **Send to phone** in Studio with Motionary
+  open on the phone, or hand it a package through AirDrop, Files or
+  `Tools/deliver.sh`. Which one you want depends on whether the design has to
+  travel. The first send asks the phone for local network permission; until
+  that is allowed, Studio finds the phone and the transfer fails at the end.
 - **Only the iPhone 17 Pro is calibrated.** The widget's frame is measured
   against real hardware, not derived. On any other device the composition will
   be visibly misaligned against the wallpaper. Adding a device means measuring

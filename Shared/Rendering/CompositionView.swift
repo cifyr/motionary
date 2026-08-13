@@ -21,6 +21,14 @@ struct CompositionView<Tile: View>: View {
     /// widget black.
     var wallpaperRect: CGRect?
     let isAnimated: Bool
+    /// The frames of a design built as pictures, in playing order.
+    ///
+    /// Empty for a design built as fonts, which is most of them: the two are
+    /// alternate bodies for the same composition and everything around the
+    /// animated layer - wallpaper, assets, readouts, tiles - is identical
+    /// either way. Supplied rather than loaded here, because the extension is
+    /// the one process that must not decode more than it draws.
+    var frames: [Image] = []
     /// Placed pictures, drawn over the animation and under the tiles by
     /// default - the same stacking the editor and the wallpaper bake use. An
     /// asset with `drawsBehindAnimation` set instead draws between the
@@ -72,7 +80,23 @@ struct CompositionView<Tile: View>: View {
 
                 assetLayer(assets.filter(\.drawsBehindAnimation), scale: scale, originX: originX, originY: originY)
 
-                if isAnimated {
+                if !frames.isEmpty {
+                    // Placed at the crop rather than over the whole screen: a
+                    // glyph carries its own position inside a square canvas,
+                    // where a picture is the crop and has to be put where the
+                    // crop was.
+                    let crop = manifest.animationCrop
+                    FrameStackLayer(
+                        frames: frames,
+                        laneCount: manifest.laneCount,
+                        framesPerSecond: manifest.framesPerSecond
+                    )
+                        .frame(width: crop.width * scale, height: crop.height * scale)
+                        .offset(
+                            x: originX + crop.minX * scale,
+                            y: originY + crop.minY * scale
+                        )
+                } else if isAnimated {
                     TimerFontLayer(
                         laneCount: manifest.laneCount,
                         framesPerSecond: manifest.framesPerSecond,
@@ -251,7 +275,9 @@ struct SingleLaneGlyph: View {
     }
 }
 
-private struct BlinkMask: View {
+/// Not private: the mask lab draws the production masking rather than a
+/// restatement of it, so that a result there is a result about this.
+struct BlinkMask: View {
     /// Shared with the lane texts so both sides of the mask agree on phase.
     let reference: Date
     let blinkOffset: TimeInterval

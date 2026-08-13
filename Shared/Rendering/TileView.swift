@@ -100,8 +100,37 @@ struct TileView: View {
 /// bundle and decoded here rather than handed over as a path - a widget's
 /// renderer cannot reach a file itself.
 enum SlotArtwork {
-    static func image(for tile: PlacedTile, designID: UUID, authoredAppID: String, side: CGFloat) -> Image? {
-        let url = tile.skin.flatMap { PrebuiltDesign.skinURL(designID: designID, skin: $0) }
+    /// `artFolder` is a delivered design's own artwork, which arrives beside it
+    /// rather than in the bundle. Tried first and then the bundle, so one
+    /// lookup serves both kinds of design: a delivered design whose package
+    /// predates the artwork still falls back to whatever the build shipped,
+    /// which is a worse icon rather than a missing one.
+    static func image(
+        for tile: PlacedTile,
+        designID: UUID,
+        authoredAppID: String,
+        side: CGFloat,
+        artFolder: URL? = nil
+    ) -> Image? {
+        // Both names, in that order. A delivered design carries each tile's own
+        // icon - already rendered from whatever skin it wears - but not the
+        // skin library a build ships, because that library is most of a
+        // hundred megabytes of artwork the design is not using.
+        let names = [
+            tile.skin.map { PrebuiltDesign.skinResource(designID: designID, skin: $0) },
+            PrebuiltDesign.iconResource(
+                tileID: tile.id,
+                appID: tile.appID,
+                authoredAppID: authoredAppID
+            ),
+        ].compactMap { $0 }
+        let delivered = artFolder.flatMap { folder in
+            names
+                .map { folder.appendingPathComponent("\($0).png") }
+                .first { FileManager.default.fileExists(atPath: $0.path) }
+        }
+        let url = delivered
+            ?? tile.skin.flatMap { PrebuiltDesign.skinURL(designID: designID, skin: $0) }
             ?? PrebuiltDesign.iconURL(
                 tileID: tile.id,
                 appID: tile.appID,

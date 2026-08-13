@@ -12,6 +12,7 @@ struct HomeView: View {
     @State private var saving = false
     @State private var note: String?
     @StateObject private var icons = IconImageLoader(store: try? DesignStore())
+    private let store = try? DesignStore()
 
     @State private var selection: UUID? = ActiveDesign.identifier
     @State private var choosingSlots = false
@@ -21,20 +22,51 @@ struct HomeView: View {
     /// Taps change a slot rather than open an app, and a blanked slot comes
     /// back as a target so it can be changed again.
     @State private var isEditing = false
+    @EnvironmentObject private var receiver: LocalDeliveryReceiver
+    @Environment(\.scenePhase) private var scenePhase
     @State private var editingTile: PlacedTile?
     @Environment(\.displayScale) private var displayScale
 
     /// Whatever there is to say right now, from either source.
     private var message: String? { note ?? router.lastFailure }
 
-    private var entries: [PrebuiltDesign.Entry] { PrebuiltDesign.entries }
-    private var entry: PrebuiltDesign.Entry? { PrebuiltDesign.selected(id: selection) }
+    /// The designs to show, read once rather than per draw.
+    ///
+    /// These were computed properties, and every one of them went to disk:
+    /// listing the delivered designs decodes every design.json in the app
+    /// group, and a manifest decodes its own file on each access. SwiftUI
+    /// evaluates a body many times a second, so a swipe was competing with
+    /// hundreds of JSON decodes on the main thread - which is a delay to the
+    /// swipe and a stall in the player, since the picture is a video and the
+    /// video wants that thread too.
+    @State private var shown: [Shown] = []
+
+    /// One design and its manifest, decoded together and kept.
+    private struct Shown: Identifiable {
+        let entry: PrebuiltDesign.Entry
+        let manifest: BuildManifest?
+        var id: UUID { entry.id }
+    }
+
+    private func reload() {
+        shown = PrebuiltDesign.all(in: store).map { Shown(entry: $0, manifest: $0.manifest) }
+        if selection == nil || !shown.contains(where: { $0.id == selection }) {
+            selection = shown.first?.id
+        }
+    }
+
+    private var entries: [PrebuiltDesign.Entry] { shown.map(\.entry) }
+    private var current: Shown? {
+        shown.first { $0.id == selection } ?? shown.first
+    }
+    private var entry: PrebuiltDesign.Entry? { current?.entry }
+    private var manifest: BuildManifest? { current?.manifest }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if let entry, let manifest = entry.manifest {
+            if let entry, let manifest {
                 // Identity is the scene, not the clip within it. Including the
                 // clip tore the player down and built a new one on every
                 // change, which blanked the screen to the wallpaper - baked
@@ -50,14 +82,14 @@ struct HomeView: View {
 
             if isEditing {
                 EditingBar(
-                    hasBackgrounds: !(entry?.manifest?.builtVariants.isEmpty ?? true),
+                    hasBackgrounds: !(manifest?.builtVariants.isEmpty ?? true),
                     onOptions: { choosingSlots = true },
                     onDone: { isEditing = false }
                 )
             } else {
                 SaveButton(saving: saving) { save() }
                 // Anything to change at all: a slot, or a clip variant.
-                if let manifest = entry?.manifest,
+                if let manifest,
                    !manifest.placedTiles.isEmpty || !manifest.builtVariants.isEmpty {
                     SlotsButton { isEditing = true }
                 }
@@ -75,16 +107,30 @@ struct HomeView: View {
             note = nil
             router.lastFailure = nil
         }
+        // A design that arrives while this is on screen has to appear on it.
+        // The store is a folder and `ActiveDesign` is UserDefaults, neither of
+        // which SwiftUI observes - the receiver's status is the one thing that
+        // changes in a way it does.
+        .onChange(of: receiver.status) { _, _ in
+            selection = ActiveDesign.identifier
+            reload()
+        }
+        .task { reload() }
+        // A delivery that arrived over a cable or through Files is unpacked on
+        // the way to the foreground, and nothing else here would notice it.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { reload() }
+        }
         .ignoresSafeArea()
         .statusBarHidden(entry != nil)
         .persistentSystemOverlays(.hidden)
         .sheet(isPresented: $choosingSlots) {
-            if let entry, let manifest = entry.manifest {
+            if let manifest {
                 SlotSettingsView(manifest: manifest) { slotsEdition += 1 }
             }
         }
         .sheet(item: $editingTile) { tile in
-            if let manifest = entry?.manifest {
+            if let manifest {
                 SlotEditorView(manifest: manifest, tile: tile) { slotsEdition += 1 }
             }
         }
@@ -163,7 +209,11 @@ struct HomeView: View {
             startTime: { spec.videoTime(loopFrameCount: loop) },
             assets: manifest.placedAssets,
             assetImage: { asset in
-                PrebuiltDesign.pictureURL(assetID: asset.id)
+                let name = PrebuiltDesign.pictureResource(assetID: asset.id)
+                let delivered = entry.artFolder
+                    .map { $0.appendingPathComponent("\(name).png") }
+                    .flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+                return (delivered ?? PrebuiltDesign.pictureURL(assetID: asset.id))
                     .flatMap {
                         ImageLoader.load(
                             at: $0,
@@ -194,7 +244,8 @@ struct HomeView: View {
                             for: tile,
                             designID: manifest.designID,
                             authoredAppID: authored[tile.id] ?? tile.appID,
-                            side: side
+                            side: side,
+                            artFolder: entry.artFolder
                         ) ?? icons.image(for: tile)
                     )
                 }
@@ -213,7 +264,7 @@ struct HomeView: View {
     /// Whether a drag began on an icon. A slot is a button, and a swipe that
     /// starts inside one belongs to it rather than to the background.
     private func isOnASlot(_ point: CGPoint) -> Bool {
-        guard let manifest = entry?.manifest else { return false }
+        guard let manifest else { return false }
         let scale = 1 / max(displayScale, 1)
         return (SlotChoices.effectiveTiles(manifest: manifest) + SlotChoices.blankedTiles(manifest: manifest))
             .contains { tile in
@@ -233,7 +284,7 @@ struct HomeView: View {
     /// changing something else - a swipe that means two things depending on
     /// what this design happens to carry is worse than one that means nothing.
     private func switchBackground(by step: Int) {
-        guard let manifest = entry?.manifest, !manifest.builtVariants.isEmpty else { return }
+        guard let manifest, !manifest.builtVariants.isEmpty else { return }
         // Alphabetical from the clip this scene leads with, so a swipe walks
         // the same order the options sheet lists.
         let options = manifest.clipSequence
@@ -247,7 +298,7 @@ struct HomeView: View {
     }
 
     private func save() {
-        guard let entry, let manifest = entry.manifest else {
+        guard let entry, let manifest else {
             note = "This build has no wallpaper in it."
             return
         }
@@ -305,7 +356,25 @@ struct HomeView: View {
             // wrong artwork past the widget's edge, which is the one thing
             // baking the tiles into it is for.
             artwork: { tile in
-                let url = tile.skin.flatMap { PrebuiltDesign.skinURL(designID: manifest.designID, skin: $0) }
+                // A delivered design's icons are beside it rather than in the
+                // bundle. Baking from the bundle would put a plate on the
+                // wallpaper under a tile the widget draws properly, and the
+                // seam between them is exactly what this bake exists to avoid.
+                let names = [
+                    tile.skin.map { PrebuiltDesign.skinResource(designID: manifest.designID, skin: $0) },
+                    PrebuiltDesign.iconResource(
+                        tileID: tile.id,
+                        appID: tile.appID,
+                        authoredAppID: authored[tile.id] ?? tile.appID
+                    ),
+                ].compactMap { $0 }
+                let delivered = entry.artFolder.flatMap { folder in
+                    names
+                        .map { folder.appendingPathComponent("\($0).png") }
+                        .first { FileManager.default.fileExists(atPath: $0.path) }
+                }
+                let url = delivered
+                    ?? tile.skin.flatMap { PrebuiltDesign.skinURL(designID: manifest.designID, skin: $0) }
                     ?? PrebuiltDesign.iconURL(
                         tileID: tile.id,
                         appID: tile.appID,

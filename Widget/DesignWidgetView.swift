@@ -44,6 +44,12 @@ struct DesignWidgetView: View {
         let origin: String
         let scope: String
         let name: String
+        /// Non-empty only for a design built as pictures, which is the only
+        /// kind that can have arrived after this build was installed.
+        var frames: [Image] = []
+        /// Where a delivered design's tile icons and placed pictures are. Nil
+        /// for a bundled design, whose artwork is in the bundle.
+        var artFolder: URL?
     }
 
     @ViewBuilder
@@ -53,9 +59,11 @@ struct DesignWidgetView: View {
             // composition: the question it answers is what the system does to
             // those bounds.
             EdgeLabView()
+        } else if MaskLab.isEnabled {
+            maskLab()
         } else if FontLab.isEnabled, let lab = lab() {
             lab
-        } else if let source = bundled() {
+        } else if let source = delivered() ?? bundled() {
             let _ = record(source: source)
             // The phone's slot choices, applied at render time: the occupant is
             // live SwiftUI over the frozen animation, so it is the one part of
@@ -77,9 +85,17 @@ struct DesignWidgetView: View {
                 wallpaper: source.backdrop,
                 wallpaperRect: source.manifest.backdropRect,
                 isAnimated: source.fontsUsable,
+                frames: source.frames,
                 assets: source.manifest.placedAssets,
                 assetImage: { asset in
-                    PrebuiltDesign.pictureURL(assetID: asset.id)
+                    // A delivered design's pictures travel with it; a bundled
+                    // one's are in the bundle. Same names either way, so the
+                    // only difference is which folder is tried first.
+                    let name = PrebuiltDesign.pictureResource(assetID: asset.id)
+                    let delivered = source.artFolder
+                        .map { $0.appendingPathComponent("\(name).png") }
+                        .flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+                    return (delivered ?? PrebuiltDesign.pictureURL(assetID: asset.id))
                         .flatMap {
                             ImageLoader.load(
                                 at: $0,
@@ -106,7 +122,8 @@ struct DesignWidgetView: View {
                             for: tile,
                             designID: source.manifest.designID,
                             authoredAppID: authored[tile.id] ?? tile.appID,
-                            side: side
+                            side: side,
+                            artFolder: source.artFolder
                         )
                     )
                 }
@@ -115,6 +132,37 @@ struct DesignWidgetView: View {
             let _ = record(source: nil)
             PlaceholderView(message: "Open Motionary and add a clip.")
         }
+    }
+
+    /// The mask lab, which needs no design at all: the cards it draws are
+    /// written into the app group by the app, which is the whole point of them.
+    private func maskLab() -> MaskLabView {
+        let phasing = MaskLab.phasing
+        WidgetRenderLog.append("mask enter \(MemoryFootprint.megabytes)MB")
+        let loaded = MaskLab.loadCards(phasing)
+        // The footprint after decoding is the measurement: the extension is
+        // killed a little above 45MB, and a stack of distinct frames is the one
+        // arrangement that can reach it.
+        WidgetRenderLog.append("""
+        mask \(loaded.images.count)/\(phasing.cardCount) cards \(phasing.cardPixels)px \
+        \(phasing.laneCount) lanes \(MemoryFootprint.megabytes)MB
+        """)
+        if let store = try? DesignStore() {
+            MaskLab.record(
+                loaded.notes + [
+                    "lanes \(phasing.laneCount), \(phasing.lanesPerCard) per card",
+                    "card holds \(String(format: "%.2f", phasing.cardDuration))s, "
+                        + "wraps every \(String(format: "%.1f", phasing.cycleDuration))s",
+                    "footprint \(MemoryFootprint.megabytes)MB",
+                ],
+                store: store
+            )
+        }
+        return MaskLabView(
+            cards: loaded.images,
+            phasing: phasing,
+            reference: TimerFontSpec.cycleAlignedReference()
+        )
     }
 
     /// The font lab, when it is switched on and there is an imported design
@@ -148,7 +196,82 @@ struct DesignWidgetView: View {
         )
     }
 
-    /// The design compiled into this build, and the only kind there is.
+    /// A design that arrived after this build was installed.
+    ///
+    /// There used to be a path like this and it was removed, because a design
+    /// in the app group could not animate - its fonts were never in the
+    /// extension's bundle - and preferring it showed a stale, still picture
+    /// forever. The rule that replaces it is narrower and says exactly why:
+    /// prefer a delivered design only when it is built as pictures and every
+    /// one of those pictures is on disk. A picture stack needs nothing
+    /// installed, and a partial one is refused rather than drawn with black
+    /// gaps where the missing lanes are.
+    private func delivered() -> Source? {
+        // The selection by name, not `ActiveDesign.resolve`. Resolving falls
+        // back to whatever is built when the selection matches nothing, and a
+        // bundled design is not in this store - so a phone that had ever taken
+        // a delivery would fall back to it forever and every bundled design
+        // would become unreachable. That is the old bug with new furniture.
+        guard let store = try? DesignStore(),
+              let selected = ActiveDesign.identifier,
+              let design = store.loadAll().first(where: { $0.id == selected }),
+              var manifest = try? store.loadManifest(id: design.id),
+              manifest.isFrameDriven
+        else { return nil }
+
+        // The clip the phone chose, which is a whole alternate animation: its
+        // own frames, its own backdrop, its own length. Guarded on the frames
+        // actually being there, so a choice left over from a build that had
+        // more clips degrades to the design's own rather than to a stack with
+        // nothing in it.
+        var variantID: UUID?
+        var name = design.name
+        if let variant = VariantChoice.resolved(in: manifest),
+           let variantFrames = variant.frameCount,
+           store.frameCount(for: design.id, variant: variant.id) == variantFrames {
+            variantID = variant.id
+            manifest.loopFrameCount = variantFrames
+            manifest.frameCount = variantFrames
+            name = "\(design.name) (\(variant.name))"
+        }
+        guard let count = manifest.frameCount else { return nil }
+
+        let loaded = FrameSetLoader.load(
+            designID: design.id,
+            count: count,
+            store: store,
+            variant: variantID
+        )
+        WidgetRenderLog.append("""
+        deliv \(name) \(loaded.report.summary) \(MemoryFootprint.megabytes)MB
+        """)
+        guard loaded.report.isComplete else { return nil }
+
+        let longest = manifest.backdropRect.map { Int(max($0.width, $0.height)) }
+            ?? Int(max(manifest.screenSize.width, manifest.screenSize.height))
+        // The baked crop when there is one, the whole wallpaper otherwise: the
+        // widget only ever shows its own frame, and the full screen costs about
+        // 12.6MB decompressed against a budget this stack is already spending.
+        let backdropURL = variantID.flatMap { store.existingWidgetBackdropURL(for: design.id, variant: $0) }
+            ?? store.existingWidgetBackdropURL(for: design.id)
+            ?? store.wallpaperURL(for: design.id)
+        let backdrop = ImageLoader.load(at: backdropURL, maxPixelSize: longest)
+
+        return Source(
+            manifest: manifest,
+            backdrop: backdrop.map { Image(decorative: $0, scale: 1) },
+            // Nothing was registered and nothing needed to be: the frames are
+            // the animation, and they are already in hand.
+            fontsUsable: true,
+            origin: "delivered",
+            scope: variantID == nil ? "app group frames" : "app group frames, variant",
+            name: name,
+            frames: loaded.frames,
+            artFolder: store.artFolder(for: design.id)
+        )
+    }
+
+    /// The design compiled into this build.
     ///
     /// There used to be a second source: a design generated on the phone into
     /// the app group, which this preferred. That feature is gone - a design has

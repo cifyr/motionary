@@ -316,6 +316,87 @@ struct DesignStore {
             .appendingPathComponent("\(LaneFontBuilder.postScriptName(family: familyBase, lane: lane)).ttf")
     }
 
+    // MARK: - Frames
+
+    /// Frames of a design built as pictures rather than as fonts.
+    ///
+    /// Beside the fonts rather than inside them, because the two are alternate
+    /// bodies for the same design: a font-built design animates only where its
+    /// fonts were installed, and a frame-built one animates anywhere the files
+    /// can be read - which is the difference between shipping a design in a
+    /// build and delivering one to an app already on a phone.
+    /// One folder per clip: the design's own, and one for each variant. A
+    /// variant is a whole alternate animation, the same way it is a whole
+    /// alternate lane-font set in a build, so which one plays can change on the
+    /// phone without anything being rebuilt.
+    func framesFolder(for id: UUID, variant: UUID? = nil) -> URL {
+        let name = variant.map { "Frames-\($0.uuidString.lowercased())" } ?? "Frames"
+        return folder(for: id).appendingPathComponent(name, isDirectory: true)
+    }
+
+    /// Zero-padded, so the folder reads in playing order in any listing.
+    func frameURL(for id: UUID, index: Int, variant: UUID? = nil) -> URL {
+        framesFolder(for: id, variant: variant)
+            .appendingPathComponent(String(format: "frame-%04d.jpg", index))
+    }
+
+    /// Every frame folder this design has, its own first.
+    func frameFolders(for id: UUID) -> [(variant: UUID?, url: URL)] {
+        let names = (try? FileManager.default.contentsOfDirectory(
+            atPath: folder(for: id).path
+        )) ?? []
+        let variants = names
+            .filter { $0.hasPrefix("Frames-") }
+            .compactMap { UUID(uuidString: String($0.dropFirst("Frames-".count))) }
+            .sorted { $0.uuidString < $1.uuidString }
+        return [(nil, framesFolder(for: id))]
+            + variants.map { ($0, framesFolder(for: id, variant: $0)) }
+    }
+
+    /// A delivered design's own artwork: the tile icons, placed pictures and
+    /// skins that a built design gets from the app bundle instead.
+    ///
+    /// Named exactly as the bundle names them, so one lookup can try here and
+    /// fall back there without knowing which kind of design it is holding.
+    func artFolder(for id: UUID) -> URL {
+        folder(for: id).appendingPathComponent("Art", isDirectory: true)
+    }
+
+    func artURL(for id: UUID, named name: String) -> URL? {
+        let url = artFolder(for: id).appendingPathComponent(name)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    func frameCount(for id: UUID, variant: UUID? = nil) -> Int {
+        let names = (try? FileManager.default.contentsOfDirectory(
+            atPath: framesFolder(for: id, variant: variant).path
+        )) ?? []
+        return names.filter { $0.hasPrefix("frame-") && $0.hasSuffix(".jpg") }.count
+    }
+
+    /// Cleared before a rebuild so frames from a longer previous loop cannot
+    /// linger past the end of a shorter one and play as its tail.
+    func clearFrames(for id: UUID, variant: UUID? = nil) throws {
+        let folder = framesFolder(for: id, variant: variant)
+        if FileManager.default.fileExists(atPath: folder.path) {
+            try FileManager.default.removeItem(at: folder)
+        }
+        try FileManager.default.createDirectory(
+            at: folder,
+            withIntermediateDirectories: true,
+            attributes: Self.directoryAttributes
+        )
+    }
+
+    /// Every frame folder at once, for a rebuild that may produce a different
+    /// set of variants than the last one left behind.
+    func clearAllFrames(for id: UUID) throws {
+        for folder in frameFolders(for: id) {
+            try? FileManager.default.removeItem(at: folder.url)
+        }
+        try clearFrames(for: id)
+    }
+
     // MARK: - Designs
 
     func createFolder(for id: UUID) throws {

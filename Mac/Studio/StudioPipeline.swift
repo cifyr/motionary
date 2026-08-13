@@ -384,6 +384,73 @@ struct StudioPipeline: Sendable {
         )
     }
 
+    /// Builds a design as pictures and packs it into one file.
+    ///
+    /// The other path here compiles a design into the widget extension and
+    /// installs the app, because glyphs only draw from a bundle. This one
+    /// produces something that can be handed to a phone that already has the
+    /// app - AirDropped, opened from Files, or later synced - and needs no
+    /// toolchain at the other end. The cost is the loop: a picture per lane is
+    /// two seconds where the fonts get thirty.
+    ///
+    /// Progress is plain text rather than a `Stage`, because nothing about this
+    /// job is a build-and-install and mapping it onto those captions would have
+    /// the run screen claiming to be compiling something.
+    @discardableResult
+    func deliverable(
+        design: DesignDocument,
+        to destination: URL,
+        onProgress: @escaping @Sendable (String) -> Void
+    ) async throws -> URL {
+        let store = try makeStore()
+        let artwork = TileArtwork(
+            iconsFolder: Self.iconsFolder(for: store),
+            skinsFolder: store.skinsFolder(for: design.id)
+        )
+        let designID = design.id
+        let manifest = try await FrameSetGenerator(
+            store: store,
+            tileArtwork: { artwork.image(for: $0) },
+            assetArtwork: { AssetArtwork.image(for: $0, designID: designID, store: store) }
+        ).build(design: design) { stage in
+            onProgress(stage.label)
+        }
+
+        // Beside the design rather than into the project's Resources: these are
+        // the pictures its tiles draw, and a delivered design has no bundle to
+        // read them out of.
+        onProgress("Rendering the tile artwork")
+        let artFolder = store.artFolder(for: design.id)
+        // Cleared first: a design that has lost a tile since the last delivery
+        // would otherwise keep sending that tile's icon forever.
+        try? FileManager.default.removeItem(at: artFolder)
+        try BundleWriter(artworkFolder: artFolder).writeArtwork(
+            manifest: manifest,
+            iconsFolder: Self.iconsFolder(for: store),
+            store: store,
+            includeSkinLibrary: false,
+            // Nor every app a slot could hold instead: 246 files and 56MB for
+            // one design, against 306KB of frames. A delivered design carries
+            // what it shows, and a slot swapped on the phone falls back to the
+            // catalogue's plate rather than to nothing.
+            includeAlternates: false
+        )
+
+        onProgress("Packing \(manifest.frameCount ?? 0) frames")
+        let data = try DesignPackage.write(designID: design.id, store: store)
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try data.write(to: destination, options: Data.WritingOptions.atomic)
+        onProgress(String(
+            format: "%d frames, %.1fs loop, %.1fMB",
+            manifest.frameCount ?? 0,
+            Double(manifest.frameCount ?? 0) / Double(manifest.framesPerSecond),
+            Double(data.count) / 1_048_576
+        ))
+        return destination
+    }
+
     /// The whole job: build the design, compile it into the app, install it.
     func run(
         source: URL,

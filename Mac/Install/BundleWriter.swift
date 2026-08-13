@@ -60,10 +60,13 @@ enum ProjectLocator {
 /// the timeline entirely - so putting a design on the Home Screen means
 /// compiling it in.
 struct BundleWriter {
-    /// The project root: the folder holding `project.yml`.
-    let projectRoot: URL
+    /// The project root: the folder holding `project.yml`. Absent when this is
+    /// writing a delivered design's artwork rather than a build's.
+    let projectRoot: URL?
 
-    private var resources: URL { projectRoot.appendingPathComponent("Resources", isDirectory: true) }
+    /// Where the artwork and fonts land. The project's `Resources` for a build;
+    /// a design's own folder when the design is being packed to travel.
+    let resources: URL
 
     init(projectRoot: URL) throws {
         guard FileManager.default.fileExists(
@@ -72,6 +75,51 @@ struct BundleWriter {
             throw BundleWriterError.projectNotFound(path: projectRoot.path)
         }
         self.projectRoot = projectRoot
+        resources = projectRoot.appendingPathComponent("Resources", isDirectory: true)
+    }
+
+    /// Writes the artwork set somewhere other than the project.
+    ///
+    /// A delivered design carries its icons with it, and they have to be the
+    /// same files under the same names as a bundled design's: the phone looks
+    /// an icon up by the tile that owns it, and one naming scheme in the bundle
+    /// and another beside the design would mean tiles that draw in a build and
+    /// fall back to a plate when the same design is sent.
+    init(artworkFolder: URL) throws {
+        try FileManager.default.createDirectory(
+            at: artworkFolder,
+            withIntermediateDirectories: true
+        )
+        projectRoot = nil
+        resources = artworkFolder
+    }
+
+    /// Everything a design's tiles and placed pictures need, and nothing else -
+    /// no fonts, no index, no Info.plist rewriting.
+    /// `includeSkinLibrary` ships every skin the design owns, so the phone can
+    /// put any of them on any slot. A build can afford that; a delivery cannot
+    /// - measured at 105MB against 6MB of frames for one design, to carry
+    /// artwork the design is not using. Each tile's own icon is rendered from
+    /// its skin either way, so what a delivered design loses is re-skinning on
+    /// the phone, not the picture it arrives with.
+    func writeArtwork(
+        manifest: BuildManifest,
+        iconsFolder: URL?,
+        store: DesignStore?,
+        includeSkinLibrary: Bool = true,
+        includeAlternates: Bool = true
+    ) throws {
+        let skinsFolder = store?.skinsFolder(for: manifest.designID)
+        try installIcons(
+            manifest: manifest,
+            from: iconsFolder,
+            skinsFolder: skinsFolder,
+            includeAlternates: includeAlternates
+        )
+        try installPictures(manifest: manifest, store: store)
+        if includeSkinLibrary {
+            try installSkins(designID: manifest.designID, store: store)
+        }
     }
 
     struct Result: Sendable {
@@ -159,6 +207,9 @@ struct BundleWriter {
         }
 
         try writeIndex(designs)
+        // Only a build rewrites the project; a delivery has no project to
+        // rewrite, and no fonts to declare in one either.
+        guard let projectRoot else { throw BundleWriterError.projectNotFound(path: resources.path) }
         try rewriteAppFonts(at: projectRoot.appendingPathComponent("Widget/Info.plist"), fonts: allFonts)
         try rewriteAppFonts(at: projectRoot.appendingPathComponent("App/Info.plist"), fonts: allFonts)
 
@@ -190,14 +241,19 @@ struct BundleWriter {
     /// only the manifest to go on and no icon cache to consult. Two tiles
     /// sharing an icon costs one extra copy of a 256px PNG, which is cheaper
     /// than teaching the extension about cache keys.
-    private func installIcons(manifest: BuildManifest, from iconsFolder: URL?, skinsFolder: URL?) throws {
+    private func installIcons(
+        manifest: BuildManifest,
+        from iconsFolder: URL?,
+        skinsFolder: URL?,
+        includeAlternates: Bool = true
+    ) throws {
         let manager = FileManager.default
         let artwork = TileArtwork(iconsFolder: iconsFolder, skinsFolder: skinsFolder)
         for tile in manifest.placedTiles {
             // Alternates first: they cannot stop the authored icon shipping.
             // Only skinned ones have a file at all - the rest draw their
             // catalogue SF Symbol on the phone, exactly like a missing icon.
-            for alternate in tile.offeredAlternates {
+            for alternate in (includeAlternates ? tile.offeredAlternates : []) {
                 guard let skin = alternate.skin, let rendered = artwork.url(forSkin: skin) else { continue }
                 let name = PrebuiltDesign.iconResource(
                     tileID: tile.id,

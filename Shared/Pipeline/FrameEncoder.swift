@@ -34,6 +34,16 @@ struct FrameEncoder {
 
     /// Base64 JPEG for every frame, ready to inline as a data URI.
     func encodedFrames(_ frames: [CGImage]) throws -> [String] {
+        try frameData(frames).map { $0.base64EncodedString() }
+    }
+
+    /// The same frames as files rather than as text.
+    ///
+    /// A design built as pictures writes these straight out; one built as fonts
+    /// base64s them into glyphs. Same crop, same tint, same edge correction -
+    /// the two bodies of a design have to be the same picture, or switching
+    /// between them would move the scene against the wallpaper behind it.
+    func frameData(_ frames: [CGImage]) throws -> [Data] {
         guard crop.width >= 1, crop.height >= 1 else { throw FrameEncoderError.cropEmpty }
 
         return try frames.enumerated().map { index, frame in
@@ -64,7 +74,7 @@ struct FrameEncoder {
             guard let data = Self.jpegData(prepared, quality: quality) else {
                 throw FrameEncoderError.jpegEncodeFailed(frameIndex: index, cropSize: crop.size)
             }
-            return data.base64EncodedString()
+            return data
         }
     }
 

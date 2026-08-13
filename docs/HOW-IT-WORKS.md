@@ -37,13 +37,25 @@ registration, `CTFontManagerRegisterGraphicsFont`, `Font(CTFont)`, App Group URL
 in the archive, and the private `_wantsCustomFontsEmbeddedInArchive` flag — which
 is real, and linkable, and embeds nothing.
 
-So:
+So, for the font engine:
 
 - designs are compiled on a Mac and shipped inside the app, not made on the phone;
 - the phone app is a viewer, with no import, no settings and no generation;
 - adding or changing a design means a build and an install.
 
-That is not a design preference. It is the only arrangement that draws.
+That is not a design preference. It is the only arrangement that draws **frames
+made of glyphs**.
+
+> **There is a way around it, measured on 2026-08-12.** The constraint is about
+> fonts, and only about fonts. A live timer mask gates an `Image(uiImage:)`
+> decoded from bytes written into the app group *after* install — verified on
+> device and in the simulator, up to 64 distinct frames at full widget
+> resolution, with the extension's footprint never above 12 MB. Frames delivered
+> as pictures need nothing in the bundle, so a design can be sent to an
+> installed app. The price is the loop: one picture per lane gives exactly
+> `laneCount / fps` = **2 seconds**, where the font engine's fifteen glyphs per
+> lane stretch the same lane cycle to 30. See
+> [the measurement](widget-animation-surface.md#411-measured-cost-of-a-runtime-frame-stack--device-2026-08-12).
 
 ## The animation trick
 
