@@ -48,6 +48,27 @@ enum FramePayloadPlan {
 
     static let defaultByteBudget = 8 * 1_048_576
 
+    /// Where the widget stops being drawn, as opposed to where a build aims.
+    ///
+    /// Measured by photographing a Home Screen: 11.9MB of frames draws nothing,
+    /// 9.9MB draws. `byteBudget` sits under this with room for the rest of the
+    /// archived tree; this is the number a set already on a phone is judged
+    /// against, because it was packed by whatever budget was current when it was
+    /// sent - and a design delivered under the old 12MB one is black until it
+    /// is sent again.
+    static let archiveLimit = 10 * 1_048_576
+
+    /// How many lanes to skip so a frame set already on disk fits the archive.
+    ///
+    /// Taking every `n`th lane halves the frame rate rather than the loop: the
+    /// mask gates each lane at a fixed offset, so the lanes that remain keep
+    /// their places in the cycle and each one is simply held longer. The clip
+    /// plays at the speed it was authored at, less smoothly.
+    static func laneStride(forBytes totalBytes: Int, limit: Int = archiveLimit) -> Int {
+        guard totalBytes > limit, limit > 0 else { return 1 }
+        return Int((Double(totalBytes) / Double(limit)).rounded(.up))
+    }
+
     /// The smallest per-image cap seen on shipping hardware is far lower than
     /// this, but the caps observed on modern phones cluster around 2.1M px
     /// [FORUM: 710745, 768169]. Over it, the render is dropped rather than

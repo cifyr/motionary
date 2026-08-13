@@ -29,6 +29,9 @@ struct CompositionView<Tile: View>: View {
     /// either way. Supplied rather than loaded here, because the extension is
     /// the one process that must not decode more than it draws.
     var frames: [Image] = []
+    /// How many lanes each of those frames covers. Above one, the set was too
+    /// big to draw whole and the loader thinned it - see `FrameSetLoader.load`.
+    var frameStride = 1
     /// Placed pictures, drawn over the animation and under the tiles by
     /// default - the same stacking the editor and the wallpaper bake use. An
     /// asset with `drawsBehindAnimation` set instead draws between the
@@ -94,7 +97,8 @@ struct CompositionView<Tile: View>: View {
                         laneCount: manifest.frameLaneCount,
                         framesPerSecond: manifest.framesPerSecond,
                         maskFont: manifest.maskFontResource,
-                        maskPeriod: manifest.maskPeriodSeconds
+                        maskPeriod: manifest.maskPeriodSeconds,
+                        laneStride: frameStride
                     )
                         .frame(width: crop.width * scale, height: crop.height * scale)
                         .offset(

@@ -47,6 +47,9 @@ struct DesignWidgetView: View {
         /// Non-empty only for a design built as pictures, which is the only
         /// kind that can have arrived after this build was installed.
         var frames: [Image] = []
+        /// How many lanes each frame covers, above one only when the set on
+        /// disk was too big for one archive to draw.
+        var frameStride = 1
         /// Where a delivered design's tile icons and placed pictures are. Nil
         /// for a bundled design, whose artwork is in the bundle.
         var artFolder: URL?
@@ -86,6 +89,7 @@ struct DesignWidgetView: View {
                 wallpaperRect: source.manifest.backdropRect,
                 isAnimated: source.fontsUsable,
                 frames: source.frames,
+                frameStride: source.frameStride,
                 assets: source.manifest.placedAssets,
                 assetImage: { asset in
                     // A delivered design's pictures travel with it; a bundled
@@ -286,6 +290,7 @@ struct DesignWidgetView: View {
             scope: variantID == nil ? "app group frames" : "app group frames, variant",
             name: name,
             frames: loaded.frames,
+            frameStride: loaded.report.stride,
             artFolder: store.artFolder(for: design.id)
         )
     }

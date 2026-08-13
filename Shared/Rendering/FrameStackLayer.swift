@@ -31,6 +31,13 @@ struct FrameStackLayer: View {
     /// how a clip longer than two seconds plays as long as it is.
     var maskFont = FontSetGenerator.blinkFontResourceName
     var maskPeriod: TimeInterval = 2
+    /// How many lanes each frame covers, when a set was too big to draw whole.
+    ///
+    /// The lanes that remain keep their own offsets rather than closing up, so
+    /// the cycle still takes exactly as long - each frame is simply the one on
+    /// top for `laneStride` phases instead of one. That is a lower frame rate,
+    /// not a faster clip. See `FrameSetLoader.load`.
+    var laneStride = 1
 
     /// Which frame a lane shows. Its own function because getting it wrong
     /// shows as a loop playing in the wrong order, which looks like a bad clip
@@ -94,9 +101,11 @@ struct FrameStackLayer: View {
         size: CGSize
     ) -> some View {
         let frameDuration = 1 / Double(max(1, framesPerSecond))
+        let step = max(1, laneStride)
+        let drawn = Array(Swift.stride(from: lanes.lowerBound, to: lanes.upperBound, by: step))
         return ZStack {
-            ForEach(Array(lanes), id: \.self) { lane in
-                frames[Self.frameIndex(lane: lane, frameCount: frames.count)]
+            ForEach(drawn, id: \.self) { lane in
+                frames[Self.frameIndex(lane: lane / step, frameCount: frames.count)]
                     .resizable()
                     .interpolation(.high)
                     .frame(width: size.width, height: size.height)

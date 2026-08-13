@@ -418,6 +418,16 @@ JPEG bytes: `ok` is a true statement about a widget nobody can see.
 `FramePayloadPlan.byteBudget` was 12MB, called "well under the archive figures"
 in a paragraph that quotes one of those figures as 10. It is now 8.
 
+**A design already on a phone cannot be fixed by changing the budget.** It was
+packed by whatever budget was current when it was sent, and the extension cannot
+re-encode it - so every design delivered under the old 12MB one stayed black
+until it was sent again, which is a failure nobody could read. `FrameSetLoader`
+now measures the set on disk before loading it and draws one lane in `n` when it
+is over `FramePayloadPlan.archiveLimit`. The lanes that remain keep their own
+offsets rather than closing up, so each surviving frame is simply on top for
+longer: the clip keeps its length and its speed and loses smoothness. Measured -
+an 11.7MB set that drew nothing draws and animates at 1 lane in 2.
+
 **Lane count is not the ceiling.** Photographed on a Home Screen at a fixed byte
 budget, 60, 90, 120, 160, 190 and 240 lanes all draw and all animate. What the
 lane count costs is quality - the byte budget is shared out across the lanes -

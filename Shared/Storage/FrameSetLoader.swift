@@ -20,28 +20,50 @@ enum FrameSetLoader {
         let loaded: Int
         let bytes: Int
         let missing: [Int]
+        /// How many lanes each loaded frame covers. Above one, the set on disk
+        /// was too big for one archive and has been thinned.
+        var stride = 1
 
         var isComplete: Bool { loaded == requested && requested > 0 }
         /// A gap in the stack is a lane with nothing in it, which plays as a
         /// black flash once per loop rather than as an error.
         var summary: String {
             "\(loaded)/\(requested) frames, \(bytes / 1024)KB"
+                + (stride > 1 ? ", 1 in \(stride) to fit the archive" : "")
                 + (missing.isEmpty ? "" : ", missing \(missing.prefix(4).map(String.init).joined(separator: ","))")
         }
     }
 
+    /// Reads the frames, skipping some when the whole set will not fit.
+    ///
+    /// Over the archive limit nothing is drawn at all - not a partial picture,
+    /// not an error, a black widget with `ok` written beside it. A build now
+    /// shrinks its frames to stay under, but a design delivered before that
+    /// change is already sitting on the phone at whatever it was packed at, and
+    /// the extension cannot re-encode it. Dropping lanes is what it can do:
+    /// each remaining frame is held longer, so the clip keeps its length and
+    /// its speed and loses smoothness.
     static func load(
         designID: UUID,
         count: Int,
         store: DesignStore,
-        variant: UUID? = nil
+        variant: UUID? = nil,
+        limit: Int = FramePayloadPlan.archiveLimit
     ) -> (frames: [Image], report: Report) {
+        let urls = (0 ..< count).map { store.frameURL(for: designID, index: $0, variant: variant) }
+        // Sized from the file table rather than by reading them: the point is
+        // to avoid holding a set this big, so measuring it by loading it would
+        // be the same mistake one step earlier.
+        let onDisk = urls.reduce(0) { total, url in
+            total + ((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        }
+        let stride = FramePayloadPlan.laneStride(forBytes: onDisk, limit: limit)
+
         var images: [Image] = []
         var missing: [Int] = []
         var bytes = 0
-        for index in 0 ..< count {
-            let url = store.frameURL(for: designID, index: index, variant: variant)
-            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe),
+        for index in Swift.stride(from: 0, to: count, by: stride) {
+            guard let data = try? Data(contentsOf: urls[index], options: .mappedIfSafe),
                   let image = UIImage(data: data)
             else {
                 missing.append(index)
@@ -50,7 +72,16 @@ enum FrameSetLoader {
             bytes += data.count
             images.append(Image(uiImage: image))
         }
-        let report = Report(requested: count, loaded: images.count, bytes: bytes, missing: missing)
+        let wanted = Array(Swift.stride(from: 0, to: count, by: stride)).count
+        let report = Report(
+            requested: wanted, loaded: images.count, bytes: bytes, missing: missing, stride: stride
+        )
+        if stride > 1 {
+            logger.warning("""
+            \(count) frames come to \(onDisk / 1024)KB on disk, over the archive limit; \
+            drawing 1 lane in \(stride). Send the design again to get the rest back.
+            """)
+        }
         if report.isComplete {
             logger.info("loaded \(report.summary, privacy: .public)")
         } else {
