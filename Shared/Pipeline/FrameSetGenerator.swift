@@ -176,6 +176,19 @@ struct FrameSetGenerator {
         }
         onStage(.writingFrames(completed: data.count, total: data.count))
 
+        // The same preview the font path writes, and for the same reason: only
+        // the system widget renderer advances timer text fast enough to animate
+        // a design, so the app plays a video of it instead. A delivered design
+        // needs one too or it sits still in the app while moving on the Home
+        // Screen - and it cannot be built from the frames on the phone, where
+        // decoding sixty-four 1.7Mpx JPEGs a loop is not something to do behind
+        // a scroll view.
+        onStage(.writingFrames(completed: data.count, total: data.count))
+        try await PreviewVideoWriter(
+            size: DeviceGeometry.screenPixelSize,
+            framesPerSecond: spec.framesPerSecond
+        ).write(frames: frames, to: store.previewVideoURL(for: design.id))
+
         onStage(.writingWallpaper)
         let backdropRect = try await DesignArtWriter(
             store: store,

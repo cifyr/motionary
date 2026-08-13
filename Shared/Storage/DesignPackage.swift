@@ -92,6 +92,13 @@ enum DesignPackage {
         for name in ((try? FileManager.default.contentsOfDirectory(atPath: artFolder.path)) ?? []).sorted() {
             try add("art/\(name)", artFolder.appendingPathComponent(name))
         }
+        // The app plays this rather than the frames: it is the same picture,
+        // hardware-decoded, and it is what lets a delivered design animate in
+        // the app as well as on the Home Screen.
+        try add(
+            store.previewVideoURL(for: designID).lastPathComponent,
+            store.previewVideoURL(for: designID)
+        )
         if let backdrop = store.existingWidgetBackdropURL(for: designID) {
             try add(backdrop.lastPathComponent, backdrop)
         }
