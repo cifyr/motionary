@@ -246,6 +246,124 @@ struct FrameSetGenerator {
             speed: design.playbackSpeed,
             progress: { onStage(.decoding(progress: $0)) }
         )
+        return try await write(
+            frames: frames,
+            design: design,
+            spec: spec,
+            crop: crop,
+            variant: variant,
+            onStage: onStage
+        )
+    }
+
+    /// The pictures for one clip, without writing anything.
+    ///
+    /// A shuffled design's stack is cut from several clips into one frame set,
+    /// so the segments are gathered first and encoded together - one archive,
+    /// one budget.
+    private func pictures(
+        design: DesignDocument,
+        spec: TimerFontSpec,
+        source: URL,
+        isPrimary: Bool,
+        count: Int,
+        onStage: @Sendable @escaping (Stage) -> Void
+    ) async throws -> [CGImage] {
+        let extractor = MediaFrameExtractor(
+            url: source,
+            transform: design.mediaTransform,
+            background: design.backgroundName.flatMap {
+                ImageLoader.load(
+                    at: store.backgroundURL(for: design.id, name: $0),
+                    maxPixelSize: Int(max(
+                        DeviceGeometry.screenPixelSize.width,
+                        DeviceGeometry.screenPixelSize.height
+                    ))
+                )
+            },
+            clipRect: design.backgroundName == nil ? nil : design.widgetRect,
+            clipCornerRadius: design.effectiveCornerRadius
+        )
+        return try await extractor.composedFrames(
+            startFrame: isPrimary ? design.loopStartFrame : 0,
+            count: max(1, count),
+            frameRate: spec.framesPerSecond,
+            speed: design.playbackSpeed,
+            progress: { onStage(.decoding(progress: $0)) }
+        )
+    }
+
+    /// One stack cut from every clip the design has, in an order drawn from the
+    /// design's own id.
+    ///
+    /// The delivered path cannot do what the font path does here. There, the
+    /// programme runs over the thirty-second timer cycle and every segment is a
+    /// whole clip. Here the loop *is* the mask's period - ten seconds at the
+    /// most, because that is the longest pattern the substitution table can
+    /// express - so three clips get a third of it each and play the first
+    /// three-and-a-bit seconds of themselves. Shortening them is the price of
+    /// seeing all three; the alternative is seeing one.
+    ///
+    /// A clip shorter than its segment repeats inside it, the same way a short
+    /// clip already repeats around the whole stack.
+    private func programmedPictures(
+        design: DesignDocument,
+        spec: TimerFontSpec,
+        program: [ClipProgram.Segment],
+        onStage: @Sendable @escaping (Stage) -> Void
+    ) async throws -> [CGImage] {
+        var out: [CGImage] = []
+        for segment in program {
+            try Task.checkCancellation()
+            let source = segment.clipID
+                .flatMap { id in design.variants.first { $0.id == id } }
+                .map { store.variantClipURL(for: design.id, name: $0.sourceVideoName) }
+                ?? store.sourceVideoURL(for: design)
+            let cut = try await pictures(
+                design: design,
+                spec: spec,
+                source: source,
+                isPrimary: segment.clipID == nil,
+                count: segment.frameCount,
+                onStage: onStage
+            )
+            guard !cut.isEmpty else {
+                throw GeneratorError.emptyCrop(design: design.name)
+            }
+            for index in 0 ..< segment.frameCount {
+                out.append(cut[index % cut.count])
+            }
+        }
+        return out
+    }
+
+    /// How the cycle is divided between the clips.
+    ///
+    /// Evenly, with the remainder spread over the first few so the segments add
+    /// up to the whole stack exactly - a lane nobody drew into is a black flash
+    /// once per loop.
+    static func programShares(lanes: Int, clips: Int) -> [Int] {
+        guard clips > 0, lanes > 0 else { return [] }
+        let base = lanes / clips
+        let remainder = lanes % clips
+        return (0 ..< clips).map { base + ($0 < remainder ? 1 : 0) }
+    }
+
+    /// Everything a clip needs once its pictures exist: the artwork that shares
+    /// its archive, the budget that leaves, the encode, the files and the
+    /// preview.
+    ///
+    /// Separate from the extraction because a shuffled design's frames do not
+    /// come from one clip - they are cut from several - and the two have to be
+    /// encoded against one budget, because they end up in one archive.
+    private func write(
+        frames: [CGImage],
+        design: DesignDocument,
+        spec: TimerFontSpec,
+        crop: CGRect,
+        variant: ClipVariant?,
+        onStage: @Sendable @escaping (Stage) -> Void
+    ) async throws -> ClipBuild {
         guard let first = frames.first else {
             throw GeneratorError.emptyCrop(design: design.name)
         }
@@ -371,6 +489,17 @@ struct FrameSetGenerator {
         // nobody chose.
         spec = TimerFontSpec(laneCount: spec.laneCount, framesPerSecond: plan.framesPerSecond)
 
+        // Shuffle turns every clip into one stack, so it replaces the whole
+        // build rather than being applied after it: there is one frame set, the
+        // clips are not separately selectable, and nothing else needs to know.
+        if design.clipPlaybackMode == .shuffled, !design.variants.isEmpty,
+           let manifest = try await buildShuffled(
+               design: design, spec: spec, crop: crop, plan: plan, onStage: onStage
+           )
+        {
+            return manifest
+        }
+
         let primary = try await buildClip(
             design: design,
             spec: spec,
@@ -479,6 +608,89 @@ struct FrameSetGenerator {
         Self.logger.info("""
         frame build done design=\(design.id.uuidString, privacy: .public) \
         clips=\(builtVariants.count + 1) frames=\(primary.frameCount) bytes=\(totalBytes)
+        """)
+        return manifest
+    }
+
+    /// Every clip in one stack, in a shuffled order, as the design's only frame
+    /// set.
+    ///
+    /// Returns nil when the clips will not divide the cycle - fewer than two
+    /// usable clips, or a stack too short to give each one a segment - and the
+    /// caller builds the design the ordinary way rather than failing. A design
+    /// that plays one clip is worth more than a build that stops.
+    private func buildShuffled(
+        design: DesignDocument,
+        spec: TimerFontSpec,
+        crop: CGRect,
+        plan: (period: Int, resource: String, frames: Int, framesPerSecond: Int),
+        onStage: @Sendable @escaping (Stage) -> Void
+    ) async throws -> BuildManifest? {
+        let usable = design.variants.filter {
+            FileManager.default.fileExists(
+                atPath: store.variantClipURL(for: design.id, name: $0.sourceVideoName).path
+            )
+        }
+        let clipIDs: [UUID?] = [nil] + usable.map { $0.id as UUID? }
+        let shares = Self.programShares(lanes: plan.frames, clips: clipIDs.count)
+        guard clipIDs.count > 1, shares.allSatisfy({ $0 > 0 }) else {
+            Self.logger.warning("""
+            shuffle asked for on \(design.name, privacy: .public) but \(clipIDs.count) clips \
+            will not divide \(plan.frames) lanes; building one clip instead
+            """)
+            return nil
+        }
+        guard let program = ClipProgram.shuffled(
+            clips: zip(clipIDs, shares).map { .init(id: $0, frameCount: $1) },
+            totalFrames: plan.frames,
+            seed: design.id
+        ) else {
+            Self.logger.warning("no shuffled order fits \(plan.frames) lanes; building one clip instead")
+            return nil
+        }
+        Self.logger.info("""
+        shuffled \(program.count) segments over \(plan.frames) lanes: \
+        \(program.map { "\($0.frameCount)" }.joined(separator: "+"), privacy: .public)
+        """)
+
+        let frames = try await programmedPictures(
+            design: design, spec: spec, program: program, onStage: onStage
+        )
+        let built = try await write(
+            frames: frames, design: design, spec: spec, crop: crop, variant: nil, onStage: onStage
+        )
+
+        let backdropRect = DesignArtWriter.backdropRect(widgetRect: design.widgetRect)
+        // No `clipVariants`: with a programme there is nothing to switch
+        // between, and offering a switch that the widget ignores is how a
+        // stale choice used to survive a rebuild.
+        let manifest = BuildManifest(
+            designID: design.id,
+            buildGeneration: design.buildGeneration + 1,
+            fontFamilyBase: design.fontFamilyBase,
+            laneCount: spec.laneCount,
+            framesPerSecond: spec.framesPerSecond,
+            loopFrameCount: built.frameCount,
+            animationCrop: crop,
+            widgetRect: design.widgetRect,
+            screenSize: DeviceGeometry.screenPixelSize,
+            wallpaperName: store.wallpaperURL(for: design.id).lastPathComponent,
+            totalFontBytes: built.totalBytes,
+            builtAt: Date(),
+            backdropRect: backdropRect.isNull ? nil : backdropRect,
+            frameCount: built.frameCount,
+            maskPeriod: plan.period,
+            tiles: design.tiles,
+            assets: design.assets,
+            readouts: design.readouts,
+            clipVariants: nil,
+            primaryClipName: design.primaryClipName,
+            clipProgram: program
+        )
+        try store.save(manifest)
+        Self.logger.info("""
+        shuffled build done design=\(design.id.uuidString, privacy: .public) \
+        clips=\(clipIDs.count) frames=\(built.frameCount) bytes=\(built.totalBytes)
         """)
         return manifest
     }

@@ -186,7 +186,16 @@ struct HomeView: View {
         // because variants only differ inside the widget frame. The loop is
         // the variant's own - lengths need not match across variants.
         let variant = manifest.hasShuffledClipProgram ? nil : VariantChoice.resolved(in: manifest)
-        let loop = manifest.hasShuffledClipProgram ? manifest.spec.totalFrames : (variant?.loopFrameCount ?? manifest.loopFrameCount)
+        // A shuffled design's loop is the whole programme. For a design built as
+        // fonts that is the timer cycle; for one built as pictures it is the
+        // stack, which is shorter - reading the font figure there played the
+        // preview against a loop eight times the one on the Home Screen.
+        let programLoop = manifest.isFrameDriven
+            ? (manifest.frameCount ?? manifest.loopFrameCount)
+            : manifest.spec.totalFrames
+        let loop = manifest.hasShuffledClipProgram
+            ? programLoop
+            : (variant?.loopFrameCount ?? manifest.loopFrameCount)
         // Blanked slots come back while editing: one that draws nothing would
         // otherwise be unreachable, and blanking it would be a one-way door.
         let blanked = isEditing ? SlotChoices.blankedTiles(manifest: manifest) : []

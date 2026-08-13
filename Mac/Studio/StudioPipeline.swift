@@ -442,11 +442,22 @@ struct StudioPipeline: Sendable {
             try FileManager.default.removeItem(at: destination)
         }
         try data.write(to: destination, options: Data.WritingOptions.atomic)
+        // The package size is the wrong number to read: most of it is wallpaper
+        // and preview video that the widget never archives. What decides
+        // whether the Home Screen shows a picture is the heaviest single clip's
+        // frames plus the artwork that shares its archive.
+        let heaviest = DesignPackage.archiveWeights(designID: design.id, store: store).first
         onProgress(String(
-            format: "%d frames, %.1fs loop, %.1fMB",
+            format: "%d frames, %.1fs loop, %.1fMB%@%@",
             manifest.frameCount ?? 0,
             Double(manifest.frameCount ?? 0) / Double(manifest.framesPerSecond),
-            Double(data.count) / 1_048_576
+            Double(data.count) / 1_048_576,
+            manifest.hasShuffledClipProgram
+                ? ", \(manifest.clipProgram?.count ?? 0) clips shuffled" : "",
+            heaviest.map {
+                String(format: ", %.1fMB per archive%@", Double($0.bytes) / 1_048_576,
+                       $0.fits ? "" : " - OVER THE LIMIT, the widget will drop lanes to fit")
+            } ?? ""
         ))
         return destination
     }

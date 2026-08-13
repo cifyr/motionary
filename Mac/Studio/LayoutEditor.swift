@@ -1592,7 +1592,13 @@ struct LayoutEditor: View {
                 .pickerStyle(.menu)
 
                 if design.clipPlaybackMode == .shuffled {
-                    Text("Plays every clip all the way through once, then reshuffles. Consecutive clips are always different. Studio fits clip speed so the complete bag loops cleanly; resolution, frame rate and quality stay unchanged.")
+                    Text("""
+                    Built into the app, every clip plays all the way through once and then \
+                    reshuffles across the thirty-second cycle. Sent to a phone, the loop is the \
+                    mask's own period - ten seconds at most - so the clips share it and each \
+                    plays the opening of itself: three clips get about three seconds each. \
+                    Consecutive clips are always different, and the order is fixed at build time.
+                    """)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

@@ -58,6 +58,59 @@ enum DesignPackage {
 
     // MARK: - Writing
 
+    /// What one clip will weigh inside the widget's archive.
+    ///
+    /// Not the package, which also carries the wallpapers and the preview
+    /// videos and is three times the size - none of that is archived. What the
+    /// renderer has to hold is the clip's frames, the backdrop behind them and
+    /// the artwork on every placed tile, and over about nine megabytes of it
+    /// the widget is not drawn at all.
+    struct ClipWeight: Sendable {
+        let clip: String
+        let frames: Int
+        let companions: Int
+
+        var bytes: Int { frames + companions }
+        var fits: Bool { bytes <= FramePayloadPlan.archiveLimit }
+        var summary: String {
+            String(
+                format: "%@ %.2fMB (%.2f frames + %.2f artwork)%@",
+                clip, Double(bytes) / 1_048_576, Double(frames) / 1_048_576,
+                Double(companions) / 1_048_576, fits ? "" : "  OVER THE ARCHIVE LIMIT"
+            )
+        }
+    }
+
+    /// Every clip's archive weight, heaviest first.
+    ///
+    /// Worth measuring at the point a design leaves the Mac, because it is the
+    /// last place anybody can read it: on the phone the extension hands the
+    /// bytes over and reports `ok`, and the process that fails to draw them
+    /// does not log anywhere this project can reach.
+    static func archiveWeights(designID: UUID, store: DesignStore) -> [ClipWeight] {
+        func size(_ url: URL) -> Int {
+            (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        }
+        let artFolder = store.artFolder(for: designID)
+        let art = ((try? FileManager.default.contentsOfDirectory(atPath: artFolder.path)) ?? [])
+            .reduce(0) { $0 + size(artFolder.appendingPathComponent($1)) }
+
+        return store.frameFolders(for: designID).map { folder in
+            let frames = ((try? FileManager.default.contentsOfDirectory(atPath: folder.url.path)) ?? [])
+                .filter { $0.hasPrefix("frame-") && $0.hasSuffix(".jpg") }
+                .reduce(0) { $0 + size(folder.url.appendingPathComponent($1)) }
+            let backdrop = folder.variant
+                .flatMap { store.existingWidgetBackdropURL(for: designID, variant: $0) }
+                ?? store.existingWidgetBackdropURL(for: designID)
+            return ClipWeight(
+                clip: folder.variant?.uuidString.lowercased() ?? "primary",
+                frames: frames,
+                companions: art + (backdrop.map(size) ?? 0)
+            )
+        }
+        .sorted { $0.bytes > $1.bytes }
+    }
+
     /// Packs a design's delivered body: its frames, its manifest and the two
     /// stills the composition needs. The source clip is deliberately left out -
     /// it is the largest thing in the folder and the phone has no use for it.
@@ -138,6 +191,17 @@ enum DesignPackage {
         withUnsafeBytes(of: UInt32(headerData.count).littleEndian) { out.append(contentsOf: $0) }
         out.append(headerData)
         out.append(payload)
+        // Read out per clip, because the package total says nothing about this:
+        // most of it is wallpaper and preview video, which the widget never
+        // archives. A clip over the limit is the black widget, and this is the
+        // last place before the phone that anybody can see it coming.
+        for weight in archiveWeights(designID: designID, store: store) {
+            if weight.fits {
+                logger.info("archive \(weight.summary, privacy: .public)")
+            } else {
+                logger.error("archive \(weight.summary, privacy: .public)")
+            }
+        }
         logger.info("packed \(designID.uuidString, privacy: .public): \(entries.count) files, \(out.count) bytes")
         return out
     }

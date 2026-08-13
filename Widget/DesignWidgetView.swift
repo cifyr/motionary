@@ -230,7 +230,11 @@ struct DesignWidgetView: View {
         // nothing in it.
         var variantID: UUID?
         var name = design.name
-        if let variant = VariantChoice.resolved(in: manifest),
+        // A shuffled design has no clip to choose: every clip is already in the
+        // one stack, cut into segments. A choice left over from before the
+        // shuffle was turned on must not pull one of them back out.
+        if !manifest.hasShuffledClipProgram,
+           let variant = VariantChoice.resolved(in: manifest),
            let variantFrames = variant.frameCount,
            store.frameCount(for: design.id, variant: variant.id) == variantFrames {
             variantID = variant.id
