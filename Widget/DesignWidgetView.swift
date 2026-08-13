@@ -196,8 +196,14 @@ struct DesignWidgetView: View {
     /// installed, and a partial one is refused rather than drawn with black
     /// gaps where the missing lanes are.
     private func delivered() -> Source? {
+        // The selection by name, not `ActiveDesign.resolve`. Resolving falls
+        // back to whatever is built when the selection matches nothing, and a
+        // bundled design is not in this store - so a phone that had ever taken
+        // a delivery would fall back to it forever and every bundled design
+        // would become unreachable. That is the old bug with new furniture.
         guard let store = try? DesignStore(),
-              let design = ActiveDesign.resolve(in: store),
+              let selected = ActiveDesign.identifier,
+              let design = store.loadAll().first(where: { $0.id == selected }),
               let manifest = try? store.loadManifest(id: design.id),
               manifest.isFrameDriven,
               let count = manifest.frameCount
