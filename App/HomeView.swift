@@ -12,6 +12,9 @@ struct HomeView: View {
     @State private var saving = false
     @State private var note: String?
     @StateObject private var icons = IconImageLoader(store: try? DesignStore())
+    private let store = try? DesignStore()
+    /// Bumped when a design is delivered, so the list picks it up.
+    @State private var deliveries = 0
 
     @State private var selection: UUID? = ActiveDesign.identifier
     @State private var choosingSlots = false
@@ -21,14 +24,24 @@ struct HomeView: View {
     /// Taps change a slot rather than open an app, and a blanked slot comes
     /// back as a target so it can be changed again.
     @State private var isEditing = false
+    @EnvironmentObject private var receiver: LocalDeliveryReceiver
     @State private var editingTile: PlacedTile?
     @Environment(\.displayScale) private var displayScale
 
     /// Whatever there is to say right now, from either source.
     private var message: String? { note ?? router.lastFailure }
 
-    private var entries: [PrebuiltDesign.Entry] { PrebuiltDesign.entries }
-    private var entry: PrebuiltDesign.Entry? { PrebuiltDesign.selected(id: selection) }
+    /// Delivered designs as well as bundled ones, and `deliveries` is what
+    /// makes this re-run after one arrives: the store is a folder, which
+    /// SwiftUI does not observe.
+    private var entries: [PrebuiltDesign.Entry] {
+        let _ = deliveries
+        return PrebuiltDesign.all(in: store)
+    }
+    private var entry: PrebuiltDesign.Entry? {
+        let _ = deliveries
+        return PrebuiltDesign.selected(id: selection, in: store)
+    }
 
     var body: some View {
         ZStack {
@@ -74,6 +87,14 @@ struct HomeView: View {
             try? await Task.sleep(for: .seconds(4))
             note = nil
             router.lastFailure = nil
+        }
+        // A design that arrives while this is on screen has to appear on it.
+        // The store is a folder and `ActiveDesign` is UserDefaults, neither of
+        // which SwiftUI observes - the receiver's status is the one thing that
+        // changes in a way it does.
+        .onChange(of: receiver.status) { _, _ in
+            selection = ActiveDesign.identifier
+            deliveries += 1
         }
         .ignoresSafeArea()
         .statusBarHidden(entry != nil)
@@ -163,7 +184,11 @@ struct HomeView: View {
             startTime: { spec.videoTime(loopFrameCount: loop) },
             assets: manifest.placedAssets,
             assetImage: { asset in
-                PrebuiltDesign.pictureURL(assetID: asset.id)
+                let name = PrebuiltDesign.pictureResource(assetID: asset.id)
+                let delivered = entry.artFolder
+                    .map { $0.appendingPathComponent("\(name).png") }
+                    .flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+                return (delivered ?? PrebuiltDesign.pictureURL(assetID: asset.id))
                     .flatMap {
                         ImageLoader.load(
                             at: $0,
@@ -194,7 +219,8 @@ struct HomeView: View {
                             for: tile,
                             designID: manifest.designID,
                             authoredAppID: authored[tile.id] ?? tile.appID,
-                            side: side
+                            side: side,
+                            artFolder: entry.artFolder
                         ) ?? icons.image(for: tile)
                     )
                 }
@@ -305,7 +331,25 @@ struct HomeView: View {
             // wrong artwork past the widget's edge, which is the one thing
             // baking the tiles into it is for.
             artwork: { tile in
-                let url = tile.skin.flatMap { PrebuiltDesign.skinURL(designID: manifest.designID, skin: $0) }
+                // A delivered design's icons are beside it rather than in the
+                // bundle. Baking from the bundle would put a plate on the
+                // wallpaper under a tile the widget draws properly, and the
+                // seam between them is exactly what this bake exists to avoid.
+                let names = [
+                    tile.skin.map { PrebuiltDesign.skinResource(designID: manifest.designID, skin: $0) },
+                    PrebuiltDesign.iconResource(
+                        tileID: tile.id,
+                        appID: tile.appID,
+                        authoredAppID: authored[tile.id] ?? tile.appID
+                    ),
+                ].compactMap { $0 }
+                let delivered = entry.artFolder.flatMap { folder in
+                    names
+                        .map { folder.appendingPathComponent("\($0).png") }
+                        .first { FileManager.default.fileExists(atPath: $0.path) }
+                }
+                let url = delivered
+                    ?? tile.skin.flatMap { PrebuiltDesign.skinURL(designID: manifest.designID, skin: $0) }
                     ?? PrebuiltDesign.iconURL(
                         tileID: tile.id,
                         appID: tile.appID,

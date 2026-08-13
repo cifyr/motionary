@@ -36,19 +36,61 @@ enum PrebuiltDesign {
         /// requiring a rebuild to see anything at all.
         var isLegacy = false
 
+        /// A delivered design's folder in the app group, when this entry is one
+        /// rather than a design compiled into the build.
+        ///
+        /// The same type either way, because everything the app does with a
+        /// design - show it, swipe to it, bake its wallpaper - is the same job
+        /// from either home, and a second type would have meant a second copy
+        /// of all of it. Only where the files are differs.
+        var deliveredFolder: URL?
+
+        var isDelivered: Bool { deliveredFolder != nil }
+
         private func resource(_ kind: String) -> String {
             isLegacy ? "prebuilt-\(kind)" : "prebuilt-\(id.uuidString.lowercased())-\(kind)"
         }
 
+        /// A file beside a delivered design, if it is there.
+        private func delivered(_ name: String) -> URL? {
+            guard let deliveredFolder else { return nil }
+            let url = deliveredFolder.appendingPathComponent(name)
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }
+
+        /// Where a delivered design's tile icons and placed pictures live. Nil
+        /// for a bundled design, whose artwork is in the bundle.
+        var artFolder: URL? { deliveredFolder?.appendingPathComponent("Art", isDirectory: true) }
+
         var manifestName: String { resource("manifest") }
-        var backdropURL: URL? { PrebuiltDesign.resolvedBackdrop(named: resource("backdrop")) }
-        var wallpaperURL: URL? { PrebuiltDesign.resource(named: resource("wallpaper"), extension: "png") }
+        var backdropURL: URL? {
+            if isDelivered {
+                return DesignStore.backdropExtensions.lazy
+                    .compactMap { delivered("widget-backdrop.\($0)") }
+                    .first
+            }
+            return PrebuiltDesign.resolvedBackdrop(named: resource("backdrop"))
+        }
+        var wallpaperURL: URL? {
+            if isDelivered { return delivered("wallpaper.png") }
+            return PrebuiltDesign.resource(named: resource("wallpaper"), extension: "png")
+        }
         /// The wallpaper without the tiles, when this build shipped one. The
         /// phone bakes its own occupants onto it at export time; nil means the
         /// design was built before the plain variant existed and only the
         /// pre-baked wallpaper can be offered.
-        var plainWallpaperURL: URL? { PrebuiltDesign.resource(named: resource("wallpaper-plain"), extension: "png") }
-        var previewURL: URL? { PrebuiltDesign.resource(named: resource("preview"), extension: "mp4") }
+        var plainWallpaperURL: URL? {
+            if isDelivered { return delivered("wallpaper-plain.png") }
+            return PrebuiltDesign.resource(named: resource("wallpaper-plain"), extension: "png")
+        }
+        /// A delivered design has no preview video - the frames it travels with
+        /// are the animation, and an mp4 of them would be the same pictures
+        /// again. The app draws its still composition instead, which is what it
+        /// already does for any design whose animation it cannot play.
+        var previewURL: URL? {
+            if isDelivered { return delivered("preview.mp4") }
+            return PrebuiltDesign.resource(named: resource("preview"), extension: "mp4")
+        }
 
         /// A clip variant's own backdrop and preview, addressed by variant id.
         func backdropURL(variant: UUID) -> URL? {
@@ -65,8 +107,10 @@ enum PrebuiltDesign {
         }
 
         var manifest: BuildManifest? {
-            guard let url = PrebuiltDesign.resource(named: manifestName, extension: "json"),
-                  let data = try? Data(contentsOf: url)
+            guard let url = isDelivered
+                ? delivered("manifest.json")
+                : PrebuiltDesign.resource(named: manifestName, extension: "json"),
+                let data = try? Data(contentsOf: url)
             else { return nil }
             return try? JSONDecoder().decode(BuildManifest.self, from: data)
         }
@@ -104,6 +148,36 @@ enum PrebuiltDesign {
     static func selected(id: UUID? = ActiveDesign.identifier) -> Entry? {
         if let id, let match = entries.first(where: { $0.id == id }) { return match }
         return entries.first
+    }
+
+    /// Designs that arrived after this build was installed.
+    ///
+    /// Only the ones built as pictures: a design whose body is fonts cannot
+    /// animate unless those fonts shipped in the extension, so listing one here
+    /// would offer a design the Home Screen will not draw.
+    static func delivered(in store: DesignStore?) -> [Entry] {
+        guard let store else { return [] }
+        return store.loadAll()
+            .filter { (try? store.loadManifest(id: $0.id))?.isFrameDriven == true }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .map {
+                Entry(id: $0.id, name: $0.name, deliveredFolder: store.folder(for: $0.id))
+            }
+    }
+
+    /// Everything the app can show, delivered first.
+    ///
+    /// Newest work first: a design that was just sent to the phone is the one
+    /// somebody wants to look at, and the bundled ones have been there since
+    /// the install.
+    static func all(in store: DesignStore?) -> [Entry] {
+        delivered(in: store) + entries
+    }
+
+    static func selected(id: UUID?, in store: DesignStore?) -> Entry? {
+        let all = all(in: store)
+        if let id, let match = all.first(where: { $0.id == id }) { return match }
+        return all.first
     }
 
     /// Loaded once: the manifest is small, but a widget re-reads it on every
