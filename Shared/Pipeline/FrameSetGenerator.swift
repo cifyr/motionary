@@ -201,6 +201,18 @@ struct FrameSetGenerator {
         return context.makeImage() ?? image
     }
 
+    /// A frame with nothing in it, for the part of the loop the clips do not
+    /// reach. It still gets a patch - one that covers what its neighbours drew
+    /// and shows only backdrop - so the last figure does not hang there.
+    static func transparent(like image: CGImage) -> CGImage? {
+        CGContext(
+            data: nil, width: image.width, height: image.height,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )?.makeImage()
+    }
+
     static func hasAlpha(_ image: CGImage) -> Bool {
         switch image.alphaInfo {
         case .none, .noneSkipFirst, .noneSkipLast: false
@@ -988,28 +1000,30 @@ struct FrameSetGenerator {
         let mask = Self.shufflePeriod(covering: wall, authored: spec.framesPerSecond)
         let fps = max(1, min(spec.framesPerSecond, Self.laneBudget / mask.seconds))
         let lanes = mask.seconds * fps
-        // Each clip gets exactly its own length where the loop can afford it,
-        // and whatever is left over goes to one segment rather than being
-        // spread across all of them. The leftover is a clip playing its opening
-        // again, and one hitch per loop is easier to watch than three.
-        // Rounded up: rounding to nearest drops the last fraction of a second,
-        // which is a clip ending a moment early - and the end of a swing is
-        // exactly the part anybody watching is waiting for.
+        // Every clip gets exactly its own length. No more: the leftover used to
+        // be given to one segment, which played that clip through and then
+        // started it again - the replay that was reported. No less: cutting is
+        // what was reported before that.
+        //
+        // Rounded up, because rounding to nearest drops the last fraction of a
+        // second and the end of a swing is the part worth waiting for.
+        //
+        // The clips will not add up to the loop, because a mask period has to
+        // divide sixty and 25.1s of clip is held by a thirty-second one. The
+        // remainder is drawn as nothing at all - the backdrop on its own - so
+        // the loop is every clip once, whole, and then a pause.
         let own = clips.map { max(1, Int(($0.wall * Double(fps)).rounded(.up))) }
-        var shares = own.reduce(0, +) <= lanes
+        let shares = own.reduce(0, +) <= lanes
             ? own
             : Self.programShares(lanes: lanes, weights: clips.map(\.wall))
-        let slack = lanes - shares.reduce(0, +)
-        if slack > 0, let longest = shares.indices.max(by: { shares[$0] < shares[$1] }) {
-            shares[longest] += slack
-        }
+        let gap = max(0, lanes - shares.reduce(0, +))
         guard shares.count == clips.count, shares.allSatisfy({ $0 > 0 }) else {
             Self.logger.warning("\(clips.count) clips will not divide \(lanes) lanes; building one clip instead")
             return nil
         }
         guard let program = ClipProgram.shuffled(
             clips: zip(clips, shares).map { .init(id: $0.id, frameCount: $1) },
-            totalFrames: lanes,
+            totalFrames: shares.reduce(0, +),
             seed: design.id
         ) else {
             Self.logger.warning("no shuffled order fits \(lanes) lanes; building one clip instead")
@@ -1025,10 +1039,14 @@ struct FrameSetGenerator {
         // the same scene shot the same way, and a stack half sprites and half
         // flattened frames would draw the still background over the sprites.
         let sprites = cutOut
-        let frames = try await programmedPictures(
+        var frames = try await programmedPictures(
             design: design, fps: fps, clips: clips, program: program,
             preservesAlpha: sprites, onStage: onStage
         )
+        if gap > 0, let first = frames.first, let blank = Self.transparent(like: first) {
+            Self.logger.info("the clips are \(gap) lanes short of \(lanes); drawing nothing there")
+            frames.append(contentsOf: repeatElement(blank, count: gap))
+        }
         let plate = sprites ? try? await pictures(
             design: design, spec: programSpec, source: clips[0].source,
             isPrimary: clips[0].id == nil, count: 1, onStage: { _ in }
