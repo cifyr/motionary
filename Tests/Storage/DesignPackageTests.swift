@@ -79,6 +79,84 @@ final class DesignPackageTests: XCTestCase {
         XCTAssertEqual(try destination.loadManifest(id: design.id).frameCount, 6)
     }
 
+    /// Every clip travels, not only the design's own.
+    ///
+    /// A variant is a whole alternate animation, and half of one on the phone
+    /// is a clip that can be chosen and then cannot be drawn - which is what
+    /// switching to it looks like from the sofa.
+    func testEveryVariantTravelsWithTheDesign() throws {
+        let design = try stageDesign(frames: 4)
+        let variant = UUID()
+        try store.clearFrames(for: design.id, variant: variant)
+        for index in 0 ..< 3 {
+            try Data(repeating: 200, count: 20 + index)
+                .write(to: store.frameURL(for: design.id, index: index, variant: variant))
+        }
+        var manifest = try store.loadManifest(id: design.id)
+        manifest.clipVariants = [BuildManifest.VariantBuild(
+            id: variant,
+            name: "Second",
+            fontFamilyBase: "MFontTestV",
+            totalFontBytes: 0,
+            loopFrameCount: 3,
+            frameCount: 3
+        )]
+        try store.save(manifest)
+
+        let destination = try DesignStore(
+            containerURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("package-variants-\(UUID().uuidString)")
+        )
+        try DesignPackage.read(
+            try DesignPackage.write(designID: design.id, store: store),
+            into: destination
+        )
+
+        XCTAssertEqual(destination.frameCount(for: design.id), 4, "the design's own clip")
+        XCTAssertEqual(destination.frameCount(for: design.id, variant: variant), 3, "the variant")
+        XCTAssertEqual(destination.frameFolders(for: design.id).count, 2)
+        for index in 0 ..< 3 {
+            XCTAssertEqual(
+                try Data(contentsOf: destination.frameURL(for: design.id, index: index, variant: variant)),
+                try Data(contentsOf: store.frameURL(for: design.id, index: index, variant: variant)),
+                "variant frame \(index) did not survive"
+            )
+        }
+        XCTAssertEqual(try destination.loadManifest(id: design.id).builtVariants.first?.frameCount, 3)
+    }
+
+    /// A rebuild that drops a variant must not leave its frames behind, or the
+    /// phone goes on offering a clip the design no longer has.
+    func testADroppedVariantDoesNotSurviveTheNextDelivery() throws {
+        let design = try stageDesign(frames: 4)
+        let gone = UUID()
+        try store.clearFrames(for: design.id, variant: gone)
+        try Data(repeating: 1, count: 10)
+            .write(to: store.frameURL(for: design.id, index: 0, variant: gone))
+
+        let destination = try DesignStore(
+            containerURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("package-dropped-\(UUID().uuidString)")
+        )
+        try DesignPackage.read(
+            try DesignPackage.write(designID: design.id, store: store),
+            into: destination
+        )
+        XCTAssertEqual(destination.frameCount(for: design.id, variant: gone), 1)
+
+        try store.clearAllFrames(for: design.id)
+        for index in 0 ..< 4 {
+            try Data(repeating: 2, count: 10)
+                .write(to: store.frameURL(for: design.id, index: index))
+        }
+        try DesignPackage.read(
+            try DesignPackage.write(designID: design.id, store: store),
+            into: destination
+        )
+        XCTAssertEqual(destination.frameCount(for: design.id, variant: gone), 0)
+        XCTAssertEqual(destination.frameFolders(for: design.id).count, 1)
+    }
+
     /// The identity travels with the design, so delivering the same design
     /// twice replaces it rather than filling the phone with copies.
     func testDeliveringTwiceReplacesRatherThanAccumulates() throws {

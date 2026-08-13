@@ -215,14 +215,35 @@ struct DesignWidgetView: View {
         guard let store = try? DesignStore(),
               let selected = ActiveDesign.identifier,
               let design = store.loadAll().first(where: { $0.id == selected }),
-              let manifest = try? store.loadManifest(id: design.id),
-              manifest.isFrameDriven,
-              let count = manifest.frameCount
+              var manifest = try? store.loadManifest(id: design.id),
+              manifest.isFrameDriven
         else { return nil }
 
-        let loaded = FrameSetLoader.load(designID: design.id, count: count, store: store)
+        // The clip the phone chose, which is a whole alternate animation: its
+        // own frames, its own backdrop, its own length. Guarded on the frames
+        // actually being there, so a choice left over from a build that had
+        // more clips degrades to the design's own rather than to a stack with
+        // nothing in it.
+        var variantID: UUID?
+        var name = design.name
+        if let variant = VariantChoice.resolved(in: manifest),
+           let variantFrames = variant.frameCount,
+           store.frameCount(for: design.id, variant: variant.id) == variantFrames {
+            variantID = variant.id
+            manifest.loopFrameCount = variantFrames
+            manifest.frameCount = variantFrames
+            name = "\(design.name) (\(variant.name))"
+        }
+        guard let count = manifest.frameCount else { return nil }
+
+        let loaded = FrameSetLoader.load(
+            designID: design.id,
+            count: count,
+            store: store,
+            variant: variantID
+        )
         WidgetRenderLog.append("""
-        deliv \(design.name) \(loaded.report.summary) \(MemoryFootprint.megabytes)MB
+        deliv \(name) \(loaded.report.summary) \(MemoryFootprint.megabytes)MB
         """)
         guard loaded.report.isComplete else { return nil }
 
@@ -231,7 +252,8 @@ struct DesignWidgetView: View {
         // The baked crop when there is one, the whole wallpaper otherwise: the
         // widget only ever shows its own frame, and the full screen costs about
         // 12.6MB decompressed against a budget this stack is already spending.
-        let backdropURL = store.existingWidgetBackdropURL(for: design.id)
+        let backdropURL = variantID.flatMap { store.existingWidgetBackdropURL(for: design.id, variant: $0) }
+            ?? store.existingWidgetBackdropURL(for: design.id)
             ?? store.wallpaperURL(for: design.id)
         let backdrop = ImageLoader.load(at: backdropURL, maxPixelSize: longest)
 
@@ -242,8 +264,8 @@ struct DesignWidgetView: View {
             // the animation, and they are already in hand.
             fontsUsable: true,
             origin: "delivered",
-            scope: "app group frames",
-            name: design.name,
+            scope: variantID == nil ? "app group frames" : "app group frames, variant",
+            name: name,
             frames: loaded.frames,
             artFolder: store.artFolder(for: design.id)
         )

@@ -729,6 +729,10 @@ struct BuildManifest: Codable, Equatable, Sendable {
         /// match across variants. Optional because manifests written before it
         /// existed must still decode; nil falls back to the design's loop.
         var loopFrameCount: Int?
+        /// How many pictures this variant was built as, when the design was
+        /// built that way. Nil means the variant is fonts, which is every
+        /// variant of every design built before deliveries existed.
+        var frameCount: Int?
     }
 
     /// The built alternative clips, in the order they were authored. Optional

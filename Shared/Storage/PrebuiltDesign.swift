@@ -94,13 +94,19 @@ enum PrebuiltDesign {
 
         /// A clip variant's own backdrop and preview, addressed by variant id.
         func backdropURL(variant: UUID) -> URL? {
-            PrebuiltDesign.resolvedBackdrop(
+            if isDelivered {
+                return DesignStore.backdropExtensions.lazy
+                    .compactMap { delivered("widget-backdrop-\(variant.uuidString.lowercased()).\($0)") }
+                    .first
+            }
+            return PrebuiltDesign.resolvedBackdrop(
                 named: resource("backdrop-\(variant.uuidString.lowercased())")
             )
         }
 
         func previewURL(variant: UUID) -> URL? {
-            PrebuiltDesign.resource(
+            if isDelivered { return delivered("preview-\(variant.uuidString.lowercased()).mp4") }
+            return PrebuiltDesign.resource(
                 named: resource("preview-\(variant.uuidString.lowercased())"),
                 extension: "mp4"
             )

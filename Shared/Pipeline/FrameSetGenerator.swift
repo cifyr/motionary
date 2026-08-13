@@ -82,40 +82,34 @@ struct FrameSetGenerator {
         }
     }
 
-    func build(
+    /// One clip: the design's own, or one of its variants.
+    ///
+    /// A variant is a whole alternate animation - its own frames, its own
+    /// backdrop, its own preview - which is what makes switching on the phone
+    /// free. Everything here is the same work for both; only the source clip
+    /// and where it is written differ.
+    private struct ClipBuild {
+        let frameCount: Int
+        let totalBytes: Int
+        let firstFrame: CGImage
+        let quality: Double
+    }
+
+    private func buildClip(
         design: DesignDocument,
+        spec: TimerFontSpec,
+        crop: CGRect,
+        source: URL,
+        variant: ClipVariant?,
+        loopFrameCount: Int,
         onStage: @Sendable @escaping (Stage) -> Void
-    ) async throws -> BuildManifest {
-        let spec = design.spec
-        let crop = design.effectiveCrop
-        guard crop.width >= 2, crop.height >= 2 else {
-            throw GeneratorError.emptyCrop(design: design.name)
-        }
-        // Never more than the design's own loop: a clip with six frames in it
-        // has six, and asking the extractor for the whole stack fails the build
-        // rather than producing a short loop. The lanes repeat around whatever
-        // arrives, which plays that loop several times per cycle at the speed
-        // it was authored at - the lane cycle is fixed either way.
-        let count = max(1, min(design.loopFrameCount, Self.frameCount(for: spec)))
-
-        Self.logger.info("""
-        frame build design=\(design.id.uuidString, privacy: .public) frames=\(count) \
-        fps=\(spec.framesPerSecond) crop=\(String(describing: crop), privacy: .public)
-        """)
-        // Not an error, the same way an ill-fitting loop is not one for the
-        // fonts: it costs one jump per lane cycle at the wrap, which is often
-        // invisible. Say so and carry on rather than refusing to build.
-        if !spec.laneCount.isMultiple(of: count) {
-            Self.logger.warning(
-                "\(count) frames do not divide \(spec.laneCount) lanes; the loop will jump once per cycle"
-            )
-        }
-
-        try store.clearFrames(for: design.id)
+    ) async throws -> ClipBuild {
+        let count = max(1, min(loopFrameCount, Self.frameCount(for: spec)))
+        try store.clearFrames(for: design.id, variant: variant?.id)
 
         onStage(.decoding(progress: 0))
         let extractor = MediaFrameExtractor(
-            url: store.sourceVideoURL(for: design),
+            url: source,
             transform: design.mediaTransform,
             background: design.backgroundName.flatMap {
                 ImageLoader.load(
@@ -130,7 +124,9 @@ struct FrameSetGenerator {
             clipCornerRadius: design.effectiveCornerRadius
         )
         let frames = try await extractor.composedFrames(
-            startFrame: design.loopStartFrame,
+            // A variant plays from its own start: the loop point was chosen
+            // against the design's own clip and means nothing in another.
+            startFrame: variant == nil ? design.loopStartFrame : 0,
             count: count,
             frameRate: spec.framesPerSecond,
             speed: design.playbackSpeed,
@@ -141,20 +137,12 @@ struct FrameSetGenerator {
         }
 
         onStage(.encoding(progress: 0))
-        // Not `design.jpegQuality`: that was chosen to fit a font payload,
-        // where one frame is base64'd into every one of `lanes x 15` glyph
-        // selections. Written once, the same frames have several times the
-        // budget - see FramePayloadPlan.
         var quality = FramePayloadPlan.bestQuality
         var data = try encode(frames: frames, design: design, crop: crop, quality: quality)
         while let lower = FramePayloadPlan.retry(
             totalBytes: data.reduce(0) { $0 + $1.count },
             at: quality
         ) {
-            Self.logger.info("""
-            frame set is \(data.reduce(0) { $0 + $1.count } / 1_048_576)MB at quality \
-            \(Int(quality * 100))%; trying \(Int(lower * 100))%
-            """)
             quality = lower
             data = try encode(frames: frames, design: design, crop: crop, quality: quality)
             try Task.checkCancellation()
@@ -164,7 +152,7 @@ struct FrameSetGenerator {
         var totalBytes = 0
         for (index, frame) in data.enumerated() {
             onStage(.writingFrames(completed: index, total: data.count))
-            let url = store.frameURL(for: design.id, index: index)
+            let url = store.frameURL(for: design.id, index: index, variant: variant?.id)
             do {
                 try frame.write(to: url, options: DesignStore.writingOptions)
             } catch {
@@ -176,49 +164,160 @@ struct FrameSetGenerator {
         }
         onStage(.writingFrames(completed: data.count, total: data.count))
 
-        // The same preview the font path writes, and for the same reason: only
-        // the system widget renderer advances timer text fast enough to animate
-        // a design, so the app plays a video of it instead. A delivered design
-        // needs one too or it sits still in the app while moving on the Home
-        // Screen - and it cannot be built from the frames on the phone, where
-        // decoding sixty-four 1.7Mpx JPEGs a loop is not something to do behind
-        // a scroll view.
-        onStage(.writingFrames(completed: data.count, total: data.count))
+        // The app plays this; only the widget renderer can animate the design
+        // itself. One per clip, so switching variants switches the picture in
+        // the app as well as on the Home Screen.
         try await PreviewVideoWriter(
             size: DeviceGeometry.screenPixelSize,
             framesPerSecond: spec.framesPerSecond
-        ).write(frames: frames, to: store.previewVideoURL(for: design.id))
+        ).write(
+            frames: frames,
+            to: variant.map { store.previewVideoURL(for: design.id, variant: $0.id) }
+                ?? store.previewVideoURL(for: design.id)
+        )
 
         onStage(.writingWallpaper)
-        let backdropRect = try await DesignArtWriter(
+        // A variant gets its own backdrop and nothing else: the clips differ
+        // inside the widget frame, and the wallpaper is everything outside it.
+        try await DesignArtWriter(
             store: store,
             tileArtwork: tileArtwork,
             assetArtwork: assetArtwork
-        ).write(design: design, poster: first)
+        ).write(design: design, poster: first, variantID: variant?.id)
 
+        return ClipBuild(
+            frameCount: data.count,
+            totalBytes: totalBytes,
+            firstFrame: first,
+            quality: quality
+        )
+    }
+
+    func build(
+        design: DesignDocument,
+        onStage: @Sendable @escaping (Stage) -> Void
+    ) async throws -> BuildManifest {
+        let spec = design.spec
+        let crop = design.effectiveCrop
+        guard crop.width >= 2, crop.height >= 2 else {
+            throw GeneratorError.emptyCrop(design: design.name)
+        }
+
+        Self.logger.info("""
+        frame build design=\(design.id.uuidString, privacy: .public) \
+        variants=\(design.variants.count) fps=\(spec.framesPerSecond) \
+        crop=\(String(describing: crop), privacy: .public)
+        """)
+
+        // Every folder first, not each in turn: a rebuild that drops a variant
+        // would otherwise leave its frames behind, and the phone would go on
+        // offering a clip the design no longer has.
+        try store.clearAllFrames(for: design.id)
+
+        let primary = try await buildClip(
+            design: design,
+            spec: spec,
+            crop: crop,
+            source: store.sourceVideoURL(for: design),
+            variant: nil,
+            // Never more than the design's own loop: a clip with six frames in
+            // it has six, and asking the extractor for the whole stack fails
+            // the build rather than producing a short loop. The lanes repeat
+            // around whatever arrives, which plays that loop several times per
+            // cycle at the speed it was authored at.
+            loopFrameCount: design.loopFrameCount,
+            onStage: onStage
+        )
+        // Not an error, the same way an ill-fitting loop is not one for the
+        // fonts: it costs one jump per lane cycle at the wrap, which is often
+        // invisible.
+        if !spec.laneCount.isMultiple(of: primary.frameCount) {
+            Self.logger.warning(
+                "\(primary.frameCount) frames do not divide \(spec.laneCount) lanes; the loop will jump once per cycle"
+            )
+        }
+
+        var builtVariants: [BuildManifest.VariantBuild] = []
+        var totalBytes = primary.totalBytes
+        for variant in design.variants {
+            try Task.checkCancellation()
+            let source = store.variantClipURL(for: design.id, name: variant.sourceVideoName)
+            guard FileManager.default.fileExists(atPath: source.path) else {
+                // Skipped rather than fatal: one missing clip file should not
+                // cost the design every other clip it has.
+                Self.logger.error("variant \(variant.name, privacy: .public) has no clip at \(source.path, privacy: .public)")
+                continue
+            }
+            // A variant keeps its own length, sized to its own clip the same
+            // way the font path sizes it: asking a two-second clip for a
+            // two-second stack is fine, asking a half-second one for it stops
+            // the build on "yielded 8 frames but the loop needs 32".
+            let summary = try? await MediaFrameExtractor(
+                url: source,
+                transform: design.mediaTransform
+            ).summary()
+            let own = FontSetGenerator.variantLoopLength(
+                duration: summary?.duration ?? 0,
+                spec: spec,
+                playbackSpeed: design.playbackSpeed
+            )
+            let built: ClipBuild
+            do {
+                built = try await buildClip(
+                    design: design,
+                    spec: spec,
+                    crop: crop,
+                    source: source,
+                    variant: variant,
+                    loopFrameCount: min(max(1, own), Self.frameCount(for: spec)),
+                    onStage: onStage
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // One clip that will not decode should not cost the design
+                // every other clip it has, and a variant missing from the
+                // manifest is simply one the phone is not offered.
+                Self.logger.error("variant \(variant.name, privacy: .public) would not build: \(String(describing: error), privacy: .public)")
+                continue
+            }
+            totalBytes += built.totalBytes
+            builtVariants.append(BuildManifest.VariantBuild(
+                id: variant.id,
+                name: variant.name,
+                fontFamilyBase: design.fontFamilyBase(for: variant),
+                totalFontBytes: built.totalBytes,
+                loopFrameCount: built.frameCount,
+                frameCount: built.frameCount
+            ))
+        }
+
+        let backdropRect = DesignArtWriter.backdropRect(widgetRect: design.widgetRect)
         let manifest = BuildManifest(
             designID: design.id,
             buildGeneration: design.buildGeneration + 1,
             fontFamilyBase: design.fontFamilyBase,
             laneCount: spec.laneCount,
             framesPerSecond: spec.framesPerSecond,
-            loopFrameCount: data.count,
+            loopFrameCount: primary.frameCount,
             animationCrop: crop,
             widgetRect: design.widgetRect,
             screenSize: DeviceGeometry.screenPixelSize,
             wallpaperName: store.wallpaperURL(for: design.id).lastPathComponent,
             totalFontBytes: totalBytes,
             builtAt: Date(),
-            backdropRect: backdropRect,
-            frameCount: data.count,
+            backdropRect: backdropRect.isNull ? nil : backdropRect,
+            frameCount: primary.frameCount,
             tiles: design.tiles,
             assets: design.assets,
-            readouts: design.readouts
+            readouts: design.readouts,
+            clipVariants: builtVariants.isEmpty ? nil : builtVariants,
+            primaryClipName: design.primaryClipName
         )
         try store.save(manifest)
         Self.logger.info("""
         frame build done design=\(design.id.uuidString, privacy: .public) \
-        frames=\(data.count) bytes=\(totalBytes)
+        clips=\(builtVariants.count + 1) frames=\(primary.frameCount) bytes=\(totalBytes)
         """)
         return manifest
     }

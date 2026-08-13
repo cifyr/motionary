@@ -30,12 +30,17 @@ enum FrameSetLoader {
         }
     }
 
-    static func load(designID: UUID, count: Int, store: DesignStore) -> (frames: [Image], report: Report) {
+    static func load(
+        designID: UUID,
+        count: Int,
+        store: DesignStore,
+        variant: UUID? = nil
+    ) -> (frames: [Image], report: Report) {
         var images: [Image] = []
         var missing: [Int] = []
         var bytes = 0
         for index in 0 ..< count {
-            let url = store.frameURL(for: designID, index: index)
+            let url = store.frameURL(for: designID, index: index, variant: variant)
             guard let data = try? Data(contentsOf: url, options: .mappedIfSafe),
                   let image = UIImage(data: data)
             else {

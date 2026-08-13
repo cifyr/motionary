@@ -64,7 +64,7 @@ enum DesignPackage {
     static func write(designID: UUID, store: DesignStore) throws -> Data {
         let design = try store.load(id: designID)
         let manifest = try store.loadManifest(id: designID)
-        guard manifest.isFrameDriven, let frameCount = manifest.frameCount else {
+        guard manifest.isFrameDriven else {
             throw DesignPackageError.notFrameDriven(designID: designID)
         }
 
@@ -77,13 +77,35 @@ enum DesignPackage {
             payload.append(data)
         }
 
-        for index in 0 ..< frameCount {
-            let url = store.frameURL(for: designID, index: index)
-            guard let data = try? Data(contentsOf: url) else {
-                throw DesignPackageError.entryMissing(name: url.lastPathComponent)
+        // Every clip, not only the design's own: a variant is a whole
+        // alternate animation, and half of one on the phone is a clip that can
+        // be chosen and then cannot be drawn.
+        for folder in store.frameFolders(for: designID) {
+            let names = ((try? FileManager.default.contentsOfDirectory(atPath: folder.url.path)) ?? [])
+                .filter { $0.hasPrefix("frame-") && $0.hasSuffix(".jpg") }
+                .sorted()
+            guard !names.isEmpty else { continue }
+            let key = folder.variant?.uuidString.lowercased() ?? "primary"
+            for name in names {
+                let url = folder.url.appendingPathComponent(name)
+                guard let data = try? Data(contentsOf: url) else {
+                    throw DesignPackageError.entryMissing(name: name)
+                }
+                entries.append(Entry(name: "frames/\(key)/\(name)", length: data.count))
+                payload.append(data)
             }
-            entries.append(Entry(name: url.lastPathComponent, length: data.count))
-            payload.append(data)
+            if let variant = folder.variant {
+                try add(
+                    store.previewVideoURL(for: designID, variant: variant).lastPathComponent,
+                    store.previewVideoURL(for: designID, variant: variant)
+                )
+                if let backdrop = store.existingWidgetBackdropURL(for: designID, variant: variant) {
+                    try add(backdrop.lastPathComponent, backdrop)
+                }
+            }
+        }
+        guard entries.contains(where: { $0.name.hasPrefix("frames/primary/") }) else {
+            throw DesignPackageError.entryMissing(name: "frames/primary")
         }
         // The tiles travel in the manifest but their pictures do not, and a
         // launcher with no artwork falls back to a catalogue plate - which
@@ -172,7 +194,7 @@ enum DesignPackage {
         }
 
         try store.createFolder(for: design.id)
-        try store.clearFrames(for: design.id)
+        try store.clearAllFrames(for: design.id)
 
         for entry in header.entries {
             let end = offset + entry.length
@@ -182,7 +204,20 @@ enum DesignPackage {
             let bytes = data.subdata(in: offset ..< end)
             offset = end
             let url: URL
-            if entry.name.hasPrefix("frame-") {
+            if entry.name.hasPrefix("frames/") {
+                // frames/<primary|variant-uuid>/frame-0000.jpg
+                let parts = entry.name.split(separator: "/")
+                let variant = parts.count == 3 ? UUID(uuidString: String(parts[1])) : nil
+                let folder = store.framesFolder(for: design.id, variant: variant)
+                try FileManager.default.createDirectory(
+                    at: folder,
+                    withIntermediateDirectories: true,
+                    attributes: DesignStore.directoryAttributes
+                )
+                url = folder.appendingPathComponent(String(parts.last ?? "frame.jpg"))
+            } else if entry.name.hasPrefix("frame-") {
+                // A package written before variants travelled, which put the
+                // design's own frames at the top level.
                 url = store.framesFolder(for: design.id).appendingPathComponent(entry.name)
             } else if entry.name.hasPrefix("art/") {
                 let folder = store.artFolder(for: design.id)
