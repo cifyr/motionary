@@ -119,6 +119,13 @@ struct StudioHome: View {
     /// that will not say why is worse than no button.
     private var actionBar: some View {
         HStack(spacing: 10) {
+            // The window has no title bar to carry the app's name, so the bar
+            // that replaced it carries it.
+            Text("Motionary Studio")
+                .font(StudioTheme.title)
+                .foregroundStyle(StudioTheme.textBright)
+                .padding(.trailing, 4)
+
             Button(action: onNew) {
                 Label("New design", systemImage: "plus")
             }
@@ -144,7 +151,7 @@ struct StudioHome: View {
             .help("Compile every starred design into the app and install it")
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.vertical, 8)
         .background(StudioTheme.headerFill)
     }
 

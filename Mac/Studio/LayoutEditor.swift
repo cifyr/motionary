@@ -22,7 +22,6 @@ struct LayoutEditor: View {
     /// the window, which owns saving and building.
     var documentName: String = "Design"
     var savedNote: String = ""
-    var onPreview: () -> Void = {}
     var onBuild: () -> Void = {}
     /// Back to the library. The editor filled the window with no way out of it
     /// but building, which left the library reachable only by quitting.

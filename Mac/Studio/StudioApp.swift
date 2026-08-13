@@ -29,6 +29,9 @@ struct MotionaryStudioApp: App {
             StudioView()
         }
         .commands { StudioCommands() }
+        // Every screen carries its own bar, so the window's was a second one
+        // stacked above it. The traffic lights now sit in the screen's bar.
+        .windowStyle(.hiddenTitleBar)
         // Was .contentSize, which pinned the window to a fixed-width column.
         // The split view needs to be draggable to be worth having.
         .windowResizability(.contentMinSize)
@@ -261,7 +264,6 @@ struct StudioView: View {
     @State private var renamedTo = ""
     /// The design a delete has been asked for but not yet confirmed.
     @State private var deleting: DesignDocument?
-    @State private var designFilter = ""
     @State private var targeting = false
 
     /// The job in flight, or the one that just finished and has not been
@@ -299,17 +301,15 @@ struct StudioView: View {
         Set(saved.filter(\.isStarter).map(\.id))
     }
 
-    /// Library on the left, the design being worked on to the right.
+    /// One screen at a time.
     ///
-    /// It was one fixed-width column with the library wedged into the middle of
-    /// it, so the list competed for height with the drop target, the settings
-    /// and the build controls, and every one of them lost. A split view gives
-    /// the library its own resizable column and lets the work take the rest.
+    /// There was a sidebar listing every design beside all of this, from when
+    /// the library was a list of names. Once the library became a shelf of
+    /// pictures the sidebar was the same content twice, in a worse form, taking
+    /// 320pt off the thing it was duplicating — so the library is the way
+    /// around now, and every screen carries one button back to it.
     var body: some View {
-        NavigationSplitView {
-            librarySidebar
-                .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 420)
-        } detail: {
+        Group {
             // First, so nothing in flight can fall through to a screen about
             // some other job.
             if let run {
@@ -498,7 +498,7 @@ struct StudioView: View {
             Spacer()
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.vertical, 8)
         .background(StudioTheme.headerFill)
     }
 
@@ -529,146 +529,8 @@ struct StudioView: View {
         .frame(maxWidth: 620, alignment: .leading)
     }
 
-    private var filteredDesigns: [DesignDocument] {
-        let query = designFilter.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !query.isEmpty else { return saved }
-        return saved.filter { $0.name.lowercased().contains(query) }
-    }
 
-    /// A navigator, not a second library.
-    ///
-    /// It used to be both: its own Import button, its own per-row rename and
-    /// duplicate, its own footnote about what starring costs, and its own
-    /// context menu that let a starter be renamed and deleted while the
-    /// library's refused. Everything it offered twice is gone; what is left is
-    /// the one thing a sidebar is for, which is knowing where you are and
-    /// getting somewhere else in one click.
-    private var librarySidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                libraryRow
-                // Only once the list is long enough to need it: a filter field
-                // over four designs is furniture.
-                if saved.count > 6 {
-                    TextField("Filter", text: $designFilter)
-                        .textFieldStyle(StudioFieldStyle())
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
-
-            if saved.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("No designs yet").font(.callout)
-                    Text("Drop a video or GIF on the library to make one.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .padding(12)
-                Spacer()
-            } else {
-                List {
-                    ForEach(filteredDesigns) { design in
-                        designRow(design)
-                            .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4))
-                    }
-                }
-                .listStyle(.sidebar)
-                .scrollContentBackground(.hidden)
-                .background(StudioTheme.panel)
-
-                if filteredDesigns.isEmpty, !designFilter.isEmpty {
-                    Text("Nothing matches \"\(designFilter)\".")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .padding(12)
-                }
-            }
-        }
-        .foregroundStyle(StudioTheme.text)
-        .background(StudioTheme.panel)
-        .disabled(isBusy)
-    }
-
-    /// The way back, in the place every Mac app puts it.
-    private var libraryRow: some View {
-        Button { goHome() } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 11))
-                Text("Library")
-                    .font(.callout)
-                Spacer()
-                Text("\(saved.count)")
-                    .font(StudioTheme.monoSmall)
-            }
-            .foregroundStyle(isShowingLibrary ? StudioTheme.accentInk : StudioTheme.text)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
-            .background(
-                isShowingLibrary ? StudioTheme.accent.opacity(0.12) : .clear,
-                in: RoundedRectangle(cornerRadius: StudioTheme.radius, style: .continuous)
-            )
-        }
-        .buttonStyle(.plain)
-        .help("Show every design")
-    }
-
-    private var isShowingLibrary: Bool { prepared == nil && source == nil && !isBusy }
-
-    private func designRow(_ design: DesignDocument) -> some View {
-        let isOpen = prepared?.design.id == design.id
-        return Button { reopen(design) } label: {
-            HStack(spacing: 8) {
-                // The star is state here, not a control: it is the only thing
-                // saying which designs the next install will carry. Changing it
-                // is a menu item, so a mis-click cannot quietly resize the
-                // build.
-                Image(systemName: design.isStarred ? "star.fill" : "star")
-                    .font(.system(size: 10))
-                    .foregroundStyle(design.isStarred ? StudioTheme.accent : StudioTheme.textDim.opacity(0.5))
-
-                VStack(alignment: .leading, spacing: 1) {
-                    // Truncated in the middle, not at the end: what tells two
-                    // designs apart is the number on the tail, and clipping
-                    // that is what made a numbered library still unreadable.
-                    Text(design.name)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .font(.callout)
-                        // The editor is a pane now, so the row is the only
-                        // thing saying which design is in it.
-                        .fontWeight(isOpen ? .semibold : .regular)
-                        .foregroundStyle(isOpen ? StudioTheme.accentInk : StudioTheme.text)
-                    HStack(spacing: 6) {
-                        Text(count(design.tiles.count, "app"))
-                        if !design.assets.isEmpty {
-                            Text("·")
-                            Text(count(design.assets.count, "picture"))
-                        }
-                        Text("·")
-                        Text(design.updatedAt.formatted(date: .abbreviated, time: .shortened))
-                    }
-                    .font(StudioTheme.monoSmall).foregroundStyle(StudioTheme.textDim)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
-            .background(
-                isOpen ? StudioTheme.accent.opacity(0.1) : .clear,
-                in: RoundedRectangle(cornerRadius: StudioTheme.radius, style: .continuous)
-            )
-        }
-        .buttonStyle(.plain)
-        .help("Open \(design.name)")
-        .contextMenu {
-            DesignMenu(design: design, isStarter: starterIDs.contains(design.id), actions: designActions)
-        }
-    }
-
-    /// One set of verbs, shared by the library and the sidebar.
+    /// One set of verbs, shared by the library grid and its context menus.
     private var designActions: DesignActions {
         DesignActions(
             open: { reopen($0) },
@@ -704,10 +566,6 @@ struct StudioView: View {
         done = nil
         failure = nil
         log = []
-    }
-
-    private func count(_ value: Int, _ noun: String) -> String {
-        "\(value) \(noun)\(value == 1 ? "" : "s")"
     }
 
     /// A copy is the safe way to try a variation: the design that already
@@ -1328,11 +1186,9 @@ private struct EditorWindow: View {
             store: prepared.store,
             documentName: prepared.design.name,
             savedNote: savedNote,
-            // "Preview" leaves the editor the way Done did: it saves, and the
-            // library pane behind is where a design is looked at.
-            onPreview: { onCancel(prepared) },
             onBuild: { onBuild(prepared) },
-            // Saves on the way out, exactly as Preview does.
+            // Saved on the way out: leaving the editor should not be the thing
+            // that loses an afternoon's placement.
             onClose: { onCancel(prepared) }
         )
         .frame(
