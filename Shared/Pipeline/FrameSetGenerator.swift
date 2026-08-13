@@ -94,10 +94,12 @@ struct FrameSetGenerator {
     /// resolution to keep them, down to half size; past 320 the frames are
     /// small enough that the loop would be better served by fewer of them.
     ///
-    /// 320 is also ten seconds at the 32fps the font-built path gets, which is
-    /// the rate this is measured against - a delivered design should not look
-    /// slower than a compiled one for being delivered.
-    static let provenLaneCount = 320
+    /// 320 was measured with full-crop layers, each of which cost the render
+    /// server a full-crop offscreen buffer for its mask. A patch-built design's
+    /// mask is applied at the patch's own size - about a tenth of the crop - so
+    /// a lane is far cheaper than the one that number came from, and 480 is
+    /// 24fps over a twenty-second loop.
+    static let provenLaneCount = 480
 
     /// `MOTIONARY_LANE_BUDGET` moves the ceiling for one build, so where it
     /// actually falls can be bisected without a recompile between points.
@@ -198,7 +200,10 @@ struct FrameSetGenerator {
         let encoder = FrameEncoder(
             crop: crop, quality: FramePayloadPlan.bestQuality, widgetRect: design.widgetRect
         )
-        var sprites = try encoder.sprites(frames)
+        // One second of lanes either side: that is how many are unmasked at
+        // once, and the patch has to cover what they drew or they show through.
+        let window = max(1, spec.framesPerSecond)
+        var sprites = try encoder.occludingPatches(frames, plate: plate, window: window)
         func measured() -> Int { sprites.reduce(0) { $0 + $1.data.count } }
         Self.logger.info("""
         \(sprites.count) sprites come to \(measured() / 1024)KB against a \(budget / 1024)KB budget \
@@ -208,7 +213,7 @@ struct FrameSetGenerator {
         let shrink = FramePayloadPlan.shrink(toFit: budget, measured: measured())
         if shrink < 1 {
             Self.logger.warning("shrinking sprites to \(Int(shrink * 100))% to fit the archive")
-            sprites = try encoder.sprites(frames, shrink: shrink)
+            sprites = try encoder.occludingPatches(frames, plate: plate, window: window, shrink: shrink)
         }
         onStage(.encoding(progress: 1))
 
@@ -216,7 +221,7 @@ struct FrameSetGenerator {
         var totalBytes = 0
         for (index, sprite) in sprites.enumerated() {
             onStage(.writingFrames(completed: index, total: sprites.count))
-            let url = store.frameURL(for: design.id, index: index, variant: variant?.id, ext: "png")
+            let url = store.frameURL(for: design.id, index: index, variant: variant?.id)
             do {
                 try sprite.data.write(to: url, options: DesignStore.writingOptions)
             } catch {
@@ -498,11 +503,14 @@ struct FrameSetGenerator {
 
     /// The slowest a shuffled design is allowed to play.
     ///
-    /// Holding every clip whole needs a thirty-second loop, and thirty seconds
-    /// against a 320-lane ceiling is 10fps, which reads as a slideshow. A clip
-    /// that ends early is the cheaper loss: this is the floor the loop length is
+    /// Holding every clip whole needs a thirty-second loop, and a clip that
+    /// ends early is the cheaper loss: this is the floor the loop length is
     /// chosen to clear.
-    static let shuffleFrameRateFloor = 16
+    ///
+    /// 16 at first, because 480 lanes was not affordable when every lane cost a
+    /// full-crop mask buffer. Patch-built lanes are a tenth of that, so the
+    /// floor is now 24 - a twenty-second loop at 24fps against 480 lanes.
+    static let shuffleFrameRateFloor = 24
 
     static var shuffleFrameRateFloorBudget: Int {
         ProcessInfo.processInfo.environment["MOTIONARY_SHUFFLE_FPS_FLOOR"]

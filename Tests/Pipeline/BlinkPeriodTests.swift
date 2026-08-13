@@ -95,7 +95,7 @@ final class BlinkPeriodTests: XCTestCase {
     /// on a Home Screen with every report still saying ok, so they are pinned.
     func testTheCeilingsAreWhatWasMeasured() {
         XCTAssertEqual(FrameSetGenerator.provenLoopSeconds, 10)
-        XCTAssertEqual(FrameSetGenerator.provenLaneCount, 320)
+        XCTAssertEqual(FrameSetGenerator.provenLaneCount, 480)
     }
 
     /// A manifest from before longer masks existed has no period, and has to go

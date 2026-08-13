@@ -114,27 +114,39 @@ struct FrameStackLayer: View {
             ForEach(drawn, id: \.self) { lane in
                 let index = Self.frameIndex(lane: lane / step, frameCount: frames.count)
                 let rect = frameRects.flatMap { $0.indices.contains(index) ? $0[index] : nil }
-                frames[index]
-                    .resizable()
-                    .interpolation(.high)
-                    // Its own box when it has one, the whole layer otherwise.
-                    .frame(
-                        width: (rect?.width ?? 1) * size.width,
-                        height: (rect?.height ?? 1) * size.height
-                    )
-                    .offset(
-                        x: (rect?.minX ?? 0) * size.width,
-                        y: (rect?.minY ?? 0) * size.height
-                    )
-                    .frame(width: size.width, height: size.height, alignment: .topLeading)
-                    .mask {
-                        BlinkMask(
-                            reference: reference,
-                            blinkOffset: Double(-lane) * frameDuration,
-                            font: maskFont
-                        )
-                        .frame(width: side, height: side)
-                    }
+                let gate = BlinkMask(
+                    reference: reference,
+                    blinkOffset: Double(-lane) * frameDuration,
+                    font: maskFont
+                )
+                .frame(width: side, height: side)
+
+                if let rect {
+                    // Masked at the sprite's own size, then placed - not placed
+                    // and then masked across the whole layer.
+                    //
+                    // This is what the frame rate was costing. A mask needs an
+                    // offscreen buffer the size of what it masks, so gating a
+                    // full-layer view gave every one of 320 lanes a full-crop
+                    // buffer however small its picture was; the sprites made
+                    // the images cheap and left the masks exactly as expensive.
+                    // The glyph is a filled square covering its canvas, so a
+                    // small view samples the middle of it and gates the same
+                    // way.
+                    frames[index]
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: rect.width * size.width, height: rect.height * size.height)
+                        .mask { gate }
+                        .offset(x: rect.minX * size.width, y: rect.minY * size.height)
+                        .frame(width: size.width, height: size.height, alignment: .topLeading)
+                } else {
+                    frames[index]
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: size.width, height: size.height)
+                        .mask { gate }
+                }
             }
         }
     }

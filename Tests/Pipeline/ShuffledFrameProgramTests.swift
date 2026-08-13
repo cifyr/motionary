@@ -51,7 +51,7 @@ final class ShuffledFrameProgramTests: XCTestCase {
     /// early is the cheaper loss.
     func testTheLoopIsTheLongestThatKeepsTheFrameRateUp() {
         let period = FrameSetGenerator.shufflePeriod(covering: 26.6, authored: 32)
-        XCTAssertEqual(period.seconds, 20, "thirty seconds would drop to 10fps")
+        XCTAssertEqual(period.seconds, 20, "thirty seconds would drop below the floor")
         XCTAssertGreaterThanOrEqual(
             FrameSetGenerator.provenLaneCount / period.seconds,
             FrameSetGenerator.shuffleFrameRateFloor

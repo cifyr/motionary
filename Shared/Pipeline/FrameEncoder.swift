@@ -137,6 +137,95 @@ struct FrameEncoder {
         }
     }
 
+    /// Every frame as an opaque patch big enough to hide the lanes still
+    /// showing beneath it.
+    ///
+    /// The stack works by occlusion. The mask is solid for a whole second, so
+    /// about `window` lanes are unmasked at once and the topmost is simply the
+    /// one that covers the others - which a full-crop opaque frame does for
+    /// free. Cut down to its own contents and made transparent, a frame hides
+    /// nothing and every still-solid lane shows at once, which is a trail of
+    /// figures rather than one.
+    ///
+    /// So the cut is to the union of what the neighbouring lanes drew, and the
+    /// patch is opaque: small enough to be worth cutting - about a tenth of the
+    /// crop on a clip whose figure moves the way Spidey's does - and still able
+    /// to cover them. Symmetric rather than backwards-only because the solid
+    /// run straddles the ends of the stack at the wrap, where the oldest lane
+    /// is the one on top.
+    func occludingPatches(
+        _ frames: [CGImage],
+        plate: CGImage,
+        window: Int,
+        shrink: Double = 1
+    ) throws -> [Sprite] {
+        guard crop.width >= 1, crop.height >= 1 else { throw FrameEncoderError.cropEmpty }
+        guard let ground = plate.cropping(to: crop) else {
+            throw FrameEncoderError.cropOutOfBounds(
+                crop: crop, imageSize: CGSize(width: plate.width, height: plate.height)
+            )
+        }
+        let backdrop = WidgetTint.applied(to: ground)
+
+        let prepared = try frames.map { frame -> CGImage in
+            guard let cropped = frame.cropping(to: crop) else {
+                throw FrameEncoderError.cropOutOfBounds(
+                    crop: crop, imageSize: CGSize(width: frame.width, height: frame.height)
+                )
+            }
+            var out = WidgetTint.applied(to: cropped)
+            if let widgetRect, EdgeCompensation.overlaps(crop, widgetRect: widgetRect) {
+                out = EdgeCompensation.applied(to: out, originY: Int(crop.minY), widgetRect: widgetRect)
+            }
+            return out
+        }
+        let boxes = prepared.map { Self.opaqueBounds(of: $0) }
+        let count = prepared.count
+
+        return try prepared.indices.map { index in
+            // The lanes that can be solid while this one is on top, wrapped,
+            // because the stack is a cycle.
+            var union: CGRect?
+            for step in -window ... window {
+                let neighbour = ((index + step) % count + count) % count
+                guard let box = boxes[neighbour] else { continue }
+                union = union.map { $0.union(box) } ?? box
+            }
+            let full = CGRect(x: 0, y: 0, width: crop.width, height: crop.height)
+            let box = (union ?? CGRect(x: 0, y: 0, width: 1, height: 1)).intersection(full)
+            guard !box.isEmpty, let patch = prepared[index].cropping(to: box),
+                  let ground = backdrop.cropping(to: box)
+            else { throw FrameEncoderError.cropEmpty }
+
+            let flattened = Self.over(patch, ground: ground)
+            let scaled = shrink < 1 ? (Self.resized(flattened, scale: shrink) ?? flattened) : flattened
+            guard let data = Self.jpegData(scaled, quality: quality) else {
+                throw FrameEncoderError.jpegEncodeFailed(frameIndex: index, cropSize: box.size)
+            }
+            return Sprite(
+                data: data,
+                rect: CGRect(
+                    x: box.minX / crop.width, y: box.minY / crop.height,
+                    width: box.width / crop.width, height: box.height / crop.height
+                )
+            )
+        }
+    }
+
+    /// A transparent patch on its piece of the still scene, opaque afterwards.
+    static func over(_ image: CGImage, ground: CGImage) -> CGImage {
+        guard let context = CGContext(
+            data: nil, width: ground.width, height: ground.height,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else { return image }
+        let bounds = CGRect(x: 0, y: 0, width: ground.width, height: ground.height)
+        context.draw(ground, in: bounds)
+        context.draw(image, in: bounds)
+        return context.makeImage() ?? image
+    }
+
     /// The box the image's non-transparent pixels sit in, or nil when there are
     /// none.
     ///
