@@ -67,7 +67,7 @@ struct FrameSetGenerator {
     /// works". Raising it means measuring where the renderer actually stops,
     /// not assuming - which is the mistake that put a black widget on a Home
     /// Screen three times today.
-    static let provenLoopSeconds: TimeInterval = 2
+    static let provenLoopSeconds: TimeInterval = 10
 
     static func plan(for spec: TimerFontSpec, clipSeconds: TimeInterval)
         -> (period: Int, resource: String, frames: Int)
