@@ -37,6 +37,10 @@ struct MotionaryApp: App {
             MaskLab.isEnabled = wanted
             changed = true
         }
+        if let wanted = WidgetAgeLab.launchOverride(in: arguments), wanted != WidgetAgeLab.seconds {
+            WidgetAgeLab.seconds = wanted
+            changed = true
+        }
         // Written on every launch while the lab is on, because the extension
         // can only read what the app has already put there and a card left
         // over from a previous sweep would pass for a working one.

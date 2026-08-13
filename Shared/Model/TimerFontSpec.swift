@@ -79,7 +79,7 @@ struct TimerFontSpec: Equatable, Sendable {
     static func cycleAlignedReference(at date: Date = Date()) -> Date {
         let seconds = date.timeIntervalSince1970
         let aligned = (seconds / cycleDuration).rounded(.down) * cycleDuration
-        return Date(timeIntervalSince1970: aligned - 60)
+        return Date(timeIntervalSince1970: aligned - 60 - WidgetAgeLab.seconds)
     }
 
     /// Which frame of the cycle the widget intends to be showing.

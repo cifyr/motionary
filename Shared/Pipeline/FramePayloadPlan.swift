@@ -25,11 +25,28 @@ enum FramePayloadPlan {
 
     static var bestQuality: Double { qualityLadder[0] }
 
-    /// The whole frame set, not one frame. Well under the archive figures in
-    /// `docs/widget-animation-surface.md` (10MB by one Apple engineer, 30 by
-    /// another) and comfortable to send: the sweep archived 64 frames at
-    /// 1620px clean, and this is about what that set weighs.
-    static let byteBudget = 12 * 1_048_576
+    /// The whole frame set, not one frame, and the first thing that makes a
+    /// widget black.
+    ///
+    /// This was 12MB, described as "well under the archive figures" in
+    /// `docs/widget-animation-surface.md` - which give 10MB by one Apple
+    /// engineer and 30 by another. Twelve is not under ten. Photographed on the
+    /// Home Screen: a set weighing 11.9MB draws nothing at all, and the same
+    /// design at 9.9MB draws. The extension reports `ok` for both, because it
+    /// only hands over the bytes.
+    ///
+    /// 8MB leaves room for the rest of the archived tree, which is not only
+    /// frames.
+    static var byteBudget: Int {
+        // `MOTIONARY_BYTE_BUDGET` separates the two things that grow together
+        // as a clip gets longer - how many lanes there are, and how many bytes
+        // they come to - so a black widget can be attributed to one of them.
+        ProcessInfo.processInfo.environment["MOTIONARY_BYTE_BUDGET"]
+            .flatMap(Int.init)
+            .map { max(1, $0) } ?? defaultByteBudget
+    }
+
+    static let defaultByteBudget = 8 * 1_048_576
 
     /// The smallest per-image cap seen on shipping hardware is far lower than
     /// this, but the caps observed on modern phones cluster around 2.1M px

@@ -408,10 +408,37 @@ ten cards gated one second apart under the ten-second mask step through ten
 distinct cards in order and wrap.** On device, a 320-frame ten-second design
 loads all 320 frames at 12.2MB and archives clean with the extension at 9-14MB.
 
+**And drew nothing.** That design was black on a Home Screen for a day while
+every report said `ok`, and it was blamed in turn on the lane count, on the
+grouping and on the mask - none of which it was. **The frame set was over the
+archive limit.** A set weighing 11.9MB is not drawn at all; the same design at
+9.9MB draws. The extension cannot see this, because all it does is hand over the
+JPEG bytes: `ok` is a true statement about a widget nobody can see.
+
+`FramePayloadPlan.byteBudget` was 12MB, called "well under the archive figures"
+in a paragraph that quotes one of those figures as 10. It is now 8.
+
+**Lane count is not the ceiling.** Photographed on a Home Screen at a fixed byte
+budget, 60, 90, 120, 160, 190 and 240 lanes all draw and all animate. What the
+lane count costs is quality - the byte budget is shared out across the lanes -
+and memory in the render server, which is the one thing none of these
+photographs measured, because they were taken on a Simulator.
+
 So the runtime engine's shape is: **a loop as long as the clip, up to ten
 seconds**, costing `period x fps` pictures - the stack has to cover the whole
 cycle, because a phase nothing was drawn into is a second of black once per
-loop.
+loop. Length is paid for in frame rate rather than in seconds: the lanes are
+budgeted, so a two-second clip keeps all 32fps and a ten-second one runs at 12.
+
+**How to photograph this.** The extension's own report cannot answer "is there a
+picture", so a widget is judged by taking one. `scratchpad/lane-sweep.sh` in the
+session directory delivers a real design at a given budget, drives SpringBoard
+to the widget's page, takes a burst and reports `BLACK` / `DRAWS, STILL` /
+`DRAWS+MOVES`. `MOTIONARY_LANE_BUDGET` and `MOTIONARY_BYTE_BUDGET` move the two
+ceilings independently, which is what separated them. `-MotionaryWidgetAge`
+re-renders as if the archived view had been sitting there for an hour, which
+rules the timer's own drift in or out without waiting an hour - it is ruled out:
+0s, 600s and 3600s all draw and move.
 
 **The experiment, still worth 30 minutes.** One widget, three bands, on device
 (not Simulator — several of the relevant bugs are device-only):

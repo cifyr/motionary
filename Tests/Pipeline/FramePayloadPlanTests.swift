@@ -27,6 +27,20 @@ final class FramePayloadPlanTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(FramePayloadPlan.bestQuality, 0.9)
     }
 
+    /// The budget has to stay under the archive limit it was written against,
+    /// which it did not: 12MB was called "well under" a figure of 10.
+    ///
+    /// Photographed rather than reasoned about - a 11.9MB frame set draws
+    /// nothing on the Home Screen and the same design at 9.9MB draws, with the
+    /// extension reporting `ok` either way, because all it does is hand over
+    /// the bytes.
+    func testTheBudgetStaysUnderTheArchiveLimit() {
+        XCTAssertLessThanOrEqual(
+            FramePayloadPlan.defaultByteBudget, 10 * 1_048_576,
+            "over this the widget is black and nothing says so"
+        )
+    }
+
     func testASetThatFitsIsNotReEncoded() {
         XCTAssertNil(FramePayloadPlan.retry(totalBytes: 1_000_000, at: 0.92))
         XCTAssertTrue(FramePayloadPlan.fits(totalBytes: FramePayloadPlan.byteBudget))

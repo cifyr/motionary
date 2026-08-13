@@ -69,13 +69,48 @@ struct FrameSetGenerator {
     /// Screen three times today.
     static let provenLoopSeconds: TimeInterval = 10
 
+    /// How many lanes a delivered design gets, which is not what makes a
+    /// widget black.
+    ///
+    /// The black was `FramePayloadPlan.byteBudget`: a frame set over about
+    /// 10MB is not drawn at all. Photographed on a Home Screen, lane counts of
+    /// 60, 90, 120, 160, 190 and 240 all draw and all animate once the set
+    /// fits, so seconds were never the ceiling and neither, within reach, is
+    /// this.
+    ///
+    /// What it still buys is quality and headroom. The budget is spent across
+    /// the lanes, so 128 leaves each frame about 64KB where 320 would leave
+    /// 25KB and soften every one of them; and each lane is a full-screen
+    /// picture the render server has to rasterise, which on a phone - the one
+    /// place none of the photographs were taken - costs memory the simulator
+    /// never had to find.
+    static let provenLaneCount = 128
+
+    /// `MOTIONARY_LANE_BUDGET` moves the ceiling for one build, so where it
+    /// actually falls can be bisected without a recompile between points.
+    static var laneBudget: Int {
+        ProcessInfo.processInfo.environment["MOTIONARY_LANE_BUDGET"]
+            .flatMap(Int.init)
+            .map { max(2, $0) } ?? provenLaneCount
+    }
+
+    /// The mask a clip needs, and the frame rate that fits its lanes in the
+    /// budget.
+    ///
+    /// Length is bought with smoothness, because those are the same axis: the
+    /// stack has to cover the whole mask period, so lanes are `period x fps`
+    /// and the budget is on lanes. A two-second clip keeps all 32fps; a
+    /// ten-second one gets the same 64 lanes spread over five times as long,
+    /// which is 6fps. Cutting the clip instead would be the one thing that
+    /// cannot be undone by looking at it.
     static func plan(for spec: TimerFontSpec, clipSeconds: TimeInterval)
-        -> (period: Int, resource: String, frames: Int)
+        -> (period: Int, resource: String, frames: Int, framesPerSecond: Int)
     {
         let mask = FontSetGenerator.blinkPeriod(
             covering: min(clipSeconds, provenLoopSeconds)
         )
-        return (mask.seconds, mask.resource, mask.seconds * spec.framesPerSecond)
+        let fps = max(1, min(spec.framesPerSecond, laneBudget / mask.seconds))
+        return (mask.seconds, mask.resource, mask.seconds * fps, fps)
     }
 
     /// What a design's own loop comes to in seconds, at the speed it plays.
@@ -235,7 +270,7 @@ struct FrameSetGenerator {
         design: DesignDocument,
         onStage: @Sendable @escaping (Stage) -> Void
     ) async throws -> BuildManifest {
-        let spec = design.spec
+        var spec = design.spec
         let crop = design.effectiveCrop
         guard crop.width >= 2, crop.height >= 2 else {
             throw GeneratorError.emptyCrop(design: design.name)
@@ -256,8 +291,14 @@ struct FrameSetGenerator {
         let plan = Self.plan(for: spec, clipSeconds: Self.clipSeconds(for: design))
         Self.logger.info("""
         mask period \(plan.period)s (\(plan.resource, privacy: .public)) for a \
-        \(String(format: "%.1f", Self.clipSeconds(for: design)))s clip, \(plan.frames) lanes
+        \(String(format: "%.1f", Self.clipSeconds(for: design)))s clip, \(plan.frames) lanes \
+        at \(plan.framesPerSecond)fps
         """)
+        // Everything below builds at the planned rate, not the authored one:
+        // the sampling, the preview video and the manifest all have to agree
+        // with the stack the widget will draw, or the clip plays at a speed
+        // nobody chose.
+        spec = TimerFontSpec(laneCount: spec.laneCount, framesPerSecond: plan.framesPerSecond)
 
         let primary = try await buildClip(
             design: design,

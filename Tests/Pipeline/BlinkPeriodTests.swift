@@ -55,27 +55,46 @@ final class BlinkPeriodTests: XCTestCase {
         let spec = TimerFontSpec(smoothness: .light)   // 32 lanes, 16fps
         let short = FrameSetGenerator.plan(for: spec, clipSeconds: 1)
         XCTAssertEqual(short.period, 2)
+        XCTAssertEqual(short.framesPerSecond, spec.framesPerSecond, "two seconds fit at the authored rate")
         XCTAssertEqual(short.frames, 2 * spec.framesPerSecond)
 
-        // A nine-second clip does not get a nine-second stack: the plan is
-        // capped at the length that has been seen to draw, because above it the
-        // render server stops producing a picture and the widget goes black
-        // with the extension still reporting ok.
         let long = FrameSetGenerator.plan(for: spec, clipSeconds: 9)
-        XCTAssertEqual(long.period, 10)
-        XCTAssertEqual(long.frames, 10 * spec.framesPerSecond)
-        XCTAssertGreaterThan(long.frames, short.frames)
+        XCTAssertEqual(long.period, 10, "a nine-second clip gets a nine-second loop, not a cut one")
+        XCTAssertEqual(long.frames, long.period * long.framesPerSecond)
     }
 
-    /// The cap is the whole reason a long clip comes back short, so it is worth
-    /// pinning: raising it is a decision to be made against a measurement, not
-    /// something that should drift.
-    func testTheLoopIsCappedAtWhatHasBeenSeenToDraw() {
-        XCTAssertEqual(FrameSetGenerator.provenLoopSeconds, 10)
-        for seconds in [0.3, 2.0, 5.0, 30.0] {
-            let plan = FrameSetGenerator.plan(for: TimerFontSpec(smoothness: .light), clipSeconds: seconds)
-            XCTAssertLessThanOrEqual(Double(plan.period), FrameSetGenerator.provenLoopSeconds)
+    /// Length is paid for in smoothness, and the budget is on lanes.
+    ///
+    /// Every lane is a full-screen picture that the render server has to
+    /// rasterise whether the mask lets it through or not, so `period x fps`
+    /// is the number that has to stay bounded. It cannot be bought back by
+    /// shortening the clip - that is the one thing a design cannot survive -
+    /// so the frame rate gives way instead.
+    func testALongClipPaysInFrameRateRatherThanLength() {
+        let spec = TimerFontSpec(smoothness: .standard)   // 64 lanes, 32fps
+        for seconds in [0.3, 2.0, 5.0, 9.5, 30.0] {
+            let plan = FrameSetGenerator.plan(for: spec, clipSeconds: seconds)
+            XCTAssertEqual(plan.frames, plan.period * plan.framesPerSecond)
+            XCTAssertLessThanOrEqual(
+                plan.frames, FrameSetGenerator.provenLaneCount,
+                "\(seconds)s asked for \(plan.frames) lanes"
+            )
+            XCTAssertGreaterThanOrEqual(plan.framesPerSecond, 1)
+            XCTAssertLessThanOrEqual(plan.framesPerSecond, spec.framesPerSecond)
         }
+
+        // The trade, stated: a two-second clip keeps every frame it was
+        // authored with, and a ten-second one covers five times as long at
+        // twelve.
+        XCTAssertEqual(FrameSetGenerator.plan(for: spec, clipSeconds: 2).framesPerSecond, 32)
+        XCTAssertEqual(FrameSetGenerator.plan(for: spec, clipSeconds: 10).framesPerSecond, 12)
+    }
+
+    /// Both ceilings are measured, and getting them wrong puts a black widget
+    /// on a Home Screen with every report still saying ok, so they are pinned.
+    func testTheCeilingsAreWhatWasMeasured() {
+        XCTAssertEqual(FrameSetGenerator.provenLoopSeconds, 10)
+        XCTAssertEqual(FrameSetGenerator.provenLaneCount, 128)
     }
 
     /// A manifest from before longer masks existed has no period, and has to go
