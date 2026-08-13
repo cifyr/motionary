@@ -97,9 +97,10 @@ struct FrameSetGenerator {
     /// 320 was measured with full-crop layers, each of which cost the render
     /// server a full-crop offscreen buffer for its mask. A patch-built design's
     /// mask is applied at the patch's own size - about a tenth of the crop - so
-    /// a lane is far cheaper than the one that number came from, and 480 is
-    /// 24fps over a twenty-second loop.
-    static let provenLaneCount = 480
+    /// a lane is far cheaper than the one that number came from. 720 is 24fps
+    /// over a thirty-second loop, which is what it takes to play Spidey's three
+    /// clips end to end without cutting them and without dropping to 16.
+    static let provenLaneCount = 720
 
     /// `MOTIONARY_LANE_BUDGET` moves the ceiling for one build, so where it
     /// actually falls can be bisected without a recompile between points.
@@ -875,7 +876,18 @@ struct FrameSetGenerator {
         let mask = Self.shufflePeriod(covering: wall, authored: spec.framesPerSecond)
         let fps = max(1, min(spec.framesPerSecond, Self.laneBudget / mask.seconds))
         let lanes = mask.seconds * fps
-        let shares = Self.programShares(lanes: lanes, weights: clips.map(\.wall))
+        // Each clip gets exactly its own length where the loop can afford it,
+        // and whatever is left over goes to one segment rather than being
+        // spread across all of them. The leftover is a clip playing its opening
+        // again, and one hitch per loop is easier to watch than three.
+        let own = clips.map { max(1, Int(($0.wall * Double(fps)).rounded())) }
+        var shares = own.reduce(0, +) <= lanes
+            ? own
+            : Self.programShares(lanes: lanes, weights: clips.map(\.wall))
+        let slack = lanes - shares.reduce(0, +)
+        if slack > 0, let longest = shares.indices.max(by: { shares[$0] < shares[$1] }) {
+            shares[longest] += slack
+        }
         guard shares.count == clips.count, shares.allSatisfy({ $0 > 0 }) else {
             Self.logger.warning("\(clips.count) clips will not divide \(lanes) lanes; building one clip instead")
             return nil

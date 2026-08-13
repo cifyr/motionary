@@ -50,8 +50,11 @@ final class ShuffledFrameProgramTests: XCTestCase {
     /// seconds - costs 10fps, and 10fps reads as a slideshow. A clip that ends
     /// early is the cheaper loss.
     func testTheLoopIsTheLongestThatKeepsTheFrameRateUp() {
+        // Spidey's three clips come to 26.6s, and 720 lanes buys thirty seconds
+        // at 24fps - so they play end to end without being cut and without the
+        // frame rate giving way.
         let period = FrameSetGenerator.shufflePeriod(covering: 26.6, authored: 32)
-        XCTAssertEqual(period.seconds, 20, "thirty seconds would drop below the floor")
+        XCTAssertEqual(period.seconds, 30)
         XCTAssertGreaterThanOrEqual(
             FrameSetGenerator.provenLaneCount / period.seconds,
             FrameSetGenerator.shuffleFrameRateFloor
@@ -64,7 +67,9 @@ final class ShuffledFrameProgramTests: XCTestCase {
 
         // A design authored below the floor is not dragged up to it: its own
         // rate is the ceiling, so it may have the longer loop.
-        XCTAssertEqual(FrameSetGenerator.shufflePeriod(covering: 26.6, authored: 10).seconds, 30)
+        // Longer than any mask: it gets the longest there is rather than
+        // failing, which is a design that plays rather than a build that stops.
+        XCTAssertEqual(FrameSetGenerator.shufflePeriod(covering: 55.0, authored: 32).seconds, 30)
     }
 
     /// Proportion must not starve a short clip: one lane is a frame, and zero
