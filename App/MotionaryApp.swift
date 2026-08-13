@@ -53,6 +53,11 @@ struct MotionaryApp: App {
     }
 
     @StateObject private var router = ExternalAppRouter()
+    /// Only while the app is on screen. A phone cannot be relied on to hold a
+    /// socket open in the background, and advertising a service it would not
+    /// answer is worse than not advertising: the Mac finds it and the send
+    /// fails at the last moment.
+    @StateObject private var receiver = LocalDeliveryReceiver()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -76,7 +81,13 @@ struct MotionaryApp: App {
                 // the last time the app ran, so it reads them on every return
                 // to the foreground - the cheapest moment that is also the most
                 // likely to precede a look at the Home Screen.
+                .environmentObject(receiver)
                 .onChange(of: scenePhase) { _, phase in
+                    if phase == .active {
+                        receiver.start()
+                    } else {
+                        receiver.stop()
+                    }
                     if phase == .active {
                         ReadoutGatherer.gatherAndPublish()
                         // Before the mirror below, so a delivery that happened

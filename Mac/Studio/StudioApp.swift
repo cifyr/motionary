@@ -19,6 +19,9 @@ struct MotionaryStudioApp: App {
         if CommandLine.arguments.contains("--rebuild-starred") {
             HeadlessBuild.rebuildStarred(deviceID: HeadlessBuild.device(in: CommandLine.arguments))
         }
+        if HeadlessBuild.sendRequested(in: CommandLine.arguments) {
+            HeadlessBuild.send()
+        }
         if let destination = HeadlessBuild.deliveryRequested(in: CommandLine.arguments) {
             HeadlessBuild.deliver(to: destination)
         }
@@ -196,6 +199,53 @@ enum HeadlessBuild {
                 exit(1)
             }
             exit(0)
+        }
+        dispatchMain()
+    }
+
+    /// `--send [phone name]` builds the newest design as pictures and sends it
+    /// over the network to a phone with Motionary open.
+    ///
+    /// No cable, no account, and no install: the phone already has the app and
+    /// the design is data. The package is written into a temp file on the way
+    /// past because that is also the path a delivery from Files or AirDrop
+    /// takes, and one path is easier to trust than three.
+    static func sendRequested(in arguments: [String]) -> Bool {
+        arguments.contains("--send")
+    }
+
+    static func send() -> Never {
+        let pipeline = StudioPipeline(projectRoot: ProjectLocator.find(), model: .default)
+        let name: String? = {
+            guard let flag = CommandLine.arguments.firstIndex(of: "--to"),
+                  CommandLine.arguments.index(after: flag) < CommandLine.arguments.endIndex
+            else { return nil }
+            return CommandLine.arguments[CommandLine.arguments.index(after: flag)]
+        }()
+
+        Task.detached {
+            do {
+                guard let design = StudioPipeline.saved().first else {
+                    FileHandle.standardError.write(Data("failed: no saved designs to send\n".utf8))
+                    exit(1)
+                }
+                let staged = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("outgoing.\(DesignPackage.fileExtension)")
+                try await pipeline.deliverable(design: design, to: staged) { note in
+                    FileHandle.standardError.write(Data("... \(note)\n".utf8))
+                }
+                FileHandle.standardError.write(Data("... looking for a phone\n".utf8))
+                let package = try Data(contentsOf: staged)
+                let (receiver, receipt) = try await LocalDeliverySender.deliver(package, to: name)
+                try? FileManager.default.removeItem(at: staged)
+
+                print("\(receipt.ok ? "sent" : "refused") by \(receiver.name)")
+                print("phone said \(receipt.message)")
+                exit(receipt.ok ? 0 : 1)
+            } catch {
+                FileHandle.standardError.write(Data("failed: \(error)\n".utf8))
+                exit(1)
+            }
         }
         dispatchMain()
     }
@@ -1013,6 +1063,14 @@ struct StudioView: View {
                 Button("Choose project folder") { chooseProject() }
                     .buttonStyle(.studio)
             }
+            // Sends the design rather than installing it: no toolchain, no
+            // cable, and nothing rebuilt on the phone. Needs Motionary open
+            // over there, because a phone will not hold a socket in the
+            // background.
+            Button("Send to phone") { sendToPhone() }
+                .buttonStyle(.studio)
+                .disabled(isBusy || StudioPipeline.saved().isEmpty)
+                .help("Build the newest design as pictures and send it to a phone with Motionary open")
             Spacer()
             if !log.isEmpty {
                 Text(log.last ?? "")
@@ -1102,6 +1160,45 @@ struct StudioView: View {
     /// Reads the clip and opens the editor. Nothing is generated yet: the
     /// crop and the placement are baked into the glyphs, so they have to be
     /// settled before the fonts exist.
+    /// Builds the newest design as pictures and hands it to a phone on the
+    /// network.
+    ///
+    /// Reports what the phone said rather than that the bytes left: "sent" and
+    /// "drew it" are different claims, and the second is the one worth making.
+    private func sendToPhone() {
+        guard let design = StudioPipeline.saved().first else { return }
+        done = nil
+        failure = nil
+        log = []
+
+        let pipeline = StudioPipeline(projectRoot: projectRoot, model: model)
+        buildTask = Task {
+            do {
+                let staged = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("outgoing.\(DesignPackage.fileExtension)")
+                try await pipeline.deliverable(design: design, to: staged) { note in
+                    Task { @MainActor in self.log.append(note) }
+                }
+                await MainActor.run { self.log.append("Looking for a phone") }
+                let package = try Data(contentsOf: staged)
+                let (receiver, receipt) = try await LocalDeliverySender.deliver(package, to: nil)
+                try? FileManager.default.removeItem(at: staged)
+
+                await MainActor.run {
+                    if receipt.ok {
+                        self.done = "\(receiver.name): \(receipt.message)"
+                    } else {
+                        self.failure = "\(receiver.name) refused it: \(receipt.message)"
+                    }
+                }
+            } catch is CancellationError {
+                await MainActor.run { self.done = "Stopped. Nothing was sent." }
+            } catch {
+                await MainActor.run { self.failure = "\(error)" }
+            }
+        }
+    }
+
     private func start() {
         guard let source else { return }
         done = nil

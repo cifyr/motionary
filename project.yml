@@ -176,6 +176,7 @@ targets:
       # widget does, so a delivered design can be seen before it is sent.
       - path: Shared/Rendering/FrameStackLayer.swift
       - path: Shared/Storage/DesignPackage.swift
+      - path: Shared/Storage/DeliveryWire.swift
       - path: Shared/Model/AppCatalog.swift
       - path: Shared/Storage/ImageLoader.swift
       - path: Shared/Model/SnapEngine.swift

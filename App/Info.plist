@@ -39,6 +39,15 @@
     <key>CFBundleURLName</key><string>com.caden.Motionary.launch</string>
     <key>CFBundleURLSchemes</key><array><string>motionary</string></array>
   </dict></array>
+  <!-- A design can be sent straight from the Mac over the network, which needs
+       both halves: permission to look at the local network at all, and the
+       service this app answers on. Without the service listed, iOS refuses the
+       listener rather than the browse, which reads as the Mac not finding a
+       phone that is plainly running. -->
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Motionary receives designs sent from Motionary Studio on your Mac.</string>
+  <key>NSBonjourServices</key>
+  <array><string>_motionary._tcp</string></array>
   <!-- A design delivered as pictures arrives as one file, and the phone has to
        recognise it or AirDrop and Files offer no way to open it. Exported
        rather than imported: this app defines the format, and nothing else

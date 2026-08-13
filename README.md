@@ -37,9 +37,11 @@ Some of its constraints are unusually sharp, and they are not bugs:
   fonts, its frames are colour glyphs, it gets a thirty-second loop, and it can
   only reach a phone by being compiled into the widget extension and installed.
   Built as pictures, it is a two-second loop that can be **delivered to a phone
-  that already has the app** — `Tools/deliver.sh`, or any file that reaches the
-  app through AirDrop or Files. Which one you want depends on whether the
-  design has to travel.
+  that already has the app** — press **Send to phone** in Studio with Motionary
+  open on the phone, or hand it a package through AirDrop, Files or
+  `Tools/deliver.sh`. Which one you want depends on whether the design has to
+  travel. The first send asks the phone for local network permission; until
+  that is allowed, Studio finds the phone and the transfer fails at the end.
 - **Only the iPhone 17 Pro is calibrated.** The widget's frame is measured
   against real hardware, not derived. On any other device the composition will
   be visibly misaligned against the wallpaper. Adding a device means measuring
