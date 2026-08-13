@@ -181,6 +181,15 @@ struct MediaFrameExtractor {
     /// rounded, so a square confinement leaves the clip showing in the corners
     /// of the wallpaper where the background should be.
     let clipCornerRadius: CGFloat
+    /// Keep the source's own transparency instead of flattening it onto a
+    /// background.
+    ///
+    /// A cut-out clip is a figure over nothing, and flattening it bakes the
+    /// still scene into every frame - 320 copies of one grey gradient, which is
+    /// the entire byte budget spent on the part that never moves. Measured on
+    /// Spidey Swing: two frames 150 apart differ in 0.26% of their pixels.
+    /// Kept, the frames carry only what moves.
+    let preservesAlpha: Bool
 
     init(
         url: URL,
@@ -188,7 +197,8 @@ struct MediaFrameExtractor {
         transform: MediaTransform = .identity,
         background: CGImage? = nil,
         clipRect: CGRect? = nil,
-        clipCornerRadius: CGFloat = 0
+        clipCornerRadius: CGFloat = 0,
+        preservesAlpha: Bool = false
     ) {
         self.url = url
         self.screenSize = screenSize
@@ -196,6 +206,7 @@ struct MediaFrameExtractor {
         self.background = background
         self.clipRect = clipRect
         self.clipCornerRadius = clipCornerRadius
+        self.preservesAlpha = preservesAlpha
     }
 
     var kind: MediaKind { MediaKind.detect(at: url) }
@@ -532,13 +543,18 @@ struct MediaFrameExtractor {
             bitsPerComponent: 8,
             bytesPerRow: 0,
             space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+            bitmapInfo: (preservesAlpha ? CGImageAlphaInfo.premultipliedLast
+                                        : CGImageAlphaInfo.noneSkipLast).rawValue
         ) else {
             throw MediaImportError.renderFailed(frameIndex: frameIndex)
         }
 
-        context.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
-        context.fill(CGRect(origin: .zero, size: screenSize))
+        // Transparent when the transparency is the point. Filling black here is
+        // what made every frame carry the whole scene.
+        if !preservesAlpha {
+            context.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+            context.fill(CGRect(origin: .zero, size: screenSize))
+        }
         context.interpolationQuality = .high
 
         let source = CGSize(width: image.width, height: image.height)
@@ -557,7 +573,10 @@ struct MediaFrameExtractor {
         // A chosen background wins outright, and is drawn at full strength
         // across the whole screen: it was picked to be seen, unlike the blow-up
         // below, which exists only to avoid a black band.
-        if let background {
+        if preservesAlpha {
+            // Nothing behind the clip: the still scene is drawn once, under the
+            // stack, as the backdrop the widget already has.
+        } else if let background {
             let size = CGSize(width: background.width, height: background.height)
             context.draw(background, in: flipped(Self.backdropPlacement(
                 sourceSize: size,

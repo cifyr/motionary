@@ -335,9 +335,35 @@ struct DesignStore {
     }
 
     /// Zero-padded, so the folder reads in playing order in any listing.
-    func frameURL(for id: UUID, index: Int, variant: UUID? = nil) -> URL {
+    ///
+    /// JPEG for a frame that fills the animated crop, PNG for one cut down to
+    /// the pixels that move - that one needs an alpha channel, which JPEG does
+    /// not have. Both extensions are read back, because a design delivered
+    /// before sprites existed is still on somebody's phone.
+    func frameURL(for id: UUID, index: Int, variant: UUID? = nil, ext: String = "jpg") -> URL {
         framesFolder(for: id, variant: variant)
-            .appendingPathComponent(String(format: "frame-%04d.jpg", index))
+            .appendingPathComponent(String(format: "frame-%04d.%@", index, ext))
+    }
+
+    /// Whichever of the two is actually on disk.
+    func existingFrameURL(for id: UUID, index: Int, variant: UUID? = nil) -> URL? {
+        for ext in ["png", "jpg"] {
+            let url = frameURL(for: id, index: index, variant: variant, ext: ext)
+            if FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        return nil
+    }
+
+    /// Where a sprite set records which part of the crop each frame covers.
+    func frameRectsURL(for id: UUID, variant: UUID? = nil) -> URL {
+        framesFolder(for: id, variant: variant).appendingPathComponent(Self.frameRectsName)
+    }
+
+    static let frameRectsName = "rects.json"
+
+    /// True when a name is one of a design's frames, whichever kind.
+    static func isFrameFile(_ name: String) -> Bool {
+        name.hasPrefix("frame-") && (name.hasSuffix(".jpg") || name.hasSuffix(".png"))
     }
 
     /// Every frame folder this design has, its own first.
@@ -371,7 +397,7 @@ struct DesignStore {
         let names = (try? FileManager.default.contentsOfDirectory(
             atPath: framesFolder(for: id, variant: variant).path
         )) ?? []
-        return names.filter { $0.hasPrefix("frame-") && $0.hasSuffix(".jpg") }.count
+        return names.filter(Self.isFrameFile).count
     }
 
     /// Cleared before a rebuild so frames from a longer previous loop cannot

@@ -23,6 +23,10 @@ enum FrameSetLoader {
         /// How many lanes each loaded frame covers. Above one, the set on disk
         /// was too big for one archive and has been thinned.
         var stride = 1
+        /// Where each frame sits in the crop, for a design shipped as sprites.
+        /// Nil for one whose frames fill the crop, which is how they all used
+        /// to be.
+        var rects: [CGRect]?
 
         var isComplete: Bool { loaded == requested && requested > 0 }
         /// A gap in the stack is a lane with nothing in it, which plays as a
@@ -50,7 +54,12 @@ enum FrameSetLoader {
         variant: UUID? = nil,
         limit: Int = FramePayloadPlan.archiveLimit
     ) -> (frames: [Image], report: Report) {
-        let urls = (0 ..< count).map { store.frameURL(for: designID, index: $0, variant: variant) }
+        let urls = (0 ..< count).map {
+            store.existingFrameURL(for: designID, index: $0, variant: variant)
+                ?? store.frameURL(for: designID, index: $0, variant: variant)
+        }
+        let allRects = (try? Data(contentsOf: store.frameRectsURL(for: designID, variant: variant)))
+            .flatMap { try? JSONDecoder().decode([FrameRect].self, from: $0) }
         // Sized from the file table rather than by reading them: the point is
         // to avoid holding a set this big, so measuring it by loading it would
         // be the same mistake one step earlier.
@@ -60,6 +69,7 @@ enum FrameSetLoader {
         let stride = FramePayloadPlan.laneStride(forBytes: onDisk, limit: limit)
 
         var images: [Image] = []
+        var rects: [CGRect] = []
         var missing: [Int] = []
         var bytes = 0
         for index in Swift.stride(from: 0, to: count, by: stride) {
@@ -71,10 +81,14 @@ enum FrameSetLoader {
             }
             bytes += data.count
             images.append(Image(uiImage: image))
+            if let allRects, index < allRects.count { rects.append(allRects[index].cgRect) }
         }
         let wanted = Array(Swift.stride(from: 0, to: count, by: stride)).count
+        // Only when there is one for every frame that loaded: a partial set
+        // would place some sprites and stretch the rest across the whole crop.
         let report = Report(
-            requested: wanted, loaded: images.count, bytes: bytes, missing: missing, stride: stride
+            requested: wanted, loaded: images.count, bytes: bytes, missing: missing, stride: stride,
+            rects: rects.count == images.count && !rects.isEmpty ? rects : nil
         )
         if stride > 1 {
             logger.warning("""

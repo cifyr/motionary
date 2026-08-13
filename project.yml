@@ -168,6 +168,8 @@ targets:
       # The timer reference is what the studio's own preview of the stack runs
       # from, so the knob that ages it has to resolve here too.
       - path: Shared/Diagnostics/WidgetAgeLab.swift
+      # Sprite placement travels with the frames the studio writes.
+      - path: Shared/Model/FrameRect.swift
       - path: Shared/Model/WidgetFamilyCompatibility.swift
       # The editor places the same tiles the widget draws, so it shares the
       # tile view, the catalogue, the snapping, and the icon pipeline.

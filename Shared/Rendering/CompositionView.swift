@@ -32,6 +32,9 @@ struct CompositionView<Tile: View>: View {
     /// How many lanes each of those frames covers. Above one, the set was too
     /// big to draw whole and the loader thinned it - see `FrameSetLoader.load`.
     var frameStride = 1
+    /// Where each of those frames belongs in the crop, for a design shipped as
+    /// sprites - see `FrameSetLoader`.
+    var frameRects: [CGRect]?
     /// Placed pictures, drawn over the animation and under the tiles by
     /// default - the same stacking the editor and the wallpaper bake use. An
     /// asset with `drawsBehindAnimation` set instead draws between the
@@ -98,7 +101,8 @@ struct CompositionView<Tile: View>: View {
                         framesPerSecond: manifest.framesPerSecond,
                         maskFont: manifest.maskFontResource,
                         maskPeriod: manifest.maskPeriodSeconds,
-                        laneStride: frameStride
+                        laneStride: frameStride,
+                        frameRects: frameRects
                     )
                         .frame(width: crop.width * scale, height: crop.height * scale)
                         .offset(

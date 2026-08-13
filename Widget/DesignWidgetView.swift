@@ -50,6 +50,8 @@ struct DesignWidgetView: View {
         /// How many lanes each frame covers, above one only when the set on
         /// disk was too big for one archive to draw.
         var frameStride = 1
+        /// Where each frame belongs in the crop, for a design shipped as sprites.
+        var frameRects: [CGRect]?
         /// Where a delivered design's tile icons and placed pictures are. Nil
         /// for a bundled design, whose artwork is in the bundle.
         var artFolder: URL?
@@ -90,6 +92,7 @@ struct DesignWidgetView: View {
                 isAnimated: source.fontsUsable,
                 frames: source.frames,
                 frameStride: source.frameStride,
+                frameRects: source.frameRects,
                 assets: source.manifest.placedAssets,
                 assetImage: { asset in
                     // A delivered design's pictures travel with it; a bundled
@@ -295,6 +298,7 @@ struct DesignWidgetView: View {
             name: name,
             frames: loaded.frames,
             frameStride: loaded.report.stride,
+            frameRects: loaded.report.rects,
             artFolder: store.artFolder(for: design.id)
         )
     }

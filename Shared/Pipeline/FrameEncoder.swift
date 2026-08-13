@@ -78,6 +78,128 @@ struct FrameEncoder {
         }
     }
 
+    /// One frame's moving pixels, and where in the crop they belong.
+    ///
+    /// The rect is normalised to the animated crop, so it survives the frames
+    /// being shrunk and the widget being a different size from the screen they
+    /// were cut for.
+    struct Sprite: Sendable {
+        let data: Data
+        let rect: CGRect
+    }
+
+    /// Every frame reduced to the box its own opaque pixels occupy.
+    ///
+    /// A cut-out clip is a small figure over nothing. Encoded whole, each frame
+    /// carries the crop's full area - and every frame's is the same still
+    /// scene, so the byte budget goes on 320 copies of one gradient and the
+    /// frames have to be shrunk to fit, which is what made them soft. Encoded
+    /// as its own bounding box, a frame is a few kilobytes at full resolution.
+    ///
+    /// PNG rather than JPEG: the alpha edge is the whole point, and JPEG has no
+    /// alpha at all.
+    ///
+    /// A frame with nothing opaque in it - the figure has swung off the crop -
+    /// gets a one-pixel transparent sprite rather than nothing, so the lane it
+    /// belongs to still exists and the stack keeps its shape.
+    func sprites(_ frames: [CGImage], shrink: Double = 1) throws -> [Sprite] {
+        guard crop.width >= 1, crop.height >= 1 else { throw FrameEncoderError.cropEmpty }
+
+        return try frames.map { frame in
+            let bounds = CGRect(x: 0, y: 0, width: frame.width, height: frame.height)
+            guard bounds.contains(crop), let cropped = frame.cropping(to: crop) else {
+                throw FrameEncoderError.cropOutOfBounds(
+                    crop: crop, imageSize: CGSize(width: frame.width, height: frame.height)
+                )
+            }
+            var prepared = WidgetTint.applied(to: cropped)
+            if let widgetRect, EdgeCompensation.overlaps(crop, widgetRect: widgetRect) {
+                prepared = EdgeCompensation.applied(
+                    to: prepared, originY: Int(crop.minY), widgetRect: widgetRect
+                )
+            }
+            guard let box = Self.opaqueBounds(of: prepared), let sprite = prepared.cropping(to: box) else {
+                return Sprite(
+                    data: try Self.pngData(Self.blankPixel()),
+                    rect: CGRect(x: 0, y: 0, width: 0.001, height: 0.001)
+                )
+            }
+            let scaled = shrink < 1 ? (Self.resized(sprite, scale: shrink) ?? sprite) : sprite
+            return Sprite(
+                data: try Self.pngData(scaled),
+                rect: CGRect(
+                    x: box.minX / crop.width,
+                    y: box.minY / crop.height,
+                    width: box.width / crop.width,
+                    height: box.height / crop.height
+                )
+            )
+        }
+    }
+
+    /// The box the image's non-transparent pixels sit in, or nil when there are
+    /// none.
+    ///
+    /// Scanned at a stride and then padded, because the exact edge does not
+    /// matter and a full scan of 320 frames at 1.26M pixels each is 400 million
+    /// reads for a box that is then rounded anyway.
+    static func opaqueBounds(of image: CGImage, stride: Int = 2, pad: Int = 3) -> CGRect? {
+        let width = image.width, height = image.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = pixels.withUnsafeMutableBytes { raw -> Bool in
+            guard let context = CGContext(
+                data: raw.baseAddress,
+                width: width, height: height,
+                bitsPerComponent: 8, bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return nil }
+
+        var minX = width, minY = height, maxX = -1, maxY = -1
+        for y in Swift.stride(from: 0, to: height, by: stride) {
+            let row = y * width * 4
+            for x in Swift.stride(from: 0, to: width, by: stride) where pixels[row + x * 4 + 3] > 8 {
+                if x < minX { minX = x }
+                if x > maxX { maxX = x }
+                if y < minY { minY = y }
+                if y > maxY { maxY = y }
+            }
+        }
+        guard maxX >= minX, maxY >= minY else { return nil }
+
+        let x0 = max(0, minX - pad), y0 = max(0, minY - pad)
+        let x1 = min(width, maxX + pad + 1), y1 = min(height, maxY + pad + 1)
+        // CGImage is top-left origin here because the context was drawn into in
+        // image order, which is the order the rect is wanted in.
+        return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+    }
+
+    private static func blankPixel() -> CGImage {
+        let context = CGContext(
+            data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )
+        return context!.makeImage()!
+    }
+
+    static func resized(_ image: CGImage, scale: Double) -> CGImage? {
+        let width = max(1, Int(Double(image.width) * scale))
+        let height = max(1, Int(Double(image.height) * scale))
+        guard let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
+    }
+
     static func jpegData(_ image: CGImage, quality: Double) -> Data? {
         let output = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(

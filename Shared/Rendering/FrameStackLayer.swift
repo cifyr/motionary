@@ -38,6 +38,13 @@ struct FrameStackLayer: View {
     /// top for `laneStride` phases instead of one. That is a lower frame rate,
     /// not a faster clip. See `FrameSetLoader.load`.
     var laneStride = 1
+    /// Where each frame belongs inside the layer, as fractions of it.
+    ///
+    /// A cut-out design ships sprites - each frame cropped to the pixels that
+    /// are actually in it - so the frames are different sizes and have to be
+    /// put back rather than stretched across the whole crop. Nil for a design
+    /// whose frames fill it, which is how they all used to be.
+    var frameRects: [CGRect]?
 
     /// Which frame a lane shows. Its own function because getting it wrong
     /// shows as a loop playing in the wrong order, which looks like a bad clip
@@ -105,10 +112,21 @@ struct FrameStackLayer: View {
         let drawn = Array(Swift.stride(from: lanes.lowerBound, to: lanes.upperBound, by: step))
         return ZStack {
             ForEach(drawn, id: \.self) { lane in
-                frames[Self.frameIndex(lane: lane / step, frameCount: frames.count)]
+                let index = Self.frameIndex(lane: lane / step, frameCount: frames.count)
+                let rect = frameRects.flatMap { $0.indices.contains(index) ? $0[index] : nil }
+                frames[index]
                     .resizable()
                     .interpolation(.high)
-                    .frame(width: size.width, height: size.height)
+                    // Its own box when it has one, the whole layer otherwise.
+                    .frame(
+                        width: (rect?.width ?? 1) * size.width,
+                        height: (rect?.height ?? 1) * size.height
+                    )
+                    .offset(
+                        x: (rect?.minX ?? 0) * size.width,
+                        y: (rect?.minY ?? 0) * size.height
+                    )
+                    .frame(width: size.width, height: size.height, alignment: .topLeading)
                     .mask {
                         BlinkMask(
                             reference: reference,

@@ -97,7 +97,7 @@ enum DesignPackage {
 
         return store.frameFolders(for: designID).map { folder in
             let frames = ((try? FileManager.default.contentsOfDirectory(atPath: folder.url.path)) ?? [])
-                .filter { $0.hasPrefix("frame-") && $0.hasSuffix(".jpg") }
+                .filter(DesignStore.isFrameFile)
                 .reduce(0) { $0 + size(folder.url.appendingPathComponent($1)) }
             let backdrop = folder.variant
                 .flatMap { store.existingWidgetBackdropURL(for: designID, variant: $0) }
@@ -135,7 +135,7 @@ enum DesignPackage {
         // be chosen and then cannot be drawn.
         for folder in store.frameFolders(for: designID) {
             let names = ((try? FileManager.default.contentsOfDirectory(atPath: folder.url.path)) ?? [])
-                .filter { $0.hasPrefix("frame-") && $0.hasSuffix(".jpg") }
+                .filter(DesignStore.isFrameFile)
                 .sorted()
             guard !names.isEmpty else { continue }
             let key = folder.variant?.uuidString.lowercased() ?? "primary"
@@ -146,6 +146,12 @@ enum DesignPackage {
                 }
                 entries.append(Entry(name: "frames/\(key)/\(name)", length: data.count))
                 payload.append(data)
+            }
+            // Which part of the crop each frame covers; absent for a design
+            // whose frames fill it, which is how they all used to be.
+            let rects = store.frameRectsURL(for: designID, variant: folder.variant)
+            if FileManager.default.fileExists(atPath: rects.path) {
+                try add("frames/\(key)/\(DesignStore.frameRectsName)", rects)
             }
             if let variant = folder.variant {
                 try add(

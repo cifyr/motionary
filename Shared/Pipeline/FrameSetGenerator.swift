@@ -133,6 +133,129 @@ struct FrameSetGenerator {
 
     static func frameCount(for spec: TimerFontSpec) -> Int { spec.laneCount }
 
+    /// Whether this clip is worth shipping as sprites.
+    ///
+    /// Measured on one frame rather than assumed from the file: a ProRes 4444
+    /// has an alpha channel whether or not anything in it is transparent, and
+    /// what decides this is how much of the crop the moving part actually
+    /// covers. Under two thirds and the sprites are the cheaper picture; above
+    /// it they are the same bytes with a rect attached.
+    private func prefersSprites(
+        design: DesignDocument, spec: TimerFontSpec, source: URL, crop: CGRect
+    ) async -> Bool {
+        guard let probe = try? await pictures(
+            design: design, spec: spec, source: source, isPrimary: true, count: 1,
+            preservesAlpha: true, onStage: { _ in }
+        ).first, Self.hasAlpha(probe), let cropped = probe.cropping(to: crop) else { return false }
+        guard let box = FrameEncoder.opaqueBounds(of: cropped) else { return true }
+        let covered = (box.width * box.height) / (crop.width * crop.height)
+        Self.logger.info("cut-out probe: the moving part covers \(Int(covered * 100))% of the crop")
+        return covered < 0.66
+    }
+
+    /// One sprite frame put back on the still scene, for anything that needs a
+    /// picture rather than a layer - the app's preview, and the poster.
+    static func flattened(_ image: CGImage, over plate: CGImage) -> CGImage {
+        guard let context = CGContext(
+            data: nil, width: plate.width, height: plate.height,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else { return image }
+        let bounds = CGRect(x: 0, y: 0, width: plate.width, height: plate.height)
+        context.draw(plate, in: bounds)
+        context.draw(image, in: bounds)
+        return context.makeImage() ?? image
+    }
+
+    static func hasAlpha(_ image: CGImage) -> Bool {
+        switch image.alphaInfo {
+        case .none, .noneSkipFirst, .noneSkipLast: false
+        default: true
+        }
+    }
+
+    /// Writes a cut-out clip as sprites, and records where each one belongs.
+    ///
+    /// The frames keep their full resolution here where a flattened set has to
+    /// be shrunk to fit - a sprite is a few kilobytes because it is only the
+    /// figure, so the budget buys sharpness instead of 320 copies of one
+    /// gradient. Shrinking is still the fallback when even the sprites will not
+    /// fit, and it shrinks the sprites rather than the crop, so the rects stay
+    /// right.
+    private func writeSprites(
+        frames: [CGImage],
+        design: DesignDocument,
+        spec: TimerFontSpec,
+        crop: CGRect,
+        variant: ClipVariant?,
+        companions: Int,
+        budget: Int,
+        plate: CGImage,
+        onStage: @Sendable @escaping (Stage) -> Void
+    ) async throws -> ClipBuild {
+        guard let first = frames.first else { throw GeneratorError.emptyCrop(design: design.name) }
+        let encoder = FrameEncoder(
+            crop: crop, quality: FramePayloadPlan.bestQuality, widgetRect: design.widgetRect
+        )
+        var sprites = try encoder.sprites(frames)
+        func measured() -> Int { sprites.reduce(0) { $0 + $1.data.count } }
+        Self.logger.info("""
+        \(sprites.count) sprites come to \(measured() / 1024)KB against a \(budget / 1024)KB budget \
+        (flattened, this crop would be \(Int(crop.width))x\(Int(crop.height)) every frame)
+        """)
+
+        let shrink = FramePayloadPlan.shrink(toFit: budget, measured: measured())
+        if shrink < 1 {
+            Self.logger.warning("shrinking sprites to \(Int(shrink * 100))% to fit the archive")
+            sprites = try encoder.sprites(frames, shrink: shrink)
+        }
+        onStage(.encoding(progress: 1))
+
+        try store.clearFrames(for: design.id, variant: variant?.id)
+        var totalBytes = 0
+        for (index, sprite) in sprites.enumerated() {
+            onStage(.writingFrames(completed: index, total: sprites.count))
+            let url = store.frameURL(for: design.id, index: index, variant: variant?.id, ext: "png")
+            do {
+                try sprite.data.write(to: url, options: DesignStore.writingOptions)
+            } catch {
+                throw GeneratorError.laneWriteFailed(lane: index, path: url.path, underlying: error)
+            }
+            totalBytes += sprite.data.count
+            try Task.checkCancellation()
+            await Task.yield()
+        }
+        onStage(.writingFrames(completed: sprites.count, total: sprites.count))
+
+        // Where each sprite goes, normalised to the crop, so the widget can put
+        // it back and the numbers survive any later shrink.
+        let rects = sprites.map { FrameRect(rect: $0.rect) }
+        try JSONEncoder().encode(rects).write(
+            to: store.frameRectsURL(for: design.id, variant: variant?.id),
+            options: DesignStore.writingOptions
+        )
+
+        // The preview the app plays is the flattened picture: the app draws one
+        // video, not a backdrop with a stack over it, so the sprites have to be
+        // put back onto the still scene before it is written.
+        try await PreviewVideoWriter(
+            size: DeviceGeometry.screenPixelSize,
+            framesPerSecond: spec.framesPerSecond
+        ).write(
+            frames: frames.map { Self.flattened($0, over: plate) },
+            to: variant.map { store.previewVideoURL(for: design.id, variant: $0.id) }
+                ?? store.previewVideoURL(for: design.id)
+        )
+
+        return ClipBuild(
+            frameCount: sprites.count,
+            totalBytes: totalBytes,
+            firstFrame: plate,
+            quality: FramePayloadPlan.bestQuality
+        )
+    }
+
     /// What travels in the widget's archive beside the frames: the still
     /// backdrop behind the animation, and the artwork on every placed tile and
     /// asset.
@@ -222,36 +345,29 @@ struct FrameSetGenerator {
         try store.clearFrames(for: design.id, variant: variant?.id)
 
         onStage(.decoding(progress: 0))
-        let extractor = MediaFrameExtractor(
-            url: source,
-            transform: design.mediaTransform,
-            background: design.backgroundName.flatMap {
-                ImageLoader.load(
-                    at: store.backgroundURL(for: design.id, name: $0),
-                    maxPixelSize: Int(max(
-                        DeviceGeometry.screenPixelSize.width,
-                        DeviceGeometry.screenPixelSize.height
-                    ))
-                )
-            },
-            clipRect: design.backgroundName == nil ? nil : design.widgetRect,
-            clipCornerRadius: design.effectiveCornerRadius
-        )
-        let frames = try await extractor.composedFrames(
-            // A variant plays from its own start: the loop point was chosen
-            // against the design's own clip and means nothing in another.
-            startFrame: variant == nil ? design.loopStartFrame : 0,
+        let sprites = await prefersSprites(design: design, spec: spec, source: source, crop: crop)
+        let frames = try await pictures(
+            design: design,
+            spec: spec,
+            source: source,
+            isPrimary: variant == nil,
             count: count,
-            frameRate: spec.framesPerSecond,
-            speed: design.playbackSpeed,
-            progress: { onStage(.decoding(progress: $0)) }
+            preservesAlpha: sprites,
+            onStage: onStage
         )
+        // One opaque frame for the backdrop, which is the still scene the
+        // sprites are drawn over and cannot itself be transparent.
+        let plate = sprites ? try? await pictures(
+            design: design, spec: spec, source: source,
+            isPrimary: variant == nil, count: 1, onStage: { _ in }
+        ).first : nil
         return try await write(
             frames: frames,
             design: design,
             spec: spec,
             crop: crop,
             variant: variant,
+            poster: plate ?? nil,
             onStage: onStage
         )
     }
@@ -268,6 +384,7 @@ struct FrameSetGenerator {
         isPrimary: Bool,
         count: Int,
         speed: Double? = nil,
+        preservesAlpha: Bool = false,
         onStage: @Sendable @escaping (Stage) -> Void
     ) async throws -> [CGImage] {
         let extractor = MediaFrameExtractor(
@@ -283,7 +400,8 @@ struct FrameSetGenerator {
                 )
             },
             clipRect: design.backgroundName == nil ? nil : design.widgetRect,
-            clipCornerRadius: design.effectiveCornerRadius
+            clipCornerRadius: design.effectiveCornerRadius,
+            preservesAlpha: preservesAlpha
         )
         return try await extractor.composedFrames(
             startFrame: isPrimary ? design.loopStartFrame : 0,
@@ -312,6 +430,7 @@ struct FrameSetGenerator {
         fps: Int,
         clips: [ProgramClip],
         program: [ClipProgram.Segment],
+        preservesAlpha: Bool,
         onStage: @Sendable @escaping (Stage) -> Void
     ) async throws -> [CGImage] {
         var out: [CGImage] = []
@@ -333,6 +452,7 @@ struct FrameSetGenerator {
                 source: clip.source,
                 isPrimary: segment.clipID == nil,
                 count: min(segment.frameCount, own),
+                preservesAlpha: preservesAlpha,
                 onStage: onStage
             )
             guard !cut.isEmpty else { throw GeneratorError.emptyCrop(design: design.name) }
@@ -452,11 +572,16 @@ struct FrameSetGenerator {
         spec: TimerFontSpec,
         crop: CGRect,
         variant: ClipVariant?,
+        poster: CGImage? = nil,
         onStage: @Sendable @escaping (Stage) -> Void
     ) async throws -> ClipBuild {
         guard let first = frames.first else {
             throw GeneratorError.emptyCrop(design: design.name)
         }
+        // The backdrop is the still scene behind the animation, so it has to be
+        // opaque even when the frames are not - a sprite set composited over a
+        // transparent backdrop is a widget with nothing behind the figure.
+        let plate = poster ?? first
 
         onStage(.writingWallpaper)
         // Written before the frames are encoded, not after, because it decides
@@ -471,7 +596,7 @@ struct FrameSetGenerator {
             store: store,
             tileArtwork: tileArtwork,
             assetArtwork: assetArtwork
-        ).write(design: design, poster: first, variantID: variant?.id)
+        ).write(design: design, poster: plate, variantID: variant?.id)
         let companions = companionBytes(design: design, variant: variant?.id)
         let budget = FramePayloadPlan.frameBudget(companionBytes: companions)
         Self.logger.info("""
@@ -480,6 +605,17 @@ struct FrameSetGenerator {
         """)
 
         onStage(.encoding(progress: 0))
+        // A cut-out clip is shipped as sprites: each frame cropped to the
+        // pixels that are actually in it, over the backdrop the widget already
+        // draws. Flattened, every frame carries the same still scene and the
+        // budget goes on 320 copies of it.
+        if frames.first.map(Self.hasAlpha) == true {
+            return try await writeSprites(
+                frames: frames, design: design, spec: spec, crop: crop,
+                variant: variant, companions: companions, budget: budget, plate: plate,
+                onStage: onStage
+            )
+        }
         var quality = FramePayloadPlan.bestQuality
         var data = try encode(frames: frames, design: design, crop: crop, quality: quality)
         func measured() -> Int { data.reduce(0) { $0 + $1.count } }
@@ -750,11 +886,23 @@ struct FrameSetGenerator {
         """)
 
         let programSpec = TimerFontSpec(laneCount: spec.laneCount, framesPerSecond: fps)
-        let frames = try await programmedPictures(
-            design: design, fps: fps, clips: clips, program: program, onStage: onStage
+        // Decided once, from the design's own clip: every clip in a design is
+        // the same scene shot the same way, and a stack half sprites and half
+        // flattened frames would draw the still background over the sprites.
+        let sprites = await prefersSprites(
+            design: design, spec: programSpec, source: clips[0].source, crop: crop
         )
+        let frames = try await programmedPictures(
+            design: design, fps: fps, clips: clips, program: program,
+            preservesAlpha: sprites, onStage: onStage
+        )
+        let plate = sprites ? try? await pictures(
+            design: design, spec: programSpec, source: clips[0].source,
+            isPrimary: clips[0].id == nil, count: 1, onStage: { _ in }
+        ).first : nil
         let built = try await write(
-            frames: frames, design: design, spec: programSpec, crop: crop, variant: nil, onStage: onStage
+            frames: frames, design: design, spec: programSpec, crop: crop, variant: nil,
+            poster: plate ?? nil, onStage: onStage
         )
 
         let backdropRect = DesignArtWriter.backdropRect(widgetRect: design.widgetRect)
