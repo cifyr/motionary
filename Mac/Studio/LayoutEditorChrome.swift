@@ -13,6 +13,13 @@ extension LayoutEditor {
     /// resolves the modifier rather than this property.
     var editorToolbar: some View {
         HStack(spacing: 16) {
+            Button(action: onClose) {
+                Label("Library", systemImage: "chevron.left")
+                    .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(.studioCompact)
+            .help("Back to the library. Your work is saved on the way out.")
+
             VStack(alignment: .leading, spacing: 1) {
                 Text(documentName)
                     .font(StudioTheme.title)

@@ -20,7 +20,33 @@ struct StudioHome: View {
     let onDuplicate: (DesignDocument) -> Void
     let onRename: (DesignDocument) -> Void
     let onDelete: (DesignDocument) -> Void
+    let onExport: (DesignDocument) -> Void
     let onNew: () -> Void
+    let onImport: () -> Void
+    /// A file dropped on the library, rather than chosen through a panel.
+    let onImportFile: (URL) -> Void
+    let onInstallAll: () -> Void
+    /// What "Install all" would actually do, or why it cannot. Shown next to
+    /// the button so the phone's absence is legible before it is pressed.
+    let installAllState: InstallAllState
+
+    struct InstallAllState {
+        let starred: Int
+        let buildable: Int
+        let deviceName: String?
+        let isBusy: Bool
+
+        var canRun: Bool { buildable > 0 && deviceName != nil && !isBusy }
+
+        /// Says the next thing to do, not the state it is in.
+        var explanation: String {
+            if isBusy { return "Working…" }
+            if starred == 0 { return "Star a design to include it" }
+            if buildable == 0 { return "Build a starred design first" }
+            guard let deviceName else { return "Connect an iPhone to install" }
+            return "\(buildable) starred → \(deviceName)"
+        }
+    }
 
     private let columns = [GridItem(.adaptive(minimum: 190, maximum: 230), spacing: 18)]
 
@@ -28,6 +54,56 @@ struct StudioHome: View {
     private var mine: [DesignDocument] { designs.filter { !starterIDs.contains($0.id) } }
 
     var body: some View {
+        VStack(spacing: 0) {
+            actionBar
+            Divider()
+            grid
+        }
+        .background(StudioTheme.libraryBackground)
+        // Dropping an exported design anywhere on the library imports it,
+        // which is what someone who has just been sent one will try first.
+        .onDrop(of: [.zip, .fileURL], isTargeted: nil) { providers in
+            onImportDropped(providers)
+        }
+    }
+
+    /// The library's own controls, above the shelf.
+    ///
+    /// Install all sits here rather than in a menu because it is the thing the
+    /// whole tool is for, and it carries its own explanation: a disabled button
+    /// that will not say why is worse than no button.
+    private var actionBar: some View {
+        HStack(spacing: 10) {
+            Button(action: onNew) {
+                Label("New design", systemImage: "plus")
+            }
+            .buttonStyle(.studio)
+
+            Button(action: onImport) {
+                Label("Import…", systemImage: "square.and.arrow.down")
+            }
+            .buttonStyle(.studio)
+            .help("Open a .motionary.zip someone sent you")
+
+            Spacer()
+
+            Text(installAllState.explanation)
+                .font(StudioTheme.monoSmall)
+                .foregroundStyle(StudioTheme.textTertiary)
+
+            Button(action: onInstallAll) {
+                Label("Install all", systemImage: "iphone.and.arrow.forward")
+            }
+            .buttonStyle(.studioProminent)
+            .disabled(!installAllState.canRun)
+            .help("Compile every starred design into the app and install it")
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(StudioTheme.headerFill)
+    }
+
+    private var grid: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 if !starters.isEmpty {
@@ -53,6 +129,17 @@ struct StudioHome: View {
         // well behind light cards reads as an unfinished theme rather than a
         // deliberate one.
         .background(StudioTheme.libraryBackground)
+    }
+
+    /// Accepts a dropped archive by handing its URL to the same importer the
+    /// button uses, so there is one import path rather than two.
+    private func onImportDropped(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            guard let url, url.pathExtension.lowercased() == "zip" else { return }
+            Task { @MainActor in onImportFile(url) }
+        }
+        return true
     }
 
     private func section(
@@ -99,6 +186,10 @@ struct StudioHome: View {
     private func menu(for design: DesignDocument, isStarter: Bool) -> some View {
         Button("Open") { onOpen(design) }
         Button("Duplicate") { onDuplicate(design) }
+        Divider()
+        // Export is how a design is shared: one archive carrying the clip, the
+        // background and the skins it uses, so it opens on someone else's Mac.
+        Button("Export…") { onExport(design) }
         Divider()
         Button("Rename…") { onRename(design) }
             .disabled(isStarter)

@@ -332,20 +332,31 @@ struct StudioView: View {
                 // A clip is in hand, or a run is going: the workspace is what
                 // there is to say. Otherwise the library is a better landing
                 // place than an empty drop target.
-                ScrollView {
-                    workColumn
-                        .padding(24)
-                        .background(
-                            StudioTheme.panel.opacity(0.96),
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        )
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .strokeBorder(StudioTheme.headerEdge, lineWidth: 1)
-                        }
-                        .padding(28)
+                VStack(spacing: 0) {
+                    workspaceBar
+                    Divider()
+                    ScrollView {
+                        workColumn
+                            .padding(24)
+                            .background(
+                                StudioTheme.panel,
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            )
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .strokeBorder(StudioTheme.headerEdge, lineWidth: 1)
+                            }
+                            // Capped, then centred. Left to fill, the controls
+                            // stretched into a form the width of the window.
+                            .frame(maxWidth: 620)
+                            .frame(maxWidth: .infinity)
+                            .padding(28)
+                    }
                 }
-                .background(StudioTheme.canvasBackground)
+                // Not the canvas wash. This screen holds controls, not artwork,
+                // and a fixed-dark well behind a light panel was the single
+                // worst thing in the app to look at.
+                .background(StudioTheme.libraryBackground)
                 .frame(minWidth: 480)
             } else if let library {
                 StudioHome(
@@ -361,7 +372,12 @@ struct StudioView: View {
                         renamedTo = $0.name
                     },
                     onDelete: { deleting = $0 },
-                    onNew: { chooseFile() }
+                    onExport: { exportDesign($0) },
+                    onNew: { chooseFile() },
+                    onImport: { importDesign() },
+                    onImportFile: { importDesign(from: $0) },
+                    onInstallAll: { installStarred() },
+                    installAllState: installAllState
                 )
                 .frame(minWidth: 480)
             } else {
@@ -417,6 +433,38 @@ struct StudioView: View {
             .tint(StudioTheme.accent)
             .onAppear { renamedTo = design.name }
         }
+    }
+
+    /// The workspace's own bar, carrying the way back.
+    ///
+    /// Dropping a clip used to be a one-way door: the library was still in the
+    /// sidebar but the detail pane never returned to it, so the only way out
+    /// was to finish a build or quit.
+    private var workspaceBar: some View {
+        HStack(spacing: 10) {
+            Button {
+                source = nil
+                wallpaper = nil
+                done = nil
+                failure = nil
+            } label: {
+                Label("Library", systemImage: "chevron.left")
+            }
+            .buttonStyle(.studioCompact)
+            .disabled(isBusy)
+            .help(isBusy ? "Stop the build first" : "Back to the library")
+
+            Text(source?.lastPathComponent ?? "New design")
+                .font(StudioTheme.bodyStrong)
+                .foregroundStyle(StudioTheme.textBright)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(StudioTheme.headerFill)
     }
 
     /// Reopening keeps the placement. Deriving a design from the clip again
@@ -647,19 +695,116 @@ struct StudioView: View {
     }
 
     private func importDesign() {
-        guard let store = try? StudioPipeline.openStore() else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.zip]
         panel.allowsMultipleSelection = false
         panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
         guard panel.runModal() == .OK, let source = panel.url else { return }
+        importDesign(from: source)
+    }
+
+    /// The one importer. Both the panel and a file dropped on the library end
+    /// up here, so an archive behaves the same however it arrived.
+    private func importDesign(from source: URL) {
+        guard let store = try? StudioPipeline.openStore() else { return }
         do {
             let design = try DesignArchive.restore(from: source, into: store)
             saved = StudioPipeline.saved()
+            DesignThumbnail.forget(design.id)
             done = "Imported \(design.name). Open it to edit or build."
             failure = nil
         } catch {
-            failure = "Could not import: \(error)"
+            failure = "Could not import \(source.lastPathComponent): \(error)"
+        }
+    }
+
+    /// What the Install all button can do right now.
+    private var installAllState: StudioHome.InstallAllState {
+        let store = try? StudioPipeline.openStore()
+        let starred = saved.filter(\.isStarred)
+        let buildable = starred.filter { (try? store?.loadManifest(id: $0.id)) != nil }
+        return .init(
+            starred: starred.count,
+            buildable: buildable.count,
+            deviceName: devices.first { $0.id == deviceID }?.name,
+            isBusy: isBusy
+        )
+    }
+
+    /// Puts every starred design that has a build onto the phone.
+    ///
+    /// The same job `--install-starred` does, without making a new design on
+    /// the way: rebuilding the phone from what is starred is its own task, and
+    /// going through a fresh clip to trigger it would leave a design behind
+    /// that nobody asked for.
+    private func installStarred() {
+        if projectRoot == nil { chooseProject() }
+        guard let projectRoot else {
+            failure = String(describing: StudioPipelineError.noProjectFolder)
+            return
+        }
+        guard let store = try? StudioPipeline.openStore() else { return }
+
+        var bundled: [BundleWriter.Bundled] = []
+        var skipped: [String] = []
+        for design in saved where design.isStarred {
+            if let manifest = try? store.loadManifest(id: design.id) {
+                bundled.append(.init(
+                    name: design.name,
+                    folder: store.folder(for: design.id),
+                    manifest: manifest
+                ))
+            } else {
+                skipped.append(design.name)
+            }
+        }
+        guard !bundled.isEmpty else {
+            failure = "Nothing starred has a build yet. Open a design and build it first."
+            return
+        }
+
+        let device = deviceID
+        stage = .preparing
+        buildTask = Task {
+            do {
+                let writer = try BundleWriter(projectRoot: projectRoot)
+                let result = try writer.install(
+                    bundled,
+                    iconsFolder: StudioPipeline.iconsFolder(for: store),
+                    store: store
+                )
+                let installer = DeviceInstaller(projectRoot: projectRoot)
+                try installer.regenerateProject { caption in
+                    Task { @MainActor in log.append(caption) }
+                }
+                var warning: String?
+                if let device {
+                    warning = try installer.installAndLaunch(deviceID: device) { caption in
+                        Task { @MainActor in log.append(caption) }
+                    }
+                }
+                await MainActor.run {
+                    self.stage = nil
+                    let megabytes = result.totalBytes / 1_048_576
+                    var summary = "Installed \(bundled.count) design\(bundled.count == 1 ? "" : "s")"
+                    summary += ", \(result.fontCount) fonts, \(megabytes)MB."
+                    if !skipped.isEmpty {
+                        summary += " Skipped \(skipped.joined(separator: ", ")) — starred but not built."
+                    }
+                    self.done = [warning, summary].compactMap { $0 }.joined(separator: " ")
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    self.stage = nil
+                    self.done = "Install stopped. Nothing was changed on the phone."
+                }
+            } catch {
+                await MainActor.run {
+                    self.stage = nil
+                    self.failure = String(describing: error)
+                }
+            }
+            await MainActor.run { self.buildTask = nil }
         }
     }
 
@@ -1007,7 +1152,9 @@ private struct EditorWindow: View {
             // "Preview" leaves the editor the way Done did: it saves, and the
             // library pane behind is where a design is looked at.
             onPreview: { onCancel(prepared) },
-            onBuild: { onBuild(prepared) }
+            onBuild: { onBuild(prepared) },
+            // Saves on the way out, exactly as Preview does.
+            onClose: { onCancel(prepared) }
         )
         .frame(
             minWidth: LayoutEditor.width(for: model),
