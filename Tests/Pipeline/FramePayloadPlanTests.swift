@@ -36,8 +36,31 @@ final class FramePayloadPlanTests: XCTestCase {
     /// the bytes.
     func testTheBudgetStaysUnderTheArchiveLimit() {
         XCTAssertLessThanOrEqual(
-            FramePayloadPlan.defaultByteBudget, 10 * 1_048_576,
+            FramePayloadPlan.archiveBudget, FramePayloadPlan.archiveLimit,
             "over this the widget is black and nothing says so"
+        )
+    }
+
+    /// The frames do not get the whole archive: the still backdrop and every
+    /// placed tile's artwork are inlined into the same tree.
+    ///
+    /// This is the difference between two real designs. One with flat plate
+    /// tiles carries 1.20MB of artwork and drew at 6.28MB of frames; one with
+    /// photographic tiles carries 1.58MB and was black at 7.75MB of frames,
+    /// which is 9.32MB of archive. Budgeting the frames alone cannot tell them
+    /// apart, and the extension reports `ok` for both.
+    func testTheFramesOnlyGetWhatTheArtworkLeaves() {
+        let plain = FramePayloadPlan.frameBudget(companionBytes: 1_258_291)
+        let photographic = FramePayloadPlan.frameBudget(companionBytes: 1_657_262)
+        XCTAssertLessThan(photographic, plain, "heavier artwork has to leave the frames less")
+        XCTAssertEqual(plain + 1_258_291, FramePayloadPlan.byteBudget)
+
+        // Artwork can never squeeze the frames out entirely - a design with no
+        // room left is still a design, and the floor is what says so.
+        XCTAssertGreaterThan(FramePayloadPlan.frameBudget(companionBytes: 500 * 1_048_576), 0)
+        XCTAssertEqual(
+            FramePayloadPlan.frameBudget(companionBytes: 0), FramePayloadPlan.byteBudget,
+            "a design with no artwork gets the whole archive"
         )
     }
 

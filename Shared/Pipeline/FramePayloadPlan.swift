@@ -25,38 +25,53 @@ enum FramePayloadPlan {
 
     static var bestQuality: Double { qualityLadder[0] }
 
-    /// The whole frame set, not one frame, and the first thing that makes a
-    /// widget black.
+    /// What one archive may weigh, and the first thing that makes a widget
+    /// black.
     ///
     /// This was 12MB, described as "well under the archive figures" in
     /// `docs/widget-animation-surface.md` - which give 10MB by one Apple
-    /// engineer and 30 by another. Twelve is not under ten. Photographed on the
-    /// Home Screen: a set weighing 11.9MB draws nothing at all, and the same
-    /// design at 9.9MB draws. The extension reports `ok` for both, because it
-    /// only hands over the bytes.
-    ///
-    /// 8MB leaves room for the rest of the archived tree, which is not only
-    /// frames.
+    /// engineer and 30 by another. Twelve is not under ten. It then counted
+    /// only the frames, which is how the design in `archiveBudget` below went
+    /// black at 7.75MB of them.
     static var byteBudget: Int {
         // `MOTIONARY_BYTE_BUDGET` separates the two things that grow together
         // as a clip gets longer - how many lanes there are, and how many bytes
         // they come to - so a black widget can be attributed to one of them.
         ProcessInfo.processInfo.environment["MOTIONARY_BYTE_BUDGET"]
             .flatMap(Int.init)
-            .map { max(1, $0) } ?? defaultByteBudget
+            .map { max(1, $0) } ?? archiveBudget
     }
 
-    static let defaultByteBudget = 8 * 1_048_576
+    /// Everything one archive carries, which is not only the frames.
+    ///
+    /// The widget's tree also holds the still backdrop behind the animation and
+    /// the artwork on every placed tile, and those are inlined the same way the
+    /// frames are. Budgeting the frames alone is how a design with photographic
+    /// tiles went black while one with four times as many frames drew: 6.28MB
+    /// of frames plus 1.20MB of artwork is 7.48MB and draws, and 7.75MB of
+    /// frames plus 1.58MB of artwork is 9.32MB and does not.
+    ///
+    /// Measured on a phone, through iPhone Mirroring, on the extra-large
+    /// portrait widget that fills the screen - not on a Simulator, whose widget
+    /// is smaller and whose render server has a Mac's memory behind it. Every
+    /// earlier number here was measured there and every one of them was too
+    /// generous.
+    static let archiveBudget = 7 * 1_048_576
+
+    /// What is left for frames once the things that travel with them in the
+    /// same archive are counted.
+    static func frameBudget(companionBytes: Int, budget: Int = byteBudget) -> Int {
+        max(1_048_576, budget - max(0, companionBytes))
+    }
 
     /// Where the widget stops being drawn, as opposed to where a build aims.
     ///
-    /// Measured by photographing a Home Screen: 11.9MB of frames draws nothing,
-    /// 9.9MB draws. `byteBudget` sits under this with room for the rest of the
-    /// archived tree; this is the number a set already on a phone is judged
-    /// against, because it was packed by whatever budget was current when it was
-    /// sent - and a design delivered under the old 12MB one is black until it
-    /// is sent again.
-    static let archiveLimit = 10 * 1_048_576
+    /// `archiveBudget` sits under this with room to spare. This is the number a
+    /// set *already on a phone* is judged against, since it was packed by
+    /// whatever budget was current when it was sent - and a design delivered
+    /// under an older, more generous one is black until it is sent again.
+    /// 9.32MB has been photographed drawing nothing.
+    static let archiveLimit = 9 * 1_048_576
 
     /// How many lanes to skip so a frame set already on disk fits the archive.
     ///
@@ -84,7 +99,7 @@ enum FramePayloadPlan {
         return (maximumPixelArea / area).squareRoot()
     }
 
-    static func fits(totalBytes: Int) -> Bool { totalBytes <= byteBudget }
+    static func fits(totalBytes: Int, budget: Int = byteBudget) -> Bool { totalBytes <= budget }
 
     /// The next quality worth trying, or nil when the ladder is spent.
     ///
@@ -102,8 +117,8 @@ enum FramePayloadPlan {
     /// The quality to encode at, given what one pass measured.
     ///
     /// Returns nil when the set already fits and nothing needs re-encoding.
-    static func retry(totalBytes: Int, at quality: Double) -> Double? {
-        guard !fits(totalBytes: totalBytes) else { return nil }
+    static func retry(totalBytes: Int, at quality: Double, budget: Int = byteBudget) -> Double? {
+        guard !fits(totalBytes: totalBytes, budget: budget) else { return nil }
         return nextQuality(after: quality)
     }
 

@@ -416,7 +416,33 @@ archive limit.** A set weighing 11.9MB is not drawn at all; the same design at
 JPEG bytes: `ok` is a true statement about a widget nobody can see.
 
 `FramePayloadPlan.byteBudget` was 12MB, called "well under the archive figures"
-in a paragraph that quotes one of those figures as 10. It is now 8.
+in a paragraph that quotes one of those figures as 10.
+
+**And the frames are not the only thing in the archive.** The still backdrop and
+the artwork on every placed tile are inlined into the same tree, so budgeting the
+frames alone cannot tell two designs apart: one with flat plate tiles carries
+1.20MB of artwork and drew at 6.28MB of frames, and one with photographic
+polaroid tiles carries 1.58MB and was black at 7.75MB - 9.32MB of archive
+against 7.48MB. The build now writes the backdrop and the artwork *before*
+encoding the frames, measures them, and gives the frames what is left of a
+**7MB** whole-archive budget.
+
+**Every number above was re-measured on a phone.** The earlier ones were taken
+on a Simulator, whose widget is `systemLarge` and whose render server has a
+Mac's memory behind it; the phone draws `systemExtraLargePortrait`, which fills
+the screen, and the phone is what kept being black. The instrument is
+`scratchpad/device-sweep.sh`: deliver, drive the phone Home, photograph it
+through **iPhone Mirroring**, judge. On the phone, lane counts of 60, 120, 190,
+240, 280 and 320 all draw and animate once the archive fits - so the loop
+length, the mask period and the lane count were all innocent, and the only thing
+that was ever wrong was how much went into one archive.
+
+Two cautions for anyone repeating it. The mirroring stream does not hand back a
+fresh frame every 350ms, so a short burst reads a moving widget as frozen -
+`DRAWS, STILL` at 192 and 240 lanes was the capture, not the widget, and went
+away at 1.5s spacing. And mirroring drops the moment somebody picks the phone
+up, which photographs a "Lock your iPhone to connect" panel at 96% brightness;
+that is not a widget result.
 
 **A design already on a phone cannot be fixed by changing the budget.** It was
 packed by whatever budget was current when it was sent, and the extension cannot

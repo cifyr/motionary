@@ -69,6 +69,16 @@ struct FrameSetGenerator {
     /// Screen three times today.
     static let provenLoopSeconds: TimeInterval = 10
 
+    /// `MOTIONARY_LOOP_SECONDS` caps the loop for one build, so which mask a
+    /// design gets can be varied on its own. The masks are the one part of this
+    /// that has never been isolated on a phone: the two-second one is the
+    /// shipped font and the only one a Home Screen has been seen to animate.
+    static var loopSecondsBudget: TimeInterval {
+        ProcessInfo.processInfo.environment["MOTIONARY_LOOP_SECONDS"]
+            .flatMap(Double.init)
+            .map { max(0.1, $0) } ?? provenLoopSeconds
+    }
+
     /// How many lanes a delivered design gets, which is not what makes a
     /// widget black.
     ///
@@ -110,7 +120,7 @@ struct FrameSetGenerator {
         -> (period: Int, resource: String, frames: Int, framesPerSecond: Int)
     {
         let mask = FontSetGenerator.blinkPeriod(
-            covering: min(clipSeconds, provenLoopSeconds)
+            covering: min(clipSeconds, loopSecondsBudget)
         )
         let fps = max(1, min(spec.framesPerSecond, laneBudget / mask.seconds))
         return (mask.seconds, mask.resource, mask.seconds * fps, fps)
@@ -122,6 +132,29 @@ struct FrameSetGenerator {
     }
 
     static func frameCount(for spec: TimerFontSpec) -> Int { spec.laneCount }
+
+    /// What travels in the widget's archive beside the frames: the still
+    /// backdrop behind the animation, and the artwork on every placed tile and
+    /// asset.
+    ///
+    /// Sized from the files rather than estimated, because the difference
+    /// between designs is large - flat plates come to a megabyte, photographic
+    /// ones to half as much again - and it is the whole reason one design drew
+    /// and another did not.
+    private func companionBytes(design: DesignDocument, variant: UUID?) -> Int {
+        var total = 0
+        if let backdrop = store.existingWidgetBackdropURL(for: design.id, variant: variant)
+            ?? store.existingWidgetBackdropURL(for: design.id)
+        {
+            total += (try? backdrop.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        }
+        let art = store.artFolder(for: design.id)
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: art.path)) ?? [] {
+            total += (try? art.appendingPathComponent(name)
+                .resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        }
+        return total
+    }
 
     static func loopDuration(for spec: TimerFontSpec) -> TimeInterval {
         Double(frameCount(for: spec)) / Double(spec.framesPerSecond)
@@ -217,6 +250,27 @@ struct FrameSetGenerator {
             throw GeneratorError.emptyCrop(design: design.name)
         }
 
+        onStage(.writingWallpaper)
+        // Written before the frames are encoded, not after, because it decides
+        // how much room they get. The backdrop and the tile artwork go into the
+        // same archive the frames do, and budgeting the frames alone is how a
+        // design with photographic tiles went black while one with four times
+        // as many frames drew.
+        //
+        // A variant gets its own backdrop and nothing else: the clips differ
+        // inside the widget frame, and the wallpaper is everything outside it.
+        try await DesignArtWriter(
+            store: store,
+            tileArtwork: tileArtwork,
+            assetArtwork: assetArtwork
+        ).write(design: design, poster: first, variantID: variant?.id)
+        let companions = companionBytes(design: design, variant: variant?.id)
+        let budget = FramePayloadPlan.frameBudget(companionBytes: companions)
+        Self.logger.info("""
+        \(companions / 1024)KB of backdrop and artwork travels in the archive; \
+        \(budget / 1024)KB left for frames
+        """)
+
         onStage(.encoding(progress: 0))
         var quality = FramePayloadPlan.bestQuality
         var data = try encode(frames: frames, design: design, crop: crop, quality: quality)
@@ -226,11 +280,11 @@ struct FrameSetGenerator {
         // count, and the whole point of keeping the count is that the picture
         // moves - on a moving picture blocking is more visible than softness,
         // and the widget scales the frames back up anyway.
-        let shrink = FramePayloadPlan.shrink(measured: measured())
+        let shrink = FramePayloadPlan.shrink(toFit: budget, measured: measured())
         if shrink < 1 {
             Self.logger.warning("""
-            \(data.count) frames come to \(measured() / 1024)KB, over the archive limit; \
-            shrinking them to \(Int(shrink * 100))% rather than dropping frames
+            \(data.count) frames come to \(measured() / 1024)KB against a \(budget / 1024)KB \
+            budget; shrinking them to \(Int(shrink * 100))% rather than dropping frames
             """)
             data = try encode(
                 frames: frames, design: design, crop: crop, quality: quality, shrink: shrink
@@ -238,7 +292,7 @@ struct FrameSetGenerator {
         }
         // Then compression, for whatever is still over: a set at the smallest
         // size this will go to can still be too big for one archive.
-        while let lower = FramePayloadPlan.retry(totalBytes: measured(), at: quality) {
+        while let lower = FramePayloadPlan.retry(totalBytes: measured(), at: quality, budget: budget) {
             quality = lower
             data = try encode(
                 frames: frames, design: design, crop: crop, quality: quality, shrink: shrink
@@ -274,14 +328,6 @@ struct FrameSetGenerator {
                 ?? store.previewVideoURL(for: design.id)
         )
 
-        onStage(.writingWallpaper)
-        // A variant gets its own backdrop and nothing else: the clips differ
-        // inside the widget frame, and the wallpaper is everything outside it.
-        try await DesignArtWriter(
-            store: store,
-            tileArtwork: tileArtwork,
-            assetArtwork: assetArtwork
-        ).write(design: design, poster: first, variantID: variant?.id)
 
         return ClipBuild(
             frameCount: data.count,
