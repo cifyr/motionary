@@ -174,18 +174,35 @@ enum HeadlessBuild {
 
     static func deliver(to destination: URL) -> Never {
         let pipeline = StudioPipeline(projectRoot: ProjectLocator.find(), model: .default)
-        let wanted = device(in: CommandLine.arguments).flatMap(UUID.init(uuidString:))
-            ?? { () -> UUID? in
-                guard let flag = CommandLine.arguments.firstIndex(of: "--design"),
-                      CommandLine.arguments.index(after: flag) < CommandLine.arguments.endIndex
-                else { return nil }
-                return UUID(uuidString: CommandLine.arguments[CommandLine.arguments.index(after: flag)])
-            }()
+        let arguments = CommandLine.arguments
+        let asked: String? = {
+            guard let flag = arguments.firstIndex(of: "--design"),
+                  arguments.index(after: flag) < arguments.endIndex
+            else { return nil }
+            return arguments[arguments.index(after: flag)]
+        }()
 
         Task.detached {
             do {
                 let saved = StudioPipeline.saved()
-                guard let design = wanted.flatMap({ id in saved.first { $0.id == id } }) ?? saved.first else {
+                let design: DesignDocument
+                if let asked {
+                    // Named and not found is a refusal, not a fallback. Falling
+                    // back to the newest design here delivered the wrong design
+                    // to a phone and said "delivered" about it.
+                    guard let match = saved.first(where: { $0.id.uuidString.lowercased() == asked.lowercased() })
+                        ?? saved.first(where: { $0.name.lowercased() == asked.lowercased() })
+                    else {
+                        FileHandle.standardError.write(Data("""
+                        failed: no saved design called \(asked)
+                        \(saved.map { "  \($0.id.uuidString)  \($0.name)" }.joined(separator: "\n"))\n
+                        """.utf8))
+                        exit(1)
+                    }
+                    design = match
+                } else if let newest = saved.first {
+                    design = newest
+                } else {
                     FileHandle.standardError.write(Data("failed: no saved designs to deliver\n".utf8))
                     exit(1)
                 }

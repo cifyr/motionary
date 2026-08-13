@@ -51,6 +51,37 @@ struct FrameSetGenerator {
         Double(frameCount(for: spec)) / Double(spec.framesPerSecond)
     }
 
+    /// Crops, tints, edge-corrects and encodes, shrinking a frame first when it
+    /// is over the renderer's pixel-area cap.
+    ///
+    /// Over that cap the render is dropped rather than refused: the frame comes
+    /// out blank and the widget looks broken with nothing logged anywhere. On
+    /// the calibrated phone a crop cannot reach it - the widget frame is 1.75M
+    /// px against a cap around 2.1M - so this is what keeps that true on a
+    /// device whose frame is larger.
+    private func encode(
+        frames: [CGImage],
+        design: DesignDocument,
+        crop: CGRect,
+        quality: Double
+    ) throws -> [Data] {
+        let encoder = FrameEncoder(crop: crop, quality: quality, widgetRect: design.widgetRect)
+        let scale = FramePayloadPlan.scale(for: crop.size)
+        guard scale < 1 else { return try encoder.frameData(frames) }
+
+        Self.logger.warning("""
+        a \(Int(crop.width))x\(Int(crop.height)) frame is over the renderer's pixel cap; \
+        shrinking by \(Int(scale * 100))%
+        """)
+        let longest = Int(max(crop.width, crop.height) * scale)
+        return try encoder.frameData(frames).map { data in
+            guard let shrunk = ImageLoader.load(data: data, maxPixelSize: longest),
+                  let reduced = FrameEncoder.jpegData(shrunk, quality: quality)
+            else { return data }
+            return reduced
+        }
+    }
+
     func build(
         design: DesignDocument,
         onStage: @Sendable @escaping (Stage) -> Void
@@ -110,12 +141,24 @@ struct FrameSetGenerator {
         }
 
         onStage(.encoding(progress: 0))
-        let encoder = FrameEncoder(
-            crop: crop,
-            quality: design.jpegQuality,
-            widgetRect: design.widgetRect
-        )
-        let data = try encoder.frameData(frames)
+        // Not `design.jpegQuality`: that was chosen to fit a font payload,
+        // where one frame is base64'd into every one of `lanes x 15` glyph
+        // selections. Written once, the same frames have several times the
+        // budget - see FramePayloadPlan.
+        var quality = FramePayloadPlan.bestQuality
+        var data = try encode(frames: frames, design: design, crop: crop, quality: quality)
+        while let lower = FramePayloadPlan.retry(
+            totalBytes: data.reduce(0) { $0 + $1.count },
+            at: quality
+        ) {
+            Self.logger.info("""
+            frame set is \(data.reduce(0) { $0 + $1.count } / 1_048_576)MB at quality \
+            \(Int(quality * 100))%; trying \(Int(lower * 100))%
+            """)
+            quality = lower
+            data = try encode(frames: frames, design: design, crop: crop, quality: quality)
+            try Task.checkCancellation()
+        }
         onStage(.encoding(progress: 1))
 
         var totalBytes = 0

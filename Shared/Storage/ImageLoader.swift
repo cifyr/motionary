@@ -17,6 +17,24 @@ enum ImageLoader {
             logger.error("no image source for \(url.lastPathComponent, privacy: .public)")
             return nil
         }
+        return thumbnail(from: source, maxPixelSize: maxPixelSize, describing: url.lastPathComponent)
+    }
+
+    /// The same capped decode for bytes already in hand, which is how a frame
+    /// is shrunk on its way into a delivery.
+    static func load(data: Data, maxPixelSize: Int) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            logger.error("no image source for \(data.count) bytes")
+            return nil
+        }
+        return thumbnail(from: source, maxPixelSize: maxPixelSize, describing: "\(data.count) bytes")
+    }
+
+    private static func thumbnail(
+        from source: CGImageSource,
+        maxPixelSize: Int,
+        describing subject: String
+    ) -> CGImage? {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
@@ -24,7 +42,7 @@ enum ImageLoader {
             kCGImageSourceCreateThumbnailWithTransform: true,
         ]
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-            logger.error("could not decode \(url.lastPathComponent, privacy: .public) at \(maxPixelSize)px")
+            logger.error("could not decode \(subject, privacy: .public) at \(maxPixelSize)px")
             return nil
         }
         return image
