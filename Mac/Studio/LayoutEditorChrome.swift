@@ -13,6 +13,13 @@ extension LayoutEditor {
     /// resolves the modifier rather than this property.
     var editorToolbar: some View {
         HStack(spacing: 16) {
+            Button(action: onClose) {
+                Label("Library", systemImage: "chevron.left")
+                    .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(.studioCompact)
+            .help("Back to the library. Your work is saved on the way out.")
+
             VStack(alignment: .leading, spacing: 1) {
                 Text(documentName)
                     .font(StudioTheme.title)
@@ -60,8 +67,10 @@ extension LayoutEditor {
 
             Spacer()
 
-            Button("Preview", action: onPreview)
-                .buttonStyle(.studio)
+            // Preview used to live here, and by the end it did exactly what
+            // the Library button does: save and leave. Two buttons for one
+            // action, one of them named after a thing it no longer showed.
+            //
             // Deliberately not the default action: Return lands in this
             // window constantly while typing a position or a name, and a
             // build is minutes of work plus a device install.

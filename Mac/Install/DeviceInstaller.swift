@@ -36,6 +36,8 @@ struct ConnectedDevice: Identifiable, Equatable, Sendable {
 struct DeviceInstaller {
     let projectRoot: URL
 
+    private static let bundleID = "com.caden.Motionary"
+
     @discardableResult
     private func run(
         _ launchPath: String,
@@ -130,6 +132,14 @@ struct DeviceInstaller {
         try run("/usr/bin/env", [xcodegenCommand(), "generate"])
     }
 
+    private func installBundle(deviceID: String) throws {
+        try run("/usr/bin/xcrun", [
+            "devicectl", "device", "install", "app",
+            "--device", deviceID,
+            "build/device/Build/Products/Debug-iphoneos/Motionary.app",
+        ])
+    }
+
     /// Builds for the device, installs, and launches. Returns a warning when
     /// the design landed but something after that did not.
     @discardableResult
@@ -154,11 +164,28 @@ struct DeviceInstaller {
         }
 
         progress("Installing")
-        try run("/usr/bin/xcrun", [
-            "devicectl", "device", "install", "app",
-            "--device", deviceID,
-            "build/device/Build/Products/Debug-iphoneos/Motionary.app",
-        ])
+        do {
+            try installBundle(deviceID: deviceID)
+        } catch InstallerError.toolFailed(let tool, let status, let output)
+                    where InstallerHint.isStalePluginInstall(output) {
+            // The phone will not make the widget a container while the copy
+            // already on it owns one, and says so as a signature failure on the
+            // extension. Deleting that copy is the whole fix, and there is
+            // nothing on the phone worth keeping - every design it holds was
+            // compiled in from here.
+            progress("Removing the copy already on the phone")
+            do {
+                try run("/usr/bin/xcrun", [
+                    "devicectl", "device", "uninstall", "app",
+                    "--device", deviceID, Self.bundleID,
+                ])
+            } catch {
+                // Report the install that actually failed, not the cleanup.
+                throw InstallerError.toolFailed(tool: tool, status: status, output: output)
+            }
+            progress("Installing again")
+            try installBundle(deviceID: deviceID)
+        }
 
         progress("Launching")
         // Not fatal. The design is already installed by this point, and a
@@ -172,7 +199,7 @@ struct DeviceInstaller {
             try run("/usr/bin/xcrun", [
                 "devicectl", "device", "process", "launch",
                 "--device", deviceID,
-                "com.caden.Motionary",
+                Self.bundleID,
                 "--", "-MotionaryFontLabOff", "-MotionaryEdgeLabOff",
             ])
             return nil
