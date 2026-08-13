@@ -416,6 +416,26 @@ struct StudioPipeline: Sendable {
             onProgress(stage.label)
         }
 
+        // Beside the design rather than into the project's Resources: these are
+        // the pictures its tiles draw, and a delivered design has no bundle to
+        // read them out of.
+        onProgress("Rendering the tile artwork")
+        let artFolder = store.artFolder(for: design.id)
+        // Cleared first: a design that has lost a tile since the last delivery
+        // would otherwise keep sending that tile's icon forever.
+        try? FileManager.default.removeItem(at: artFolder)
+        try BundleWriter(artworkFolder: artFolder).writeArtwork(
+            manifest: manifest,
+            iconsFolder: Self.iconsFolder(for: store),
+            store: store,
+            includeSkinLibrary: false,
+            // Nor every app a slot could hold instead: 246 files and 56MB for
+            // one design, against 306KB of frames. A delivered design carries
+            // what it shows, and a slot swapped on the phone falls back to the
+            // catalogue's plate rather than to nothing.
+            includeAlternates: false
+        )
+
         onProgress("Packing \(manifest.frameCount ?? 0) frames")
         let data = try DesignPackage.write(designID: design.id, store: store)
         if FileManager.default.fileExists(atPath: destination.path) {

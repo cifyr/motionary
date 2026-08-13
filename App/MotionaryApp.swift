@@ -83,10 +83,16 @@ struct MotionaryApp: App {
                 // likely to precede a look at the Home Screen.
                 .environmentObject(receiver)
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active {
-                        receiver.start()
-                    } else {
+                    // Stopped only on the way to the background, not on
+                    // `.inactive`. A notification banner, Control Centre, or
+                    // the moment after a launch all pass through inactive, and
+                    // stopping there dropped the advertisement a second after
+                    // making it - which reads on the Mac as no phone listening
+                    // while the app is plainly open.
+                    if phase == .background {
                         receiver.stop()
+                    } else {
+                        receiver.start()
                     }
                     if phase == .active {
                         ReadoutGatherer.gatherAndPublish()

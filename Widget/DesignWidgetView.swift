@@ -47,6 +47,9 @@ struct DesignWidgetView: View {
         /// Non-empty only for a design built as pictures, which is the only
         /// kind that can have arrived after this build was installed.
         var frames: [Image] = []
+        /// Where a delivered design's tile icons and placed pictures are. Nil
+        /// for a bundled design, whose artwork is in the bundle.
+        var artFolder: URL?
     }
 
     @ViewBuilder
@@ -85,7 +88,14 @@ struct DesignWidgetView: View {
                 frames: source.frames,
                 assets: source.manifest.placedAssets,
                 assetImage: { asset in
-                    PrebuiltDesign.pictureURL(assetID: asset.id)
+                    // A delivered design's pictures travel with it; a bundled
+                    // one's are in the bundle. Same names either way, so the
+                    // only difference is which folder is tried first.
+                    let name = PrebuiltDesign.pictureResource(assetID: asset.id)
+                    let delivered = source.artFolder
+                        .map { $0.appendingPathComponent("\(name).png") }
+                        .flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+                    return (delivered ?? PrebuiltDesign.pictureURL(assetID: asset.id))
                         .flatMap {
                             ImageLoader.load(
                                 at: $0,
@@ -112,7 +122,8 @@ struct DesignWidgetView: View {
                             for: tile,
                             designID: source.manifest.designID,
                             authoredAppID: authored[tile.id] ?? tile.appID,
-                            side: side
+                            side: side,
+                            artFolder: source.artFolder
                         )
                     )
                 }
@@ -233,7 +244,8 @@ struct DesignWidgetView: View {
             origin: "delivered",
             scope: "app group frames",
             name: design.name,
-            frames: loaded.frames
+            frames: loaded.frames,
+            artFolder: store.artFolder(for: design.id)
         )
     }
 

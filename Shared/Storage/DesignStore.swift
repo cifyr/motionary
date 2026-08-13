@@ -335,6 +335,20 @@ struct DesignStore {
             .appendingPathComponent(String(format: "frame-%04d.jpg", index))
     }
 
+    /// A delivered design's own artwork: the tile icons, placed pictures and
+    /// skins that a built design gets from the app bundle instead.
+    ///
+    /// Named exactly as the bundle names them, so one lookup can try here and
+    /// fall back there without knowing which kind of design it is holding.
+    func artFolder(for id: UUID) -> URL {
+        folder(for: id).appendingPathComponent("Art", isDirectory: true)
+    }
+
+    func artURL(for id: UUID, named name: String) -> URL? {
+        let url = artFolder(for: id).appendingPathComponent(name)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
     func frameCount(for id: UUID) -> Int {
         let names = (try? FileManager.default.contentsOfDirectory(
             atPath: framesFolder(for: id).path

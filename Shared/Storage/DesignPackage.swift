@@ -85,6 +85,13 @@ enum DesignPackage {
             entries.append(Entry(name: url.lastPathComponent, length: data.count))
             payload.append(data)
         }
+        // The tiles travel in the manifest but their pictures do not, and a
+        // launcher with no artwork falls back to a catalogue plate - which
+        // looks like the design arriving wrong rather than like a missing file.
+        let artFolder = store.artFolder(for: designID)
+        for name in ((try? FileManager.default.contentsOfDirectory(atPath: artFolder.path)) ?? []).sorted() {
+            try add("art/\(name)", artFolder.appendingPathComponent(name))
+        }
         if let backdrop = store.existingWidgetBackdropURL(for: designID) {
             try add(backdrop.lastPathComponent, backdrop)
         }
@@ -167,9 +174,20 @@ enum DesignPackage {
             }
             let bytes = data.subdata(in: offset ..< end)
             offset = end
-            let url = entry.name.hasPrefix("frame-")
-                ? store.framesFolder(for: design.id).appendingPathComponent(entry.name)
-                : store.folder(for: design.id).appendingPathComponent(entry.name)
+            let url: URL
+            if entry.name.hasPrefix("frame-") {
+                url = store.framesFolder(for: design.id).appendingPathComponent(entry.name)
+            } else if entry.name.hasPrefix("art/") {
+                let folder = store.artFolder(for: design.id)
+                try FileManager.default.createDirectory(
+                    at: folder,
+                    withIntermediateDirectories: true,
+                    attributes: DesignStore.directoryAttributes
+                )
+                url = folder.appendingPathComponent(String(entry.name.dropFirst("art/".count)))
+            } else {
+                url = store.folder(for: design.id).appendingPathComponent(entry.name)
+            }
             try bytes.write(to: url, options: DesignStore.writingOptions)
         }
 
