@@ -62,7 +62,16 @@ struct MotionaryApp: App {
                 .preferredColorScheme(.dark)
                 // A tile tapped on the widget opens the app with a launch URL,
                 // and the app forwards it to the destination.
-                .onOpenURL { router.handle($0) }
+                .onOpenURL { url in
+                    // A design package opened from Files, AirDrop or a share
+                    // sheet is a delivery, not a tile tap - and the router
+                    // would otherwise try to launch an app for it.
+                    if url.pathExtension == DesignPackage.fileExtension {
+                        DesignDelivery.receive(at: url)
+                    } else {
+                        router.handle(url)
+                    }
+                }
                 // Battery and the other gathered values are only as fresh as
                 // the last time the app ran, so it reads them on every return
                 // to the foreground - the cheapest moment that is also the most
@@ -70,6 +79,10 @@ struct MotionaryApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         ReadoutGatherer.gatherAndPublish()
+                        // Before the mirror below, so a delivery that happened
+                        // while the app was closed is already in the report the
+                        // mirror copies out.
+                        DesignDelivery.receiveWaiting()
                         // On every return to the foreground rather than at
                         // launch alone: the render worth reading is usually
                         // the one that happened while the app was closed.

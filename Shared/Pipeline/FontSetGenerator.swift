@@ -404,81 +404,16 @@ struct FontSetGenerator {
         }
         onStage(.writingFonts(completed: spec.laneCount, total: spec.laneCount))
 
-        if variantID == nil {
-            onStage(.writingWallpaper)
-            // The wallpaper carries the tiles; the widget backdrop below does not.
-            // The widget draws its own live tiles, and only inside its frame - so a
-            // tile crossing that edge is completed by the wallpaper behind it, and
-            // baking them into the backdrop too would draw those halves twice.
-            let poster = await WallpaperComposer.compose(
-                frame: frames[0],
-                tiles: design.tiles,
-                assets: design.assets,
-                screenSize: DeviceGeometry.screenPixelSize,
-                artwork: tileArtwork,
-                assetArtwork: assetArtwork
-            )
-            let wallpaper = try FrameEncoder.pngData(poster)
-            try wallpaper.write(to: store.wallpaperURL(for: design.id), options: DesignStore.writingOptions)
-
-            // The same picture without the tiles, for the phone to bake its own
-            // onto: which app occupies a slot is chosen there, and a wallpaper
-            // baked with the authored occupants would continue the wrong icon past
-            // the widget's edge after a swap. Assets stay baked - they are not
-            // slot-dependent, and their source files never ship.
-            let plain = await WallpaperComposer.compose(
-                frame: frames[0],
-                tiles: [],
-                assets: design.assets,
-                screenSize: DeviceGeometry.screenPixelSize,
-                assetArtwork: assetArtwork
-            )
-            try FrameEncoder.pngData(plain)
-                .write(to: store.plainWallpaperURL(for: design.id), options: DesignStore.writingOptions)
-        }
-
-        // The full screen costs about 12.6MB decompressed and the widget only
-        // ever shows its own frame. On this phone the extension peaked at
-        // 46.7MB against a working reference of 43.3MB and its render was
-        // dropped, which is what a black widget looks like from outside.
-        //
-        // Padded, because the system hands over 1078x1645px where the cut frame
-        // is 1074x1632 and starts 2px further right: cropping to the exact frame
-        // would leave unpainted pixels on all four sides. The padding has to
-        // cover DeviceGeometry.renderedWidgetRect, which a test asserts.
-        let padding: CGFloat = 24
-        let backdropRect = design.widgetRect
-            .insetBy(dx: -padding, dy: -padding)
-            .intersection(CGRect(origin: .zero, size: DeviceGeometry.screenPixelSize))
-            .integral
-        var bakedBackdrop: CGRect?
-        if !backdropRect.isNull, let cropped = frames[0].cropping(to: backdropRect) {
-            // The wallpaper above keeps the picture as it is; only the widget's
-            // own copy gets the edge line taken out of it, because the line is
-            // only drawn where the widget is.
-            // Colour first, then the edge: the edge profile was measured against
-            // the wallpaper as displayed, so it belongs on content that already
-            // matches the wallpaper's colour.
-            let corrected = EdgeCompensation.applied(
-                to: WidgetTint.applied(to: cropped),
-                originY: Int(backdropRect.minY),
-                widgetRect: design.widgetRect
-            )
-            // Lossless whenever lossless is also the smaller file, which a flat
-            // background is. The quality below only decides the other case: 0.95
-            // rather than 0.9 because the correction above is a step of up to 79
-            // units across two or three rows and quantisation smooths exactly
-            // that - measured, 0.9 gave back 2-6 units of the line, 0.95 under 3.
-            let (data, ext) = try FrameEncoder.backdropData(corrected, quality: 0.95)
-            try store.writeWidgetBackdrop(data, ext: ext, for: design.id, variant: variantID)
-            bakedBackdrop = backdropRect
-            Self.logger.info("""
-            widget backdrop \(Int(backdropRect.width))x\(Int(backdropRect.height)), \
-            \(data.count) bytes, saving \
-            \(Int((DeviceGeometry.screenPixelSize.width * DeviceGeometry.screenPixelSize.height
-                - backdropRect.width * backdropRect.height) * 4 / 1_000_000))MB when decoded
-            """)
-        }
+        onStage(.writingWallpaper)
+        // Shared with the picture-built body of a design: both have to produce
+        // the same stills, and the backdrop's colour match and edge correction
+        // are measurements of real hardware rather than anything a second copy
+        // of this could be trusted to restate.
+        let bakedBackdrop = try await DesignArtWriter(
+            store: store,
+            tileArtwork: tileArtwork,
+            assetArtwork: assetArtwork
+        ).write(design: design, poster: frames[0], variantID: variantID)
 
         // The in-app preview plays this rather than the lane fonts: only the
         // system widget renderer advances timer text fast enough for those.

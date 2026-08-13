@@ -316,6 +316,46 @@ struct DesignStore {
             .appendingPathComponent("\(LaneFontBuilder.postScriptName(family: familyBase, lane: lane)).ttf")
     }
 
+    // MARK: - Frames
+
+    /// Frames of a design built as pictures rather than as fonts.
+    ///
+    /// Beside the fonts rather than inside them, because the two are alternate
+    /// bodies for the same design: a font-built design animates only where its
+    /// fonts were installed, and a frame-built one animates anywhere the files
+    /// can be read - which is the difference between shipping a design in a
+    /// build and delivering one to an app already on a phone.
+    func framesFolder(for id: UUID) -> URL {
+        folder(for: id).appendingPathComponent("Frames", isDirectory: true)
+    }
+
+    /// Zero-padded, so the folder reads in playing order in any listing.
+    func frameURL(for id: UUID, index: Int) -> URL {
+        framesFolder(for: id)
+            .appendingPathComponent(String(format: "frame-%04d.jpg", index))
+    }
+
+    func frameCount(for id: UUID) -> Int {
+        let names = (try? FileManager.default.contentsOfDirectory(
+            atPath: framesFolder(for: id).path
+        )) ?? []
+        return names.filter { $0.hasPrefix("frame-") && $0.hasSuffix(".jpg") }.count
+    }
+
+    /// Cleared before a rebuild so frames from a longer previous loop cannot
+    /// linger past the end of a shorter one and play as its tail.
+    func clearFrames(for id: UUID) throws {
+        let folder = framesFolder(for: id)
+        if FileManager.default.fileExists(atPath: folder.path) {
+            try FileManager.default.removeItem(at: folder)
+        }
+        try FileManager.default.createDirectory(
+            at: folder,
+            withIntermediateDirectories: true,
+            attributes: Self.directoryAttributes
+        )
+    }
+
     // MARK: - Designs
 
     func createFolder(for id: UUID) throws {

@@ -19,6 +19,9 @@ struct MotionaryStudioApp: App {
         if CommandLine.arguments.contains("--rebuild-starred") {
             HeadlessBuild.rebuildStarred(deviceID: HeadlessBuild.device(in: CommandLine.arguments))
         }
+        if let destination = HeadlessBuild.deliveryRequested(in: CommandLine.arguments) {
+            HeadlessBuild.deliver(to: destination)
+        }
         if let source = HeadlessBuild.requested(in: CommandLine.arguments) {
             HeadlessBuild.run(source: source)
         }
@@ -150,6 +153,51 @@ enum HeadlessBuild {
             FileHandle.standardError.write(Data("failed: \(error)\n".utf8))
             exit(1)
         }
+    }
+
+    /// `--deliver <output.motionary> [--design <uuid>]` builds the newest saved
+    /// design as pictures and packs it into one file.
+    ///
+    /// Scriptable for the same reason `--build` is: the thing worth checking is
+    /// whether a package a phone accepts comes out the other end, and a window
+    /// cannot be driven from a build script. Newest design by default, because
+    /// that is the one just worked on.
+    static func deliveryRequested(in arguments: [String]) -> URL? {
+        guard let flag = arguments.firstIndex(of: "--deliver"),
+              arguments.index(after: flag) < arguments.endIndex
+        else { return nil }
+        return URL(fileURLWithPath: arguments[arguments.index(after: flag)])
+    }
+
+    static func deliver(to destination: URL) -> Never {
+        let pipeline = StudioPipeline(projectRoot: ProjectLocator.find(), model: .default)
+        let wanted = device(in: CommandLine.arguments).flatMap(UUID.init(uuidString:))
+            ?? { () -> UUID? in
+                guard let flag = CommandLine.arguments.firstIndex(of: "--design"),
+                      CommandLine.arguments.index(after: flag) < CommandLine.arguments.endIndex
+                else { return nil }
+                return UUID(uuidString: CommandLine.arguments[CommandLine.arguments.index(after: flag)])
+            }()
+
+        Task.detached {
+            do {
+                let saved = StudioPipeline.saved()
+                guard let design = wanted.flatMap({ id in saved.first { $0.id == id } }) ?? saved.first else {
+                    FileHandle.standardError.write(Data("failed: no saved designs to deliver\n".utf8))
+                    exit(1)
+                }
+                let url = try await pipeline.deliverable(design: design, to: destination) { note in
+                    FileHandle.standardError.write(Data("... \(note)\n".utf8))
+                }
+                print("delivered \(design.name)")
+                print("package \(url.path)")
+            } catch {
+                FileHandle.standardError.write(Data("failed: \(error)\n".utf8))
+                exit(1)
+            }
+            exit(0)
+        }
+        dispatchMain()
     }
 
     static func run(source: URL) -> Never {

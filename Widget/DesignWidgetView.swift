@@ -44,6 +44,9 @@ struct DesignWidgetView: View {
         let origin: String
         let scope: String
         let name: String
+        /// Non-empty only for a design built as pictures, which is the only
+        /// kind that can have arrived after this build was installed.
+        var frames: [Image] = []
     }
 
     @ViewBuilder
@@ -57,7 +60,7 @@ struct DesignWidgetView: View {
             maskLab()
         } else if FontLab.isEnabled, let lab = lab() {
             lab
-        } else if let source = bundled() {
+        } else if let source = delivered() ?? bundled() {
             let _ = record(source: source)
             // The phone's slot choices, applied at render time: the occupant is
             // live SwiftUI over the frozen animation, so it is the one part of
@@ -79,6 +82,7 @@ struct DesignWidgetView: View {
                 wallpaper: source.backdrop,
                 wallpaperRect: source.manifest.backdropRect,
                 isAnimated: source.fontsUsable,
+                frames: source.frames,
                 assets: source.manifest.placedAssets,
                 assetImage: { asset in
                     PrebuiltDesign.pictureURL(assetID: asset.id)
@@ -181,7 +185,53 @@ struct DesignWidgetView: View {
         )
     }
 
-    /// The design compiled into this build, and the only kind there is.
+    /// A design that arrived after this build was installed.
+    ///
+    /// There used to be a path like this and it was removed, because a design
+    /// in the app group could not animate - its fonts were never in the
+    /// extension's bundle - and preferring it showed a stale, still picture
+    /// forever. The rule that replaces it is narrower and says exactly why:
+    /// prefer a delivered design only when it is built as pictures and every
+    /// one of those pictures is on disk. A picture stack needs nothing
+    /// installed, and a partial one is refused rather than drawn with black
+    /// gaps where the missing lanes are.
+    private func delivered() -> Source? {
+        guard let store = try? DesignStore(),
+              let design = ActiveDesign.resolve(in: store),
+              let manifest = try? store.loadManifest(id: design.id),
+              manifest.isFrameDriven,
+              let count = manifest.frameCount
+        else { return nil }
+
+        let loaded = FrameSetLoader.load(designID: design.id, count: count, store: store)
+        WidgetRenderLog.append("""
+        deliv \(design.name) \(loaded.report.summary) \(MemoryFootprint.megabytes)MB
+        """)
+        guard loaded.report.isComplete else { return nil }
+
+        let longest = manifest.backdropRect.map { Int(max($0.width, $0.height)) }
+            ?? Int(max(manifest.screenSize.width, manifest.screenSize.height))
+        // The baked crop when there is one, the whole wallpaper otherwise: the
+        // widget only ever shows its own frame, and the full screen costs about
+        // 12.6MB decompressed against a budget this stack is already spending.
+        let backdropURL = store.existingWidgetBackdropURL(for: design.id)
+            ?? store.wallpaperURL(for: design.id)
+        let backdrop = ImageLoader.load(at: backdropURL, maxPixelSize: longest)
+
+        return Source(
+            manifest: manifest,
+            backdrop: backdrop.map { Image(decorative: $0, scale: 1) },
+            // Nothing was registered and nothing needed to be: the frames are
+            // the animation, and they are already in hand.
+            fontsUsable: true,
+            origin: "delivered",
+            scope: "app group frames",
+            name: design.name,
+            frames: loaded.frames
+        )
+    }
+
+    /// The design compiled into this build.
     ///
     /// There used to be a second source: a design generated on the phone into
     /// the app group, which this preferred. That feature is gone - a design has

@@ -674,6 +674,19 @@ struct BuildManifest: Codable, Equatable, Sendable {
     /// — the widget falls back to the full-screen wallpaper for those.
     var backdropRect: CGRect?
 
+    /// How many frames this design was built as pictures, when it was.
+    ///
+    /// Present means the animation is a stack of JPEGs in the design's folder
+    /// rather than glyphs in fonts, and that is the whole difference between a
+    /// design that has to be compiled into the extension and one that can be
+    /// delivered to an app already installed. Optional for the same decoding
+    /// reason `tiles` is, and because most designs are neither built this way
+    /// nor should be: a picture stack is one frame per lane and therefore a
+    /// two-second loop, where the fonts get thirty out of the same cycle.
+    var frameCount: Int?
+
+    var isFrameDriven: Bool { (frameCount ?? 0) > 0 }
+
     /// The app tiles to draw over the animation.
     ///
     /// They travel in the manifest because it is the only part of a design
