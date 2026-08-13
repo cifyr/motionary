@@ -587,7 +587,9 @@ struct FrameSetGenerator {
         let wall: Double
     }
 
-    private func programClips(design: DesignDocument, spec: TimerFontSpec) async -> [ProgramClip] {
+    private func programClips(
+        design: DesignDocument, spec: TimerFontSpec, crop: CGRect, cutOut: Bool
+    ) async -> [ProgramClip] {
         var out: [ProgramClip] = []
         let speed = max(0.01, design.playbackSpeed)
         for (id, url) in [(UUID?.none, store.sourceVideoURL(for: design))]
@@ -597,11 +599,49 @@ struct FrameSetGenerator {
             guard let summary = try? await MediaFrameExtractor(
                 url: url, transform: design.mediaTransform
             ).summary(), summary.duration > 0 else { continue }
-            out.append(ProgramClip(
-                id: id, source: url, duration: summary.duration, wall: summary.duration / speed
-            ))
+            let duration = cutOut
+                ? await contentSeconds(design: design, source: url, crop: crop, whole: summary.duration)
+                : summary.duration
+            if duration < summary.duration - 0.05 {
+                let name = url.lastPathComponent
+                Self.logger.info("\(name, privacy: .public) runs \(summary.duration)s but is empty after \(duration)s")
+            }
+            out.append(ProgramClip(id: id, source: url, duration: duration, wall: duration / speed))
         }
         return out
+    }
+
+    /// How long a clip actually animates for, which is not how long its file is.
+    ///
+    /// `spidey_alpha-2-2.mov` runs eight seconds and is empty after 1.8 - the
+    /// figure leaves and never comes back. Sized by the file, it took a
+    /// 7.6-second segment of a thirty-second loop to show 1.8 seconds of
+    /// animation and six seconds of nothing, which reads as the clip being cut
+    /// off at its end.
+    ///
+    /// Sampled coarsely: this looks for where the content stops, and a quarter
+    /// of a second either way costs one lane.
+    private func contentSeconds(
+        design: DesignDocument, source: URL, crop: CGRect, whole: TimeInterval
+    ) async -> TimeInterval {
+        let rate = 4
+        let count = max(1, Int((whole * Double(rate)).rounded(.down)))
+        guard let frames = try? await pictures(
+            design: design,
+            spec: TimerFontSpec(laneCount: 1, framesPerSecond: rate),
+            source: source, isPrimary: false, count: count,
+            preservesAlpha: true, onStage: { _ in }
+        ) else { return whole }
+        var last = -1
+        for (index, frame) in frames.enumerated() {
+            guard let cropped = frame.cropping(to: crop),
+                  FrameEncoder.opaqueBounds(of: cropped, stride: 4) != nil else { continue }
+            last = index
+        }
+        guard last >= 0 else { return whole }
+        // One sample past the last one with anything in it, so the figure is not
+        // clipped mid-exit, and never longer than the file.
+        return min(whole, Double(last + 2) / Double(rate))
     }
 
     /// Everything a clip needs once its pictures exist: the artwork that shares
@@ -912,7 +952,10 @@ struct FrameSetGenerator {
         crop: CGRect,
         onStage: @Sendable @escaping (Stage) -> Void
     ) async throws -> BuildManifest? {
-        let clips = await programClips(design: design, spec: spec)
+        let cutOut = await prefersSprites(
+            design: design, spec: spec, source: store.sourceVideoURL(for: design), crop: crop
+        )
+        let clips = await programClips(design: design, spec: spec, crop: crop, cutOut: cutOut)
         guard clips.count > 1 else {
             Self.logger.warning("shuffle asked for but only \(clips.count) clip could be read; building one clip instead")
             return nil
@@ -964,9 +1007,7 @@ struct FrameSetGenerator {
         // Decided once, from the design's own clip: every clip in a design is
         // the same scene shot the same way, and a stack half sprites and half
         // flattened frames would draw the still background over the sprites.
-        let sprites = await prefersSprites(
-            design: design, spec: programSpec, source: clips[0].source, crop: crop
-        )
+        let sprites = cutOut
         let frames = try await programmedPictures(
             design: design, fps: fps, clips: clips, program: program,
             preservesAlpha: sprites, onStage: onStage
