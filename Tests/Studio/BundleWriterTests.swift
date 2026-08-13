@@ -144,6 +144,40 @@ final class InstallerHintTests: XCTestCase {
         XCTAssertTrue(hint.contains("did not answer"), hint)
     }
 
+    /// Verbatim from `devicectl`, because the only thing distinguishing this
+    /// from a genuine signing failure is the wording it buries it under.
+    private let stalePluginOutput = """
+    ERROR: Failed to install the app on the device. (com.apple.dt.CoreDeviceError error 3002 (0xBBA))
+        Unable to Install "Motionary" (IXUserPresentableErrorDomain error 1 (0x01))
+        NSLocalizedRecoverySuggestion = Failed to create plugin data containers for plugin com.caden.Motionary.widget
+        Failed to verify code signature of Motionary.app/PlugIns/MotionaryWidgetExtension.appex : \
+    0xe8008015 (A valid provisioning profile for this executable was not found.)
+    """
+
+    func testARefusedWidgetContainerIsRecognisedSoTheInstallCanBeRetried() {
+        XCTAssertTrue(InstallerHint.isStalePluginInstall(stalePluginOutput))
+        XCTAssertFalse(InstallerHint.isStalePluginInstall(lockedOutput))
+    }
+
+    /// It reads as a signing failure, and being sent to Xcode to re-sign a
+    /// profile that is already current is the one unhelpful answer.
+    func testARefusedWidgetContainerSaysToDeleteTheAppRatherThanToReSign() throws {
+        let hint = try XCTUnwrap(InstallerHint.forOutput(stalePluginOutput))
+        XCTAssertTrue(hint.contains("Delete Motionary"), hint)
+        XCTAssertFalse(hint.contains("Xcode"), hint)
+    }
+
+    /// The certificate is reissued weekly on a free account, so this is a
+    /// recurring stop rather than a one-off setup step, and the phone is the
+    /// only place it can be cleared.
+    func testAnUntrustedCertificateSaysWhereOnThePhoneToTrustIt() throws {
+        let hint = try XCTUnwrap(InstallerHint.forOutput("""
+        Unable to launch com.caden.Motionary because it has an invalid code signature, inadequate \
+        entitlements or its profile has not been explicitly trusted by the user.
+        """))
+        XCTAssertTrue(hint.contains("VPN & Device Management"), hint)
+    }
+
     /// A compile error is the project's own problem and must not be dressed up
     /// as a phone that needs unlocking.
     func testAnOrdinaryBuildFailureGetsNoHint() {
