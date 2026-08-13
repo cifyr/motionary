@@ -58,39 +58,58 @@ enum MaskLab {
 
     // MARK: - Phase
 
-    /// Which lanes each card is masked into.
+    /// Which card each lane shows.
     ///
-    /// The mask isolates one lane only within a half of the stack, so the stack
-    /// is halved and the second half gated as a group - the same arrangement
-    /// `CompositionView` uses. Each card takes a contiguous run of lanes in
-    /// both halves, which is what turns a 1/16s flicker into a step slow enough
-    /// to photograph: with 32 lanes and 4 cards, a card holds for a quarter
-    /// second and the four of them cycle twice in the two-second lane wrap.
+    /// Cards take contiguous runs of lanes across the whole stack, so the same
+    /// shape covers both jobs this lab has. Four cards over 32 lanes holds each
+    /// one for half a second, which is slow enough to photograph. One card per
+    /// lane is a real design: every frame distinct, every frame decoded, which
+    /// is the arrangement whose cost has to be measured rather than guessed.
     struct Phasing: Equatable, Sendable {
         let laneCount: Int
         let cardCount: Int
+        /// The long side of a card in pixels. The cost being measured is per
+        /// frame and the cap that bites first is on pixel area, so this is the
+        /// other axis of the sweep.
+        let cardPixels: Int
 
-        init(laneCount: Int = 32, cardCount: Int = 4) {
+        init(laneCount: Int = 32, cardCount: Int = 4, cardPixels: Int = 240) {
             self.laneCount = laneCount
             self.cardCount = cardCount
+            self.cardPixels = cardPixels
         }
 
         var framesPerSecond: Int { laneCount / 2 }
         var frameDuration: TimeInterval { 1 / Double(framesPerSecond) }
         var lanesPerHalf: Int { laneCount / 2 }
-        /// Zero when the cards do not divide the half evenly, which the view
+        /// Zero when the cards do not divide the stack evenly, which the view
         /// treats as a lab that cannot be drawn rather than drawing a stack
         /// with silent gaps in it.
-        var lanesPerCard: Int { lanesPerHalf % cardCount == 0 ? lanesPerHalf / cardCount : 0 }
+        var lanesPerCard: Int {
+            guard cardCount > 0, laneCount % cardCount == 0 else { return 0 }
+            return laneCount / cardCount
+        }
         var isValid: Bool { lanesPerCard > 0 }
 
         /// How long one card stays up, and how long the whole rotation takes.
         var cardDuration: TimeInterval { Double(lanesPerCard) * frameDuration }
         var cycleDuration: TimeInterval { Double(laneCount) * frameDuration }
 
-        func lanes(card: Int, half: Int) -> Range<Int> {
-            let start = half * lanesPerHalf + card * lanesPerCard
+        func lanes(card: Int) -> Range<Int> {
+            let start = card * lanesPerCard
             return start ..< (start + lanesPerCard)
+        }
+
+        func card(forLane lane: Int) -> Int {
+            guard lanesPerCard > 0 else { return 0 }
+            return lane / lanesPerCard
+        }
+
+        /// Lanes belonging to one half of the stack, because a mask isolates a
+        /// single lane only within a half and the second half is gated as a
+        /// group.
+        func lanes(half: Int) -> Range<Int> {
+            (half * lanesPerHalf) ..< ((half + 1) * lanesPerHalf)
         }
 
         /// The offset that makes this lane's mask the opaque one, negated the
@@ -100,24 +119,70 @@ enum MaskLab {
         }
     }
 
-    static let phasing = Phasing()
+    private static let phasingKey = "maskLabPhasing"
+
+    /// Persisted, because the extension is a different process from the app
+    /// that was launched with the arguments.
+    static var phasing: Phasing {
+        get {
+            let defaults = UserDefaults(suiteName: DesignStore.appGroupIdentifier)
+            guard let raw = defaults?.string(forKey: phasingKey) else { return Phasing() }
+            let parts = raw.split(separator: ",").compactMap { Int($0) }
+            guard parts.count == 3 else { return Phasing() }
+            return Phasing(laneCount: parts[0], cardCount: parts[1], cardPixels: parts[2])
+        }
+        set {
+            UserDefaults(suiteName: DesignStore.appGroupIdentifier)?.set(
+                "\(newValue.laneCount),\(newValue.cardCount),\(newValue.cardPixels)",
+                forKey: phasingKey
+            )
+            logger.info("mask lab \(newValue.cardCount) cards at \(newValue.cardPixels)px over \(newValue.laneCount) lanes")
+        }
+    }
+
+    /// `-MotionaryMaskLabStack <lanes>,<cards>,<pixels>`, so a sweep can be
+    /// driven from a script rather than by rebuilding for each point.
+    static func launchPhasing(in arguments: [String]) -> Phasing? {
+        guard let flag = arguments.firstIndex(of: "-MotionaryMaskLabStack"),
+              arguments.index(after: flag) < arguments.endIndex
+        else { return nil }
+        let parts = arguments[arguments.index(after: flag)].split(separator: ",").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        let phasing = Phasing(laneCount: parts[0], cardCount: parts[1], cardPixels: parts[2])
+        return phasing.isValid ? phasing : nil
+    }
 
     // MARK: - Frames
 
-    /// Small on purpose. The archive is capped on pixel area per image and the
-    /// extension is killed a little above 45MB, and this stack holds one
-    /// decoded copy per lane rather than per card.
-    static let cardPixelSize = CGSize(width: 240, height: 160)
+    /// A 3:2 card, sized in real pixels rather than points: the caps that bite
+    /// are on pixel area and on the extension's own footprint, and a measurement
+    /// taken in points would be off by the screen scale on one device and not
+    /// another.
+    static func cardPixelSize(_ phasing: Phasing) -> CGSize {
+        CGSize(width: phasing.cardPixels, height: (phasing.cardPixels * 2) / 3)
+    }
 
     private static let folderName = "masklab"
-    private static let colours: [UIColor] = [
+
+    /// Four fixed colours while there are four cards, so a photograph can be
+    /// read without a key; a hue ramp beyond that, where the point is the cost
+    /// rather than the picture.
+    private static let namedColours: [UIColor] = [
         UIColor(red: 0.85, green: 0.16, blue: 0.15, alpha: 1),
         UIColor(red: 0.13, green: 0.55, blue: 0.86, alpha: 1),
         UIColor(red: 0.18, green: 0.68, blue: 0.31, alpha: 1),
         UIColor(red: 0.95, green: 0.72, blue: 0.09, alpha: 1),
     ]
 
-    static func colour(card: Int) -> UIColor { colours[card % colours.count] }
+    static func colour(card: Int, of count: Int = 4) -> UIColor {
+        guard count > namedColours.count else { return namedColours[card % namedColours.count] }
+        return UIColor(
+            hue: CGFloat(card % count) / CGFloat(count),
+            saturation: 0.85,
+            brightness: 0.9,
+            alpha: 1
+        )
+    }
 
     private static func folder() throws -> URL {
         let root = try DesignStore().root.deletingLastPathComponent()
@@ -140,12 +205,16 @@ enum MaskLab {
     /// out of the bundle would answer a question nobody is asking. Rewritten on
     /// every launch so a stale card cannot stand in for a working one.
     @discardableResult
-    static func stageCards(_ phasing: Phasing = phasing) -> [String] {
+    static func stageCards(_ phasing: Phasing) -> [String] {
         var notes: [String] = []
+        // Left over from a wider sweep, and a card the stack no longer asks for
+        // still costs nothing - but one it does ask for and finds stale is a
+        // measurement of the wrong thing.
+        try? FileManager.default.removeItem(at: folder())
         for card in 0 ..< phasing.cardCount {
             do {
                 let url = try cardURL(card)
-                let data = try cardJPEG(card: card)
+                let data = try cardJPEG(card: card, phasing: phasing)
                 try data.write(to: url, options: DesignStore.writingOptions)
                 notes.append("card \(card): \(data.count / 1024)KB at \(url.lastPathComponent)")
             } catch {
@@ -168,10 +237,15 @@ enum MaskLab {
 
     /// A big digit on a flat colour: legible in a photograph of a Home Screen,
     /// which is how this gets read.
-    private static func cardJPEG(card: Int) throws -> Data {
-        let renderer = UIGraphicsImageRenderer(size: cardPixelSize)
+    private static func cardJPEG(card: Int, phasing: Phasing) throws -> Data {
+        let cardPixelSize = cardPixelSize(phasing)
+        // Scale 1, so a card is the number of pixels it was asked for rather
+        // than three times that on a phone and once on a Mac.
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: cardPixelSize, format: format)
         let image = renderer.image { context in
-            colour(card: card).setFill()
+            colour(card: card, of: phasing.cardCount).setFill()
             context.fill(CGRect(origin: .zero, size: cardPixelSize))
 
             let text = "\(card + 1)"
@@ -198,9 +272,10 @@ enum MaskLab {
     /// Decoded once per render and shared by every lane that shows it, because
     /// the stack references one card from `lanesPerCard` places and decoding it
     /// that many times is memory the extension does not have.
-    static func loadCards(_ phasing: Phasing = phasing) -> (images: [UIImage], notes: [String]) {
+    static func loadCards(_ phasing: Phasing) -> (images: [UIImage], notes: [String]) {
         var images: [UIImage] = []
         var notes: [String] = []
+        var bytes = 0
         for card in 0 ..< phasing.cardCount {
             do {
                 let url = try cardURL(card)
@@ -209,12 +284,19 @@ enum MaskLab {
                     notes.append("card \(card): \(data.count)B would not decode")
                     continue
                 }
+                bytes += data.count
                 images.append(image)
-                notes.append("card \(card): \(data.count / 1024)KB \(Int(image.size.width))x\(Int(image.size.height))")
             } catch {
                 notes.append("card \(card): \(error)")
             }
         }
+        let side = images.first.map { "\(Int($0.size.width))x\(Int($0.size.height))" } ?? "-"
+        // One line rather than one per card: at 64 cards the per-card list is
+        // longer than the log keeps, and it pushes out the render it explains.
+        notes.insert(
+            "\(images.count)/\(phasing.cardCount) cards, \(side), \(bytes / 1024)KB on disk",
+            at: 0
+        )
         return (images, notes)
     }
 

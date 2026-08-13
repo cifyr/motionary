@@ -17,7 +17,10 @@ struct MaskLabView: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            Text("MASK LAB  \(phasing.laneCount) lanes  \(String(format: "%.2f", phasing.cardDuration))s/card")
+            Text("""
+            MASK LAB  \(phasing.cardCount) cards \(phasing.cardPixels)px  \
+            \(String(format: "%.2f", phasing.cardDuration))s each
+            """)
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white)
 
@@ -58,17 +61,15 @@ struct MaskLabView: View {
 
     private func half(band: MaskLab.Band, half: Int, side: CGFloat) -> some View {
         ZStack {
-            ForEach(0 ..< phasing.cardCount, id: \.self) { card in
-                ForEach(Array(phasing.lanes(card: card, half: half)), id: \.self) { lane in
-                    content(band: band, card: card)
-                        .mask {
-                            BlinkMask(
-                                reference: reference,
-                                blinkOffset: phasing.blinkOffset(lane: lane)
-                            )
-                            .frame(width: side, height: side)
-                        }
-                }
+            ForEach(Array(phasing.lanes(half: half)), id: \.self) { lane in
+                content(band: band, card: phasing.card(forLane: lane))
+                    .mask {
+                        BlinkMask(
+                            reference: reference,
+                            blinkOffset: phasing.blinkOffset(lane: lane)
+                        )
+                        .frame(width: side, height: side)
+                    }
             }
         }
     }
@@ -89,11 +90,11 @@ struct MaskLabView: View {
                 Color.clear
             }
         case .colour:
-            Color(uiColor: MaskLab.colour(card: card))
+            Color(uiColor: MaskLab.colour(card: card, of: phasing.cardCount))
         case .text:
             Text("\(card + 1)")
                 .font(.system(size: 34, weight: .heavy))
-                .foregroundStyle(Color(uiColor: MaskLab.colour(card: card)))
+                .foregroundStyle(Color(uiColor: MaskLab.colour(card: card, of: phasing.cardCount)))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }

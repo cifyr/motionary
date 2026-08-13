@@ -12,6 +12,7 @@ set -euo pipefail
 
 OUT="${1:-/tmp/mask}"
 SHOTS="${2:-8}"
+STACK="${3:-32,4,240}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SIM="${MOTIONARY_SIM:-FD52D4B0-40BD-423A-8FDB-B1D41C369CA4}"
 BUNDLE_ID="com.caden.Motionary"
@@ -25,7 +26,7 @@ xcrun simctl bootstatus "$SIM" -b >/dev/null 2>&1 || true
 xcrun simctl install "$SIM" build/sim/Build/Products/Debug-iphonesimulator/Motionary.app
 # The app writes the cards the extension reads, so it has to run before the
 # widget is asked for a timeline.
-xcrun simctl launch "$SIM" "$BUNDLE_ID" -MotionaryMaskLabOn >/dev/null
+xcrun simctl launch "$SIM" "$BUNDLE_ID" -MotionaryMaskLabOn -MotionaryMaskLabStack "$STACK" >/dev/null
 sleep 8
 xcrun simctl terminate "$SIM" "$BUNDLE_ID" 2>/dev/null || true
 sleep 3

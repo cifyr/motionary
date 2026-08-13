@@ -29,14 +29,18 @@ struct MotionaryApp: App {
             EdgeLab.isEnabled = wanted
             changed = true
         }
+        if let wanted = MaskLab.launchPhasing(in: arguments), wanted != MaskLab.phasing {
+            MaskLab.phasing = wanted
+            changed = true
+        }
         if let wanted = MaskLab.launchOverride(in: arguments), wanted != MaskLab.isEnabled {
             MaskLab.isEnabled = wanted
             changed = true
         }
         // Written on every launch while the lab is on, because the extension
         // can only read what the app has already put there and a card left
-        // over from a previous build would pass for a working one.
-        if MaskLab.isEnabled { MaskLab.stageCards() }
+        // over from a previous sweep would pass for a working one.
+        if MaskLab.isEnabled { MaskLab.stageCards(MaskLab.phasing) }
         // Switching designs is a swipe, which a test run cannot make without
         // driving somebody's screen. This is the same switch by argument, so
         // "does the widget follow the selection" can be answered from a script.
@@ -64,7 +68,13 @@ struct MotionaryApp: App {
                 // to the foreground - the cheapest moment that is also the most
                 // likely to precede a look at the Home Screen.
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active { ReadoutGatherer.gatherAndPublish() }
+                    if phase == .active {
+                        ReadoutGatherer.gatherAndPublish()
+                        // On every return to the foreground rather than at
+                        // launch alone: the render worth reading is usually
+                        // the one that happened while the app was closed.
+                        DeviceReportMirror.mirror()
+                    }
                 }
         }
     }

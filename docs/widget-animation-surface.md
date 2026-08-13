@@ -341,10 +341,54 @@ So both directions are now evidenced:
 | live `Text(style:.timer)` | a composited `ZStack` subtree | this repo [CODE] |
 | rotating shape (`_clockHandRotationEffect`) | **static `Image`** | DouYinComment [CODE] |
 
-**Still not directly proven:** a live *`Text`*-driven mask over a static `Image`
-specifically. But the mechanism is now clearly content-agnostic and effect-agnostic
-compositing in the render server, so this is a small remaining gap rather than a
-structural unknown. **Confidence it works: high [INF].**
+**Directly proven, 2026-08-12** [CODE: `Shared/Diagnostics/MaskLab.swift`]. A live
+`Text(style:.timer)` mask gates a static `Image(uiImage:)` decoded from `Data`
+that was written into the app group *after install*. The lab draws three bands —
+runtime picture, flat colour, text as the control — under the production masking
+from `CompositionView`, so the result is about the engine rather than about
+masking in general.
+
+- **Simulator, 4 cards over 32 lanes:** the picture steps 3-4-2-4 across a burst
+  of screenshots. A mask resolved at archive time cannot do that.
+- **Simulator, 64 distinct cards at 1074px over 64 lanes:** steps through every
+  hue, and the picture band tracks the colour band exactly.
+- **Device (iPhone 17 Pro, iOS 27.0):** archives clean at every point of the
+  sweep below, no `imageTooLarge`, no `badTimelineData`.
+
+**This is the route out of the bundled-font constraint.** Frames delivered as
+pictures need no font, so they need nothing to be in the extension's bundle at
+install time.
+
+### 4.1.1 Measured cost of a runtime frame stack — device, 2026-08-12
+
+Swept with `Tools/mask-sweep.sh`, read back with `Tools/pull-reports.sh`. Stack
+is `lanes,distinct frames,long side in px`; footprint is the extension's own RSS
+at the point the stack is built.
+
+| Stack | Footprint | Archiver |
+|---|---|---|
+| 32, 4, 240 | 8 MB | clean |
+| 32, 32, 360 | 6 MB | clean |
+| 32, 32, 540 | 9 MB | clean |
+| 32, 32, 1074 | 10 MB | clean |
+| 64, 64, 540 | 9 MB | clean |
+| 64, 64, 1074 | 10 MB | clean |
+| 64, 64, 1620 | 12 MB | clean |
+
+**No wall was found.** The footprint barely moves with frame count or frame size,
+which is the opposite of what §6.4's 30 MB figure would predict for 64 decoded
+full-size frames — because `UIImage(data:)` does not decode until something
+draws it, and what draws it is the render server, not the extension. The cost
+that was expected to bite in the extension is paid somewhere this measurement
+cannot see. **What is measured is that it archives and renders**, up to 64
+frames at 1620px, which is past anything the loop length makes useful.
+
+**The real limit is the loop, not the budget.** One frame per lane and one mask
+phase per lane means the loop is exactly `laneCount / fps` = **2 seconds**, at
+16fps for 32 lanes or 32fps for 64. The font engine gets 30 seconds out of the
+same 2-second lane cycle by advancing a glyph within each lane — a dimension
+pictures do not have. So the runtime engine's shape is: **a 2-second loop, up to
+64 frames, at full widget resolution.**
 
 **The experiment, still worth 30 minutes.** One widget, three bands, on device
 (not Simulator — several of the relevant bugs are device-only):

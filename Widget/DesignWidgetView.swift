@@ -122,25 +122,30 @@ struct DesignWidgetView: View {
     /// The mask lab, which needs no design at all: the cards it draws are
     /// written into the app group by the app, which is the whole point of them.
     private func maskLab() -> MaskLabView {
+        let phasing = MaskLab.phasing
         WidgetRenderLog.append("mask enter \(MemoryFootprint.megabytes)MB")
-        let loaded = MaskLab.loadCards()
+        let loaded = MaskLab.loadCards(phasing)
+        // The footprint after decoding is the measurement: the extension is
+        // killed a little above 45MB, and a stack of distinct frames is the one
+        // arrangement that can reach it.
         WidgetRenderLog.append("""
-        mask cards \(loaded.images.count)/\(MaskLab.phasing.cardCount) \
-        \(MemoryFootprint.megabytes)MB
+        mask \(loaded.images.count)/\(phasing.cardCount) cards \(phasing.cardPixels)px \
+        \(phasing.laneCount) lanes \(MemoryFootprint.megabytes)MB
         """)
         if let store = try? DesignStore() {
             MaskLab.record(
                 loaded.notes + [
-                    "lanes \(MaskLab.phasing.laneCount), \(MaskLab.phasing.lanesPerCard) per card",
-                    "card holds \(String(format: "%.2f", MaskLab.phasing.cardDuration))s, "
-                        + "wraps every \(String(format: "%.1f", MaskLab.phasing.cycleDuration))s",
+                    "lanes \(phasing.laneCount), \(phasing.lanesPerCard) per card",
+                    "card holds \(String(format: "%.2f", phasing.cardDuration))s, "
+                        + "wraps every \(String(format: "%.1f", phasing.cycleDuration))s",
+                    "footprint \(MemoryFootprint.megabytes)MB",
                 ],
                 store: store
             )
         }
         return MaskLabView(
             cards: loaded.images,
-            phasing: MaskLab.phasing,
+            phasing: phasing,
             reference: TimerFontSpec.cycleAlignedReference()
         )
     }
