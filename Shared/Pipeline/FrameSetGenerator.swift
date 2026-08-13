@@ -599,9 +599,11 @@ struct FrameSetGenerator {
             guard let summary = try? await MediaFrameExtractor(
                 url: url, transform: design.mediaTransform
             ).summary(), summary.duration > 0 else { continue }
-            let duration = cutOut
-                ? await contentSeconds(design: design, source: url, crop: crop, whole: summary.duration)
-                : summary.duration
+            // Verbatim: the whole file, however much of it is motion. Trimming
+            // to where the content stops - or to where it stops moving - was
+            // measured and correct and still wrong, because a clip is a clip
+            // and cutting it is the thing that keeps being reported.
+            let duration = summary.duration
             if duration < summary.duration - 0.05 {
                 let name = url.lastPathComponent
                 Self.logger.info("\(name, privacy: .public) runs \(summary.duration)s but is empty after \(duration)s")
@@ -632,16 +634,31 @@ struct FrameSetGenerator {
             source: source, isPrimary: false, count: count,
             preservesAlpha: true, onStage: { _ in }
         ) else { return whole }
+        // Where it stops *moving*, not where it goes empty. spidey_alpha-3 runs
+        // 7.5 seconds and the swing is over in two: the figure then hangs
+        // perfectly still for five and a half, which is not an empty frame and
+        // is not worth a lane. Given a segment that long the swing is a couple
+        // of seconds of a shot that is mostly a held pose - "it only shows the
+        // second half".
+        var boxes: [CGRect?] = []
+        for frame in frames {
+            boxes.append(frame.cropping(to: crop).flatMap { FrameEncoder.opaqueBounds(of: $0, stride: 4) })
+        }
+        // A tenth of the crop's long side: smaller than that is a limb moving,
+        // and a held pose is not always pixel-identical.
+        let still = max(2.0, min(crop.width, crop.height) / 10)
         var last = -1
-        for (index, frame) in frames.enumerated() {
-            guard let cropped = frame.cropping(to: crop),
-                  FrameEncoder.opaqueBounds(of: cropped, stride: 4) != nil else { continue }
-            last = index
+        for (index, box) in boxes.enumerated() {
+            guard let box else { continue }
+            guard let previous = boxes[..<index].compactMap({ $0 }).last else { last = index; continue }
+            let moved = abs(box.minX - previous.minX) + abs(box.minY - previous.minY)
+                + abs(box.width - previous.width) + abs(box.height - previous.height)
+            if moved > still { last = index }
         }
         guard last >= 0 else { return whole }
-        // One sample past the last one with anything in it, so the figure is not
-        // clipped mid-exit, and never longer than the file.
-        return min(whole, Double(last + 2) / Double(rate))
+        // A couple of samples past the last movement, so the clip is not cut on
+        // the frame the motion ends, and never longer than the file.
+        return min(whole, Double(last + 3) / Double(rate))
     }
 
     /// Everything a clip needs once its pictures exist: the artwork that shares
