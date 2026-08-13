@@ -53,14 +53,41 @@ struct FrameStackLayer: View {
 
             ZStack {
                 if maskPeriod > 2 {
-                    // One stack, drawn in phase order. Every mask is solid for
-                    // a second, so several lanes are unmasked at once and the
-                    // last one to have turned on is the one on top - the same
-                    // ordering the two-second engine relies on, over a longer
-                    // cycle. No half-split: that exists because a mask solid on
-                    // every even second cannot tell the two halves of a
-                    // two-second cycle apart, and one solid a second in ten can.
-                    stack(0 ..< lanes, side: side, reference: reference, size: geometry.size)
+                    // One group per second of the mask's period, each gated to
+                    // its own second, and the frame rate's worth of lanes
+                    // inside it ordered by sub-second offset.
+                    //
+                    // The grouping is not decoration. Every mask is solid for a
+                    // whole second, so within a group several lanes are
+                    // unmasked at once and the last one to have turned on is
+                    // the one on top - but that ordering only holds while the
+                    // solid window sits inside the group. Drawn as one flat
+                    // stack the window eventually wraps past the end of the
+                    // list, the highest-index lane goes on winning after it
+                    // should have handed over, and the loop sticks on one frame
+                    // and then goes black. Measured: seven cards stepping
+                    // evenly, one held three times its share, then a gap.
+                    //
+                    // This is the same split the two-second engine uses for its
+                    // two halves, with one group per second instead of two.
+                    let perSecond = max(1, framesPerSecond)
+                    ForEach(0 ..< Int(maskPeriod.rounded()), id: \.self) { second in
+                        let start = second * perSecond
+                        stack(
+                            start ..< min(start + perSecond, lanes),
+                            side: side,
+                            reference: reference,
+                            size: geometry.size
+                        )
+                        .mask {
+                            BlinkMask(
+                                reference: reference,
+                                blinkOffset: Double(-second),
+                                font: maskFont
+                            )
+                            .frame(width: side, height: side)
+                        }
+                    }
                 } else {
                     stack(0 ..< half, side: side, reference: reference, size: geometry.size)
                     // Split into two halves masked against each other: the blink

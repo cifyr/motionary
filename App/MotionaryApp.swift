@@ -49,6 +49,17 @@ struct MotionaryApp: App {
             ActiveDesign.identifier = wanted
             changed = true
         }
+        // A reinstall replaces the extension and throws away its archived
+        // timelines, and nothing asks for new ones until the system gets round
+        // to it - which left the Home Screen on the grey placeholder for hours
+        // after a midnight install. Reloading once per build closes that.
+        let defaults = UserDefaults(suiteName: DesignStore.appGroupIdentifier)
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        let stamp = "\(build)-\(Bundle.main.bundlePath.hashValue)"
+        if defaults?.string(forKey: "lastLaunchedBuild") != stamp {
+            defaults?.set(stamp, forKey: "lastLaunchedBuild")
+            changed = true
+        }
         if changed { WidgetCenterBridge.reloadAll() }
     }
 

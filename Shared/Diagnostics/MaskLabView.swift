@@ -45,7 +45,7 @@ struct MaskLabView: View {
             // rather than gating it.
             let side = max(geometry.size.width, geometry.size.height)
             ZStack {
-                if phasing.spacing >= 1 {
+                if phasing.spacing >= 1 || phasing.maskFont != FontSetGenerator.blinkFontResourceName {
                     // Second-scale phases need no split. The shipped mask is
                     // solid on even seconds, so it can only tell one lane from
                     // another inside a half of the stack and the other half has
