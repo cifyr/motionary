@@ -57,10 +57,28 @@ final class BlinkPeriodTests: XCTestCase {
         XCTAssertEqual(short.period, 2)
         XCTAssertEqual(short.frames, 2 * spec.framesPerSecond)
 
+        // A nine-second clip does not get a nine-second stack: the plan is
+        // capped at the length that has been seen to draw, because above it the
+        // render server stops producing a picture and the widget goes black
+        // with the extension still reporting ok.
         let long = FrameSetGenerator.plan(for: spec, clipSeconds: 9)
-        XCTAssertEqual(long.period, 10)
-        XCTAssertEqual(long.frames, 10 * spec.framesPerSecond)
-        XCTAssertGreaterThan(long.frames, short.frames)
+        XCTAssertEqual(long.period, 2)
+        XCTAssertEqual(
+            Double(long.frames) / Double(spec.framesPerSecond),
+            FrameSetGenerator.provenLoopSeconds,
+            accuracy: 0.001
+        )
+    }
+
+    /// The cap is the whole reason a long clip comes back short, so it is worth
+    /// pinning: raising it is a decision to be made against a measurement, not
+    /// something that should drift.
+    func testTheLoopIsCappedAtWhatHasBeenSeenToDraw() {
+        XCTAssertEqual(FrameSetGenerator.provenLoopSeconds, 2)
+        for seconds in [0.3, 2.0, 5.0, 30.0] {
+            let plan = FrameSetGenerator.plan(for: TimerFontSpec(smoothness: .light), clipSeconds: seconds)
+            XCTAssertLessThanOrEqual(Double(plan.period), FrameSetGenerator.provenLoopSeconds)
+        }
     }
 
     /// A manifest from before longer masks existed has no period, and has to go
