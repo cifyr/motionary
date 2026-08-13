@@ -89,6 +89,25 @@ final class DeliveredEntryTests: XCTestCase {
         XCTAssertEqual(PrebuiltDesign.all(in: store).first?.name, "Newer")
     }
 
+    /// A design can be built into the app and later sent to the phone, under
+    /// one id. Listing it twice made the bundled twin unreachable - everything
+    /// downstream resolves an entry by id, so the swipe found the delivered
+    /// copy every time and the cycle skipped whatever sat after it.
+    func testADesignInBothHomesIsListedOnceAsTheDeliveredCopy() throws {
+        let design = try stage(name: "Both", frameDriven: true)
+        let bundledTwin = PrebuiltDesign.Entry(id: design.id, name: "Both")
+
+        var seen: Set<UUID> = []
+        let combined = (PrebuiltDesign.delivered(in: store) + [bundledTwin])
+            .filter { seen.insert($0.id).inserted }
+
+        XCTAssertEqual(combined.count, 1)
+        XCTAssertTrue(combined[0].isDelivered, "the delivered copy is the newer body")
+        XCTAssertEqual(Set(PrebuiltDesign.all(in: store).map(\.id)).count,
+                       PrebuiltDesign.all(in: store).count,
+                       "no design may appear twice")
+    }
+
     /// The selection names one design out of both homes; naming nothing takes
     /// the first, which is what a fresh install does.
     func testSelectionPicksFromBothHomes() throws {

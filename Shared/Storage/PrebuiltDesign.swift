@@ -165,13 +165,21 @@ enum PrebuiltDesign {
             }
     }
 
-    /// Everything the app can show, delivered first.
+    /// Everything the app can show, delivered first and each design once.
     ///
     /// Newest work first: a design that was just sent to the phone is the one
     /// somebody wants to look at, and the bundled ones have been there since
     /// the install.
+    ///
+    /// The dedup is the load-bearing part. A design can be in both homes at
+    /// once - built into the app and later sent to the phone - under one id,
+    /// and everything downstream resolves an entry by id: the swipe found the
+    /// delivered copy every time, so the bundled twin was unreachable and the
+    /// cycle skipped whatever sat after it. The delivered copy wins because it
+    /// is the newer body of the same design.
     static func all(in store: DesignStore?) -> [Entry] {
-        delivered(in: store) + entries
+        var seen: Set<UUID> = []
+        return (delivered(in: store) + entries).filter { seen.insert($0.id).inserted }
     }
 
     static func selected(id: UUID?, in store: DesignStore?) -> Entry? {
