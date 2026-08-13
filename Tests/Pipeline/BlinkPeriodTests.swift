@@ -9,13 +9,17 @@ import XCTest
 /// here is the choice: which mask a clip gets, and how many pictures that
 /// costs.
 final class BlinkPeriodTests: XCTestCase {
-    /// Every period has to divide 60, because the substitution keys on the
-    /// seconds digits and they wrap there. A period that does not divide would
-    /// put the solid second in a different place on each pass through the
-    /// minute, which is a loop that never repeats the same way twice.
-    func testEveryPeriodDividesTheMinute() {
+    /// Every period has to divide *ten*, not sixty.
+    ///
+    /// The substitution's six coverage entries - one per tens digit - all point
+    /// at one shared ligature set in this font, so the pattern can only depend
+    /// on the ones digit. A period of four or six or thirty needs the tens
+    /// digit to matter. Asked for one, the generator refuses; shipped anyway,
+    /// it produced a mask solid on nothing and a widget that drew black while
+    /// every report said ok.
+    func testEveryPeriodDividesTen() {
         for period in FontSetGenerator.blinkPeriods {
-            XCTAssertEqual(60 % period.seconds, 0, "\(period.resource) does not divide 60")
+            XCTAssertEqual(10 % period.seconds, 0, "\(period.resource) needs the tens digit")
             XCTAssertGreaterThanOrEqual(period.seconds, 2)
         }
         XCTAssertEqual(
@@ -30,11 +34,10 @@ final class BlinkPeriodTests: XCTestCase {
     /// because the stack has to cover the whole cycle - a second nothing was
     /// drawn into is a second of black once per loop.
     func testAClipGetsTheShortestMaskThatCoversIt() {
-        XCTAssertEqual(FontSetGenerator.blinkPeriod(covering: 0.3).seconds, 4)
-        XCTAssertEqual(FontSetGenerator.blinkPeriod(covering: 4).seconds, 4)
-        XCTAssertEqual(FontSetGenerator.blinkPeriod(covering: 4.1).seconds, 6)
+        XCTAssertEqual(FontSetGenerator.blinkPeriod(covering: 0.3).seconds, 2)
+        XCTAssertEqual(FontSetGenerator.blinkPeriod(covering: 2).seconds, 2)
+        XCTAssertEqual(FontSetGenerator.blinkPeriod(covering: 2.1).seconds, 5)
         XCTAssertEqual(FontSetGenerator.blinkPeriod(covering: 9.5).seconds, 10)
-        XCTAssertEqual(FontSetGenerator.blinkPeriod(covering: 25).seconds, 30)
     }
 
     /// A clip longer than the longest mask is not refused - it gets the longest
@@ -51,8 +54,8 @@ final class BlinkPeriodTests: XCTestCase {
     func testTheStackCoversTheWholeCycle() {
         let spec = TimerFontSpec(smoothness: .light)   // 32 lanes, 16fps
         let short = FrameSetGenerator.plan(for: spec, clipSeconds: 1)
-        XCTAssertEqual(short.period, 4)
-        XCTAssertEqual(short.frames, 4 * spec.framesPerSecond)
+        XCTAssertEqual(short.period, 2)
+        XCTAssertEqual(short.frames, 2 * spec.framesPerSecond)
 
         let long = FrameSetGenerator.plan(for: spec, clipSeconds: 9)
         XCTAssertEqual(long.period, 10)
@@ -87,5 +90,11 @@ final class BlinkPeriodTests: XCTestCase {
         XCTAssertEqual(manifest.maskPeriodSeconds, 10)
         XCTAssertEqual(manifest.maskFontResource, "Blnk10-Regular")
         XCTAssertEqual(manifest.frameLaneCount, 160)
+
+        // The two-second mask is the shipped one, which the font engine uses
+        // too - a design on it must not be sent looking for a file that is not
+        // there.
+        manifest.maskPeriod = 2
+        XCTAssertEqual(manifest.maskFontResource, FontSetGenerator.blinkFontResourceName)
     }
 }

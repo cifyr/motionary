@@ -242,8 +242,27 @@ struct DesignWidgetView: View {
             store: store,
             variant: variantID
         )
+        // The mask font is the one thing that can fail while everything else
+        // reports fine: it is looked up by name, and a name that does not
+        // resolve falls back to the system font, whose glyphs land outside the
+        // mask canvas entirely - so the mask gates nothing through and the
+        // widget is black with an "ok" beside it.
+        let maskName = manifest.maskFontResource
+        let maskFont = CTFontCreateWithName(maskName as CFString, 12, nil)
+        let maskResolves = CTFontCopyPostScriptName(maskFont) as String == maskName
+        // Resolving by name is not proof it is the right font. These five masks
+        // are one file with sixty bytes changed, and a system that dedupes them
+        // would hand back a font that answers to the name and substitutes on
+        // the wrong seconds - which draws black, not wrong. So the table is
+        // read back out of the font that was actually resolved.
+        let period = FontSetGenerator.blinkPeriods.first { $0.resource == maskName }?.seconds ?? 2
+        let gsub = CTFontCopyTable(maskFont, CTFontTableTag(kCTFontTableGSUB), [])
+            .map { Data(bytes: CFDataGetBytePtr($0), count: CFDataGetLength($0)) }
+        let solidSeconds = gsub.map { BlinkFontCheck.solidSeconds(in: $0) } ?? []
         WidgetRenderLog.append("""
-        deliv \(name) \(loaded.report.summary) \(MemoryFootprint.megabytes)MB
+        deliv \(name) \(loaded.report.summary) mask=\(maskName)\(maskResolves ? "" : " UNRESOLVED") \
+        period=\(manifest.maskPeriod ?? 2)s solid=\(solidSeconds.prefix(6).map(String.init).joined(separator: ",")) \
+        want=\(period) lanes=\(manifest.frameLaneCount) \(MemoryFootprint.megabytes)MB
         """)
         guard loaded.report.isComplete else { return nil }
 

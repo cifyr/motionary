@@ -44,7 +44,7 @@ struct FontSetGenerator {
     /// The shipped mask keys on the timer's seconds and is solid on even ones,
     /// so it repeats every two seconds - which is exactly why a picture-built
     /// design could only be two seconds long. These are solid one second in
-    /// four, six, ten and thirty, so a design's loop can be any of those.
+    /// five and ten, so a design's loop can be either.
     /// Verified in the mask lab: ten cards gated a second apart step through
     /// ten distinct cards in order and wrap.
     ///
@@ -53,11 +53,16 @@ struct FontSetGenerator {
     /// because the substitution keys on the seconds digits, and thirty is the
     /// longest useful one: the timer reference is anchored to a thirty-second
     /// cycle, so a longer mask would not repeat with the picture.
+    /// Only periods that divide ten. The substitution's six coverage entries -
+    /// one per tens digit - all point at the same ligature set in this font, so
+    /// the pattern can only depend on the ones digit. A period of four or six
+    /// or thirty needs the tens digit to matter and cannot be written without
+    /// rebuilding the table; asked for one anyway, the generator refuses rather
+    /// than producing a mask that resolves, draws, and gates everything out.
     static let blinkPeriods: [(seconds: Int, resource: String)] = [
-        (4, "Blnk04-Regular"),
-        (6, "Blnk06-Regular"),
+        (2, blinkFontResourceName),
+        (5, "Blnk05-Regular"),
         (10, "Blnk10-Regular"),
-        (30, "Blnk30-Regular"),
     ]
 
     /// The shortest mask that covers a clip, because every second of period

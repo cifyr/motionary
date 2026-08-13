@@ -54,8 +54,8 @@ made of glyphs**.
 > as pictures need nothing in the bundle, so a design can be sent to an
 > installed app. The loop is as long as the blink mask's own period: the shipped
 > mask substitutes on the timer's seconds and is solid on even ones, so it
-> repeats every two - and masks solid one second in four, six, ten and thirty
-> ship beside it, so a clip plays as long as it is up to thirty seconds. See
+> repeats every two - and masks solid one second in five and ten ship beside it,
+> so a clip plays as long as it is up to ten seconds. See
 > [the measurement](widget-animation-surface.md#411-measured-cost-of-a-runtime-frame-stack--device-2026-08-12).
 
 ## The animation trick

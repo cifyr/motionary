@@ -36,7 +36,7 @@ Some of its constraints are unusually sharp, and they are not bugs:
 - **A design can be built two ways, and they are not equivalent.** Built as
   fonts, its frames are colour glyphs, it gets a thirty-second loop, and it can
   only reach a phone by being compiled into the widget extension and installed.
-  Built as pictures, it is a loop of up to thirty seconds that can be
+  Built as pictures, it is a loop of up to ten seconds that can be
   **delivered to a phone that already has the app** — press **Send to phone** in Studio with Motionary
   open on the phone, or hand it a package through AirDrop, Files or
   `Tools/deliver.sh`. Which one you want depends on whether the design has to

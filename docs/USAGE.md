@@ -65,9 +65,10 @@ shaped around.
 **As pictures** - `Send to phone`, `--send`, `--deliver`, `Tools/deliver.sh`.
 Its frames are JPEGs the widget stacks under the same masks, so it needs nothing
 installed and can be handed to a phone that already has the app. The loop is the
-blink mask's period, and masks of four, six, ten and thirty seconds ship - the
-build picks the shortest that covers the clip, so a clip plays as long as it is
-up to thirty seconds. Every second of period costs `framesPerSecond` more
+blink mask's period, and masks of two, five and ten seconds ship - the build
+picks the shortest that covers the clip, so a clip plays as long as it is up to
+ten seconds. Only periods dividing ten exist, because the substitution keys on
+the timer's ones digit alone. Every second of period costs `framesPerSecond` more
 pictures whether the clip fills them or not, because the stack has to cover the
 whole cycle. Every clip a design has travels together, so variants can still be
 switched on the phone.

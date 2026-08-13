@@ -391,13 +391,24 @@ a two-second loop.
 
 That is a property of one font's substitution table, not of the mechanism.
 `Tools/blink-font.py` rewrites those sixty substitutions so the square lands one
-second in four, six, ten or thirty, without changing the file's length, and the
-four resulting masks ship beside the original. **Measured in the lab, 2026-08-13:
+second in five or ten, without changing the file's length, and both resulting
+masks ship beside the original.
+
+**Only periods that divide ten can be written.** The substitution's six coverage
+entries - one per tens digit - all point at the *same* ligature set in this font,
+because "solid on even seconds" depends only on the ones digit and the compiler
+shared it. A period of four or six or thirty needs the tens digit to matter and
+has nowhere to say so. Written anyway, the patch lands on the shared bytes six
+times over and the last tens digit wins: asking for six produced a mask solid on
+4, 14, 24 rather than 0, 6, 12, and asking for thirty produced one solid on
+nothing at all. Both resolve by name, both draw, and both mask the whole widget
+out - which is a black Home Screen with every report saying ok. The generator now
+refuses a period it cannot express and reads back what it wrote. **Measured in the lab, 2026-08-13:
 ten cards gated one second apart under the ten-second mask step through ten
 distinct cards in order and wrap.** On device, a 320-frame ten-second design
 loads all 320 frames at 12.2MB and archives clean with the extension at 9-14MB.
 
-So the runtime engine's shape is: **a loop as long as the clip, up to thirty
+So the runtime engine's shape is: **a loop as long as the clip, up to ten
 seconds**, costing `period x fps` pictures - the stack has to cover the whole
 cycle, because a phase nothing was drawn into is a second of black once per
 loop.
