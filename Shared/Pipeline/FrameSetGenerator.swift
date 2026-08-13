@@ -320,18 +320,19 @@ struct FrameSetGenerator {
             guard let clip = clips.first(where: { $0.id == segment.clipID }) else {
                 throw GeneratorError.emptyCrop(design: design.name)
             }
-            // The whole clip, fitted to its segment. `composedFrames` divides
-            // the sampling interval by `speed`, so `duration x fps / frames`
-            // walks the source end to end however many lanes it was given -
-            // which is what makes this play the clip out rather than cut it.
-            let speed = clip.duration * Double(fps) / Double(max(1, segment.frameCount))
+            // At the speed the design sets, never fitted to the segment.
+            // Stretching a 10.6-second clip over twelve seconds to make it tile
+            // the loop plays it slower than it was authored and buys nothing
+            // anybody asked for - a clip that ends early is the better trade.
+            // Short of its segment it repeats inside it, the same way a short
+            // clip already repeats around the whole stack.
+            let own = max(1, Int((clip.wall * Double(fps)).rounded(.down)))
             let cut = try await pictures(
                 design: design,
                 spec: TimerFontSpec(laneCount: 1, framesPerSecond: fps),
                 source: clip.source,
                 isPrimary: segment.clipID == nil,
-                count: segment.frameCount,
-                speed: speed,
+                count: min(segment.frameCount, own),
                 onStage: onStage
             )
             guard !cut.isEmpty else { throw GeneratorError.emptyCrop(design: design.name) }
@@ -373,6 +374,34 @@ struct FrameSetGenerator {
             cursor += 1
         }
         return shares
+    }
+
+    /// The slowest a shuffled design is allowed to play.
+    ///
+    /// Holding every clip whole needs a thirty-second loop, and thirty seconds
+    /// against a 320-lane ceiling is 10fps, which reads as a slideshow. A clip
+    /// that ends early is the cheaper loss: this is the floor the loop length is
+    /// chosen to clear.
+    static let shuffleFrameRateFloor = 16
+
+    static var shuffleFrameRateFloorBudget: Int {
+        ProcessInfo.processInfo.environment["MOTIONARY_SHUFFLE_FPS_FLOOR"]
+            .flatMap(Int.init).map { max(1, $0) } ?? shuffleFrameRateFloor
+    }
+
+    /// The longest loop worth giving a shuffled design.
+    ///
+    /// The shortest mask that holds every clip when they all fit - there is no
+    /// reason to spread three short clips over thirty seconds - and otherwise
+    /// the longest one that still plays at the floor, so the clips are cut as
+    /// little as the frame rate allows.
+    static func shufflePeriod(covering wall: TimeInterval, authored: Int)
+        -> (seconds: Int, resource: String)
+    {
+        let floor = min(shuffleFrameRateFloorBudget, authored)
+        let affordable = FontSetGenerator.blinkPeriods.filter { laneBudget / $0.seconds >= floor }
+        let fits = affordable.first { Double($0.seconds) >= wall - 0.001 }
+        return fits ?? affordable.last ?? FontSetGenerator.blinkPeriods[0]
     }
 
     /// Equal shares, for clips whose lengths are not known.
@@ -692,14 +721,14 @@ struct FrameSetGenerator {
             return nil
         }
 
-        // The mask is chosen to hold every clip whole, which is the whole point
-        // of shuffling: three clips of 10.6, 8.0 and 8.0 seconds need thirty,
-        // and thirty is expressible now that each tens digit has its own
-        // ligature set. The frame rate is then whatever fits the lanes in the
-        // budget - 30s at 10fps is 300, against a ceiling of 320 photographed
-        // on the phone.
+        // Length and smoothness are the same budget: lanes are `period x fps`
+        // and the lane ceiling is what the phone will draw. A mask long enough
+        // to hold all three clips whole costs 30s at 10fps, and 10fps is worse
+        // to look at than a clip that ends early - so the loop is the longest
+        // one that still clears `shuffleFrameRateFloor`, and the clips are cut
+        // to it rather than stretched to fill it.
         let wall = clips.reduce(0) { $0 + $1.wall }
-        let mask = FontSetGenerator.blinkPeriod(covering: wall)
+        let mask = Self.shufflePeriod(covering: wall, authored: spec.framesPerSecond)
         let fps = max(1, min(spec.framesPerSecond, Self.laneBudget / mask.seconds))
         let lanes = mask.seconds * fps
         let shares = Self.programShares(lanes: lanes, weights: clips.map(\.wall))

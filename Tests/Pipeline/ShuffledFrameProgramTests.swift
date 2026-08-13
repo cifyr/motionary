@@ -34,14 +34,37 @@ final class ShuffledFrameProgramTests: XCTestCase {
         XCTAssertEqual(shares, [120, 90, 90])
         XCTAssertEqual(shares.reduce(0, +), 300)
 
-        // Every clip is stretched by the same factor, so nothing plays at a
-        // different speed from anything else - the stretch is what takes 26.6
-        // seconds of clip to a thirty-second loop with no gap at the end.
-        let stretch = zip(shares, lengths).map { Double($0) / 10 / $1 }
-        for factor in stretch {
-            XCTAssertEqual(factor, stretch[0], accuracy: 0.02)
-            XCTAssertEqual(factor, 30.0 / 26.6, accuracy: 0.02)
+        // Each clip is shown for the same fraction of itself, so no clip is cut
+        // harder than its neighbours.
+        let shown = zip(shares, lengths).map { Double($0) / 10 / $1 }
+        for fraction in shown {
+            XCTAssertEqual(fraction, shown[0], accuracy: 0.02)
         }
+    }
+
+    /// Which loop a shuffled design gets, which is the whole length-against-
+    /// smoothness trade.
+    ///
+    /// Lanes are `period x fps` and the lane ceiling is what the phone will
+    /// draw, so a loop long enough to hold Spidey's three clips whole - thirty
+    /// seconds - costs 10fps, and 10fps reads as a slideshow. A clip that ends
+    /// early is the cheaper loss.
+    func testTheLoopIsTheLongestThatKeepsTheFrameRateUp() {
+        let period = FrameSetGenerator.shufflePeriod(covering: 26.6, authored: 32)
+        XCTAssertEqual(period.seconds, 20, "thirty seconds would drop to 10fps")
+        XCTAssertGreaterThanOrEqual(
+            FrameSetGenerator.provenLaneCount / period.seconds,
+            FrameSetGenerator.shuffleFrameRateFloor
+        )
+
+        // Clips that already fit get the shortest mask that holds them - there
+        // is no reason to spread three short clips over twenty seconds.
+        XCTAssertEqual(FrameSetGenerator.shufflePeriod(covering: 4.0, authored: 32).seconds, 5)
+        XCTAssertEqual(FrameSetGenerator.shufflePeriod(covering: 9.0, authored: 32).seconds, 10)
+
+        // A design authored below the floor is not dragged up to it: its own
+        // rate is the ceiling, so it may have the longer loop.
+        XCTAssertEqual(FrameSetGenerator.shufflePeriod(covering: 26.6, authored: 10).seconds, 30)
     }
 
     /// Proportion must not starve a short clip: one lane is a frame, and zero
