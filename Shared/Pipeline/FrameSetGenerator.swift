@@ -39,12 +39,29 @@ struct FrameSetGenerator {
         }
     }
 
-    /// The loop a picture-built design can hold, in frames.
+    /// The mask a clip of this length needs, and how many pictures that costs.
     ///
-    /// One frame per lane and one mask phase per lane: the stack is the loop.
-    /// Taken from the design's own start frame at its own speed, so the motion
-    /// runs at the speed it was authored at and the design is the first two
-    /// seconds of its loop rather than all of it played fifteen times too fast.
+    /// One frame per mask phase: the stack is the loop. The mask decides how
+    /// long the loop can be - the shipped one repeats every two seconds, which
+    /// is what limited a delivered design to two - so a longer clip is given a
+    /// longer mask rather than being cut down to fit the short one.
+    ///
+    /// The shortest mask that covers the clip, because the stack has to fill
+    /// the whole cycle: every second of period costs `framesPerSecond` more
+    /// pictures whether the clip fills them or not, and a second nothing was
+    /// drawn into is a second of black once per loop.
+    static func plan(for spec: TimerFontSpec, clipSeconds: TimeInterval)
+        -> (period: Int, resource: String, frames: Int)
+    {
+        let mask = FontSetGenerator.blinkPeriod(covering: clipSeconds)
+        return (mask.seconds, mask.resource, mask.seconds * spec.framesPerSecond)
+    }
+
+    /// What a design's own loop comes to in seconds, at the speed it plays.
+    static func clipSeconds(for design: DesignDocument) -> TimeInterval {
+        Double(design.loopFrameCount) / Double(design.spec.framesPerSecond)
+    }
+
     static func frameCount(for spec: TimerFontSpec) -> Int { spec.laneCount }
 
     static func loopDuration(for spec: TimerFontSpec) -> TimeInterval {
@@ -104,7 +121,7 @@ struct FrameSetGenerator {
         loopFrameCount: Int,
         onStage: @Sendable @escaping (Stage) -> Void
     ) async throws -> ClipBuild {
-        let count = max(1, min(loopFrameCount, Self.frameCount(for: spec)))
+        let count = max(1, loopFrameCount)
         try store.clearFrames(for: design.id, variant: variant?.id)
 
         onStage(.decoding(progress: 0))
@@ -214,6 +231,13 @@ struct FrameSetGenerator {
         // offering a clip the design no longer has.
         try store.clearAllFrames(for: design.id)
 
+        // The mask is chosen for the clip rather than the clip cut to the mask.
+        let plan = Self.plan(for: spec, clipSeconds: Self.clipSeconds(for: design))
+        Self.logger.info("""
+        mask period \(plan.period)s (\(plan.resource, privacy: .public)) for a \
+        \(String(format: "%.1f", Self.clipSeconds(for: design)))s clip, \(plan.frames) lanes
+        """)
+
         let primary = try await buildClip(
             design: design,
             spec: spec,
@@ -221,19 +245,19 @@ struct FrameSetGenerator {
             source: store.sourceVideoURL(for: design),
             variant: nil,
             // Never more than the design's own loop: a clip with six frames in
-            // it has six, and asking the extractor for the whole stack fails
-            // the build rather than producing a short loop. The lanes repeat
-            // around whatever arrives, which plays that loop several times per
-            // cycle at the speed it was authored at.
-            loopFrameCount: design.loopFrameCount,
+            // it has six, and asking the extractor for more fails the build
+            // rather than producing a short loop. The lanes repeat around
+            // whatever arrives, which plays that loop as many times per cycle
+            // as it fits, at the speed it was authored at.
+            loopFrameCount: min(design.loopFrameCount, plan.frames),
             onStage: onStage
         )
         // Not an error, the same way an ill-fitting loop is not one for the
-        // fonts: it costs one jump per lane cycle at the wrap, which is often
+        // fonts: it costs one jump per cycle at the wrap, which is often
         // invisible.
-        if !spec.laneCount.isMultiple(of: primary.frameCount) {
+        if !plan.frames.isMultiple(of: primary.frameCount) {
             Self.logger.warning(
-                "\(primary.frameCount) frames do not divide \(spec.laneCount) lanes; the loop will jump once per cycle"
+                "\(primary.frameCount) frames do not divide \(plan.frames) lanes; the loop will jump once per cycle"
             )
         }
 
@@ -261,6 +285,9 @@ struct FrameSetGenerator {
                 spec: spec,
                 playbackSpeed: design.playbackSpeed
             )
+            // Capped at the design's mask, not at its own: every clip in a
+            // design shares one stack of lanes, so a variant longer than the
+            // period would run off the end of it.
             let built: ClipBuild
             do {
                 built = try await buildClip(
@@ -269,7 +296,7 @@ struct FrameSetGenerator {
                     crop: crop,
                     source: source,
                     variant: variant,
-                    loopFrameCount: min(max(1, own), Self.frameCount(for: spec)),
+                    loopFrameCount: min(max(1, own), plan.frames),
                     onStage: onStage
                 )
             } catch is CancellationError {
@@ -308,6 +335,7 @@ struct FrameSetGenerator {
             builtAt: Date(),
             backdropRect: backdropRect.isNull ? nil : backdropRect,
             frameCount: primary.frameCount,
+            maskPeriod: plan.period,
             tiles: design.tiles,
             assets: design.assets,
             readouts: design.readouts,

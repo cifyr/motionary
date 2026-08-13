@@ -52,9 +52,10 @@ made of glyphs**.
 > device and in the simulator, up to 64 distinct frames at full widget
 > resolution, with the extension's footprint never above 12 MB. Frames delivered
 > as pictures need nothing in the bundle, so a design can be sent to an
-> installed app. The price is the loop: one picture per lane gives exactly
-> `laneCount / fps` = **2 seconds**, where the font engine's fifteen glyphs per
-> lane stretch the same lane cycle to 30. See
+> installed app. The loop is as long as the blink mask's own period: the shipped
+> mask substitutes on the timer's seconds and is solid on even ones, so it
+> repeats every two - and masks solid one second in four, six, ten and thirty
+> ship beside it, so a clip plays as long as it is up to thirty seconds. See
 > [the measurement](widget-animation-surface.md#411-measured-cost-of-a-runtime-frame-stack--device-2026-08-12).
 
 ## The animation trick

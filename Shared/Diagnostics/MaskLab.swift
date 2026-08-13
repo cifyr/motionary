@@ -72,11 +72,32 @@ enum MaskLab {
         /// frame and the cap that bites first is on pixel area, so this is the
         /// other axis of the sweep.
         let cardPixels: Int
+        /// How far apart the lanes are phased, in milliseconds. Zero means the
+        /// frame duration, which is what the shipped engine uses.
+        ///
+        /// A whole second is the interesting setting: the mask substitutes on
+        /// the timer's seconds digits, so second-scale offsets are what decides
+        /// whether a loop can be longer than the mask's own period.
+        let spacingMilliseconds: Int
+        /// The mask font under test.
+        let maskFont: String
 
-        init(laneCount: Int = 32, cardCount: Int = 4, cardPixels: Int = 240) {
+        init(
+            laneCount: Int = 32,
+            cardCount: Int = 4,
+            cardPixels: Int = 240,
+            spacingMilliseconds: Int = 0,
+            maskFont: String = FontSetGenerator.blinkFontResourceName
+        ) {
             self.laneCount = laneCount
             self.cardCount = cardCount
             self.cardPixels = cardPixels
+            self.spacingMilliseconds = spacingMilliseconds
+            self.maskFont = maskFont
+        }
+
+        var spacing: TimeInterval {
+            spacingMilliseconds > 0 ? Double(spacingMilliseconds) / 1000 : frameDuration
         }
 
         var framesPerSecond: Int { laneCount / 2 }
@@ -115,7 +136,7 @@ enum MaskLab {
         /// The offset that makes this lane's mask the opaque one, negated the
         /// same way the composition negates it.
         func blinkOffset(lane: Int) -> TimeInterval {
-            Double(-lane) * frameDuration
+            Double(-lane) * spacing
         }
     }
 
@@ -127,13 +148,21 @@ enum MaskLab {
         get {
             let defaults = UserDefaults(suiteName: DesignStore.appGroupIdentifier)
             guard let raw = defaults?.string(forKey: phasingKey) else { return Phasing() }
-            let parts = raw.split(separator: ",").compactMap { Int($0) }
-            guard parts.count == 3 else { return Phasing() }
-            return Phasing(laneCount: parts[0], cardCount: parts[1], cardPixels: parts[2])
+            let fields = raw.split(separator: ",")
+            let parts = fields.compactMap { Int($0) }
+            guard parts.count >= 3 else { return Phasing() }
+            return Phasing(
+                laneCount: parts[0],
+                cardCount: parts[1],
+                cardPixels: parts[2],
+                spacingMilliseconds: parts.count > 3 ? parts[3] : 0,
+                maskFont: fields.count > 4 ? String(fields[4]) : FontSetGenerator.blinkFontResourceName
+            )
         }
         set {
             UserDefaults(suiteName: DesignStore.appGroupIdentifier)?.set(
-                "\(newValue.laneCount),\(newValue.cardCount),\(newValue.cardPixels)",
+                "\(newValue.laneCount),\(newValue.cardCount),\(newValue.cardPixels),"
+                    + "\(newValue.spacingMilliseconds),\(newValue.maskFont)",
                 forKey: phasingKey
             )
             logger.info("mask lab \(newValue.cardCount) cards at \(newValue.cardPixels)px over \(newValue.laneCount) lanes")
@@ -146,9 +175,16 @@ enum MaskLab {
         guard let flag = arguments.firstIndex(of: "-MotionaryMaskLabStack"),
               arguments.index(after: flag) < arguments.endIndex
         else { return nil }
-        let parts = arguments[arguments.index(after: flag)].split(separator: ",").compactMap { Int($0) }
-        guard parts.count == 3 else { return nil }
-        let phasing = Phasing(laneCount: parts[0], cardCount: parts[1], cardPixels: parts[2])
+        let fields = arguments[arguments.index(after: flag)].split(separator: ",")
+        let parts = fields.compactMap { Int($0) }
+        guard parts.count >= 3 else { return nil }
+        let phasing = Phasing(
+            laneCount: parts[0],
+            cardCount: parts[1],
+            cardPixels: parts[2],
+            spacingMilliseconds: parts.count > 3 ? parts[3] : 0,
+            maskFont: fields.count > 4 ? String(fields[4]) : FontSetGenerator.blinkFontResourceName
+        )
         return phasing.isValid ? phasing : nil
     }
 

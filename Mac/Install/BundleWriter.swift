@@ -393,7 +393,9 @@ struct BundleWriter {
         }
         // The blink mask font drives which lane is visible and is not part of
         // any design, so it stays whatever the design's lanes turn out to be.
-        let entries = ([FontSetGenerator.blinkFontResourceName + ".otf"] + fonts)
+        let entries = ([FontSetGenerator.blinkFontResourceName + ".otf"]
+            + FontSetGenerator.blinkPeriods.map { $0.resource + ".otf" }
+            + fonts)
             .map { "\n    <string>\($0)</string>" }
             .joined()
         return plist.replacingCharacters(

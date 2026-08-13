@@ -64,11 +64,13 @@ shaped around.
 
 **As pictures** - `Send to phone`, `--send`, `--deliver`, `Tools/deliver.sh`.
 Its frames are JPEGs the widget stacks under the same masks, so it needs nothing
-installed and can be handed to a phone that already has the app. The price is
-the loop: one picture per lane makes it exactly `laneCount / fps` = **two
-seconds**, where fifteen glyphs per lane stretch the same cycle to thirty. Every
-clip a design has travels together, so variants can still be switched on the
-phone.
+installed and can be handed to a phone that already has the app. The loop is the
+blink mask's period, and masks of four, six, ten and thirty seconds ship - the
+build picks the shortest that covers the clip, so a clip plays as long as it is
+up to thirty seconds. Every second of period costs `framesPerSecond` more
+pictures whether the clip fills them or not, because the stack has to cover the
+whole cycle. Every clip a design has travels together, so variants can still be
+switched on the phone.
 
 Both bodies produce identical stills - one `DesignArtWriter` writes the
 wallpaper and the backdrop for both - so switching between them does not move

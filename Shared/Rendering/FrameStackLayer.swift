@@ -23,6 +23,14 @@ struct FrameStackLayer: View {
     /// speed it was authored at.
     let laneCount: Int
     let framesPerSecond: Int
+    /// The mask font, and how long it takes to repeat.
+    ///
+    /// The shipped mask is solid on even seconds, so it repeats every two - and
+    /// that was the whole loop a picture-built design could have. A mask solid
+    /// one second in `period` repeats every `period` seconds instead, which is
+    /// how a clip longer than two seconds plays as long as it is.
+    var maskFont = FontSetGenerator.blinkFontResourceName
+    var maskPeriod: TimeInterval = 2
 
     /// Which frame a lane shows. Its own function because getting it wrong
     /// shows as a loop playing in the wrong order, which looks like a bad clip
@@ -44,15 +52,26 @@ struct FrameStackLayer: View {
             let half = max(1, lanes / 2)
 
             ZStack {
-                stack(0 ..< half, side: side, reference: reference, size: geometry.size)
-                // Split into two halves masked against each other: the blink
-                // mask can only isolate one lane within a half, so the second
-                // half is gated as a group.
-                stack(half ..< lanes, side: side, reference: reference, size: geometry.size)
-                    .mask {
-                        BlinkMask(reference: reference, blinkOffset: 1)
-                            .frame(width: side, height: side)
-                    }
+                if maskPeriod > 2 {
+                    // One stack, drawn in phase order. Every mask is solid for
+                    // a second, so several lanes are unmasked at once and the
+                    // last one to have turned on is the one on top - the same
+                    // ordering the two-second engine relies on, over a longer
+                    // cycle. No half-split: that exists because a mask solid on
+                    // every even second cannot tell the two halves of a
+                    // two-second cycle apart, and one solid a second in ten can.
+                    stack(0 ..< lanes, side: side, reference: reference, size: geometry.size)
+                } else {
+                    stack(0 ..< half, side: side, reference: reference, size: geometry.size)
+                    // Split into two halves masked against each other: the blink
+                    // mask can only isolate one lane within a half, so the second
+                    // half is gated as a group.
+                    stack(half ..< lanes, side: side, reference: reference, size: geometry.size)
+                        .mask {
+                            BlinkMask(reference: reference, blinkOffset: 1)
+                                .frame(width: side, height: side)
+                        }
+                }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
@@ -76,7 +95,8 @@ struct FrameStackLayer: View {
                     .mask {
                         BlinkMask(
                             reference: reference,
-                            blinkOffset: Double(-lane) * frameDuration
+                            blinkOffset: Double(-lane) * frameDuration,
+                            font: maskFont
                         )
                         .frame(width: side, height: side)
                     }

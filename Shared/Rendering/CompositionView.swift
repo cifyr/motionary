@@ -88,8 +88,13 @@ struct CompositionView<Tile: View>: View {
                     let crop = manifest.animationCrop
                     FrameStackLayer(
                         frames: frames,
-                        laneCount: manifest.laneCount,
-                        framesPerSecond: manifest.framesPerSecond
+                        // The stack covers the mask's whole cycle: a lane with
+                        // nothing drawn into it is a second of black once per
+                        // loop, so a short clip repeats around the cycle.
+                        laneCount: manifest.frameLaneCount,
+                        framesPerSecond: manifest.framesPerSecond,
+                        maskFont: manifest.maskFontResource,
+                        maskPeriod: manifest.maskPeriodSeconds
                     )
                         .frame(width: crop.width * scale, height: crop.height * scale)
                         .offset(
@@ -281,12 +286,16 @@ struct BlinkMask: View {
     /// Shared with the lane texts so both sides of the mask agree on phase.
     let reference: Date
     let blinkOffset: TimeInterval
+    /// Which mask font gates this. The shipped one repeats every two seconds,
+    /// which is the whole loop a picture-built design used to get; the long one
+    /// is solid a second in ten.
+    var font = FontSetGenerator.blinkFontResourceName
 
     var body: some View {
         GeometryReader { geometry in
             let maxSize = max(geometry.size.width, geometry.size.height)
             Text(reference - blinkOffset, style: .timer)
-                .font(.custom(FontSetGenerator.blinkFontResourceName, size: maxSize))
+                .font(.custom(font, size: maxSize))
                 .centerAnimationGlyph(size: maxSize, isInGeometryReader: true)
         }
         .clipped()

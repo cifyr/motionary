@@ -685,7 +685,29 @@ struct BuildManifest: Codable, Equatable, Sendable {
     /// two-second loop, where the fonts get thirty out of the same cycle.
     var frameCount: Int?
 
+    /// The blink mask this design's picture stack was built against, in
+    /// seconds, and therefore how long its loop is.
+    ///
+    /// Nil means the two-second mask every picture-built design used before
+    /// longer ones existed - the widget falls back to that, which is what those
+    /// designs were built to play at.
+    var maskPeriod: Int?
+
     var isFrameDriven: Bool { (frameCount ?? 0) > 0 }
+
+    /// How long a picture-built loop runs, which is the mask's period.
+    var maskPeriodSeconds: TimeInterval { TimeInterval(maskPeriod ?? 2) }
+
+    var maskFontResource: String {
+        maskPeriod.flatMap { FontSetGenerator.blinkResource(forPeriod: $0) }
+            ?? FontSetGenerator.blinkFontResourceName
+    }
+
+    /// How many mask phases a picture stack covers: every second of the mask's
+    /// period holds `framesPerSecond` of them.
+    var frameLaneCount: Int {
+        maskPeriod == nil ? laneCount : Int(maskPeriodSeconds * Double(framesPerSecond))
+    }
 
     /// The app tiles to draw over the animation.
     ///

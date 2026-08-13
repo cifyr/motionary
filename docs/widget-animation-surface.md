@@ -383,12 +383,24 @@ that was expected to bite in the extension is paid somewhere this measurement
 cannot see. **What is measured is that it archives and renders**, up to 64
 frames at 1620px, which is past anything the loop length makes useful.
 
-**The real limit is the loop, not the budget.** One frame per lane and one mask
-phase per lane means the loop is exactly `laneCount / fps` = **2 seconds**, at
-16fps for 32 lanes or 32fps for 64. The font engine gets 30 seconds out of the
-same 2-second lane cycle by advancing a glyph within each lane — a dimension
-pictures do not have. So the runtime engine's shape is: **a 2-second loop, up to
-64 frames, at full widget resolution.**
+**The real limit was the mask, and it has since been lifted.** One frame per
+mask phase means the loop is exactly as long as the mask's own period, and
+`Custom-Regular` substitutes on the timer's seconds digits, mapping even seconds
+to a filled square and odd ones to nothing — a two-second pattern, and therefore
+a two-second loop.
+
+That is a property of one font's substitution table, not of the mechanism.
+`Tools/blink-font.py` rewrites those sixty substitutions so the square lands one
+second in four, six, ten or thirty, without changing the file's length, and the
+four resulting masks ship beside the original. **Measured in the lab, 2026-08-13:
+ten cards gated one second apart under the ten-second mask step through ten
+distinct cards in order and wrap.** On device, a 320-frame ten-second design
+loads all 320 frames at 12.2MB and archives clean with the extension at 9-14MB.
+
+So the runtime engine's shape is: **a loop as long as the clip, up to thirty
+seconds**, costing `period x fps` pictures - the stack has to cover the whole
+cycle, because a phase nothing was drawn into is a second of black once per
+loop.
 
 **The experiment, still worth 30 minutes.** One widget, three bands, on device
 (not Simulator — several of the relevant bugs are device-only):

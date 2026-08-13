@@ -45,12 +45,22 @@ struct MaskLabView: View {
             // rather than gating it.
             let side = max(geometry.size.width, geometry.size.height)
             ZStack {
-                half(band: band, half: 0, side: side)
-                // The second half as one gated group, exactly as the
-                // composition does it: a mask isolates a single lane only
-                // within half the stack.
-                half(band: band, half: 1, side: side)
-                    .mask { BlinkMask(reference: reference, blinkOffset: 1).frame(width: side, height: side) }
+                if phasing.spacing >= 1 {
+                    // Second-scale phases need no split. The shipped mask is
+                    // solid on even seconds, so it can only tell one lane from
+                    // another inside a half of the stack and the other half has
+                    // to be gated as a group. A mask solid one second in ten
+                    // makes each second exclusive on its own, which is the
+                    // whole question this setting exists to answer.
+                    half(band: band, half: 0, side: side, lanes: 0 ..< phasing.laneCount)
+                } else {
+                    half(band: band, half: 0, side: side)
+                    half(band: band, half: 1, side: side)
+                        .mask {
+                            BlinkMask(reference: reference, blinkOffset: 1, font: phasing.maskFont)
+                                .frame(width: side, height: side)
+                        }
+                }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
@@ -59,14 +69,20 @@ struct MaskLabView: View {
         .border(.white.opacity(0.25))
     }
 
-    private func half(band: MaskLab.Band, half: Int, side: CGFloat) -> some View {
+    private func half(
+        band: MaskLab.Band,
+        half: Int,
+        side: CGFloat,
+        lanes: Range<Int>? = nil
+    ) -> some View {
         ZStack {
-            ForEach(Array(phasing.lanes(half: half)), id: \.self) { lane in
+            ForEach(Array(lanes ?? phasing.lanes(half: half)), id: \.self) { lane in
                 content(band: band, card: phasing.card(forLane: lane))
                     .mask {
                         BlinkMask(
                             reference: reference,
-                            blinkOffset: phasing.blinkOffset(lane: lane)
+                            blinkOffset: phasing.blinkOffset(lane: lane),
+                            font: phasing.maskFont
                         )
                         .frame(width: side, height: side)
                     }

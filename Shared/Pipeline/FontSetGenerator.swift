@@ -39,6 +39,39 @@ struct FontSetGenerator {
     static let templateResourceName = "MotionTemplate-Regular"
     static let blinkFontResourceName = "Custom-Regular"
 
+    /// Blink masks with longer periods, for designs whose frames are pictures.
+    ///
+    /// The shipped mask keys on the timer's seconds and is solid on even ones,
+    /// so it repeats every two seconds - which is exactly why a picture-built
+    /// design could only be two seconds long. These are solid one second in
+    /// four, six, ten and thirty, so a design's loop can be any of those.
+    /// Verified in the mask lab: ten cards gated a second apart step through
+    /// ten distinct cards in order and wrap.
+    ///
+    /// Made by `Tools/blink-font.py`, which rewrites the substitution table of
+    /// the font above without changing its length. The period has to divide 60
+    /// because the substitution keys on the seconds digits, and thirty is the
+    /// longest useful one: the timer reference is anchored to a thirty-second
+    /// cycle, so a longer mask would not repeat with the picture.
+    static let blinkPeriods: [(seconds: Int, resource: String)] = [
+        (4, "Blnk04-Regular"),
+        (6, "Blnk06-Regular"),
+        (10, "Blnk10-Regular"),
+        (30, "Blnk30-Regular"),
+    ]
+
+    /// The shortest mask that covers a clip, because every second of period
+    /// costs `framesPerSecond` more pictures whether the clip fills them or
+    /// not - the stack has to cover the whole cycle or the widget goes black
+    /// for the seconds nothing was drawn into.
+    static func blinkPeriod(covering seconds: TimeInterval) -> (seconds: Int, resource: String) {
+        blinkPeriods.first { Double($0.seconds) >= seconds - 0.001 } ?? blinkPeriods[blinkPeriods.count - 1]
+    }
+
+    static func blinkResource(forPeriod seconds: Int) -> String? {
+        blinkPeriods.first { $0.seconds == seconds }?.resource
+    }
+
     enum Stage: Equatable, Sendable {
         case decoding(progress: Double)
         case analysing
