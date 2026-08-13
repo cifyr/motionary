@@ -589,6 +589,31 @@ struct FrameSetGenerator {
         return (0 ..< clips).map { base + ($0 < remainder ? 1 : 0) }
     }
 
+    /// The stack padded out to the mask's period, with the pause put where it
+    /// cannot cover a clip.
+    ///
+    /// The clips will not add up to the loop - a mask period has to divide
+    /// sixty, and 25.1s of clip is held by a thirty-second one - so the
+    /// remainder is drawn as nothing at all.
+    ///
+    /// It goes at the *front*. The mask is solid for a whole second, so at the
+    /// wrap the solid run straddles the stack: at t=30 exactly, lanes {0} and
+    /// {697...719} are solid together. The stack is one ZStack drawn in lane
+    /// order, so the highest lane is on top for that entire second - and a
+    /// pause lane is an opaque backdrop patch. With the pause last it painted
+    /// out the first `fps` lanes of the first clip, every loop. Measured on
+    /// Spidey Swing, whose first clip is 1.25s of motion: all but the last
+    /// quarter-second of it was erased, which read as a flicker of a swing that
+    /// clip three then performed in full.
+    ///
+    /// With the pause first, the lane that wins the wrap is the last real
+    /// frame, which holds a second longer instead.
+    static func paused<Frame>(_ frames: [Frame], lanes: Int, blank: Frame) -> [Frame] {
+        let gap = lanes - frames.count
+        guard gap > 0 else { return frames }
+        return repeatElement(blank, count: gap) + frames
+    }
+
     /// One clip in a shuffled programme, and how long it actually runs.
     private struct ProgramClip {
         let id: UUID?
@@ -1045,7 +1070,7 @@ struct FrameSetGenerator {
         )
         if gap > 0, let first = frames.first, let blank = Self.transparent(like: first) {
             Self.logger.info("the clips are \(gap) lanes short of \(lanes); drawing nothing there")
-            frames.append(contentsOf: repeatElement(blank, count: gap))
+            frames = Self.paused(frames, lanes: lanes, blank: blank)
         }
         let plate = sprites ? try? await pictures(
             design: design, spec: programSpec, source: clips[0].source,

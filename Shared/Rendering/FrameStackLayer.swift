@@ -54,6 +54,29 @@ struct FrameStackLayer: View {
         return ((lane % frameCount) + frameCount) % frameCount
     }
 
+    /// Which lane is actually visible `second` into the cycle.
+    ///
+    /// The mask is solid for a whole second, so `framesPerSecond` lanes are
+    /// unmasked at once and the frames are opaque - the highest lane wins,
+    /// because `stack` is one ZStack drawn in lane order and later is on top.
+    ///
+    /// The part worth pinning is the wrap. Lane `L` is solid when
+    /// `floor(second - L/fps)` opens a period, and the lane offsets span
+    /// exactly one period, so at the wrap the run is split across both ends of
+    /// the stack: at t=30 with 720 lanes at 24fps, lanes {0} and {697...720-1}
+    /// are solid together and lane 719 covers lane 0. The last second of the
+    /// stack is therefore drawn over the first, which is why the pause has to
+    /// be at the front of it. See `FrameSetGenerator.paused`.
+    static func topLane(atCycleSecond second: Double, lanes: Int, framesPerSecond: Int) -> Int {
+        let fps = Double(max(1, framesPerSecond))
+        let period = Double(max(1, lanes)) / fps
+        let solid = (0 ..< max(1, lanes)).filter {
+            let shown = (second - Double($0) / fps).rounded(.down)
+            return shown.truncatingRemainder(dividingBy: period) == 0
+        }
+        return solid.max() ?? 0
+    }
+
     var body: some View {
         GeometryReader { geometry in
             // The mask's glyph is centred in a square canvas, so the square has
