@@ -85,4 +85,32 @@ enum FramePayloadPlan {
         guard !fits(totalBytes: totalBytes) else { return nil }
         return nextQuality(after: quality)
     }
+
+    /// A frame set will not shrink below this, however many lanes ask for it.
+    ///
+    /// Half in each direction is a quarter of the pixels. Past that the frames
+    /// are soft enough to see, and a long clip is better served by fewer of
+    /// them than by a smear.
+    static let minimumShrink = 0.5
+
+    /// How far to shrink the frames so the set fits, once quality is spent.
+    ///
+    /// This is what buys a frame rate back. A clip's lanes cost `period x fps`
+    /// pictures and they all go in one archive, so at ten seconds and 32fps the
+    /// set is five times what it is at two - and over the archive limit the
+    /// widget is not drawn at all. Compressing harder answers that with
+    /// blocking, which is worse on a moving picture than a softer one is:
+    /// JPEG bytes go roughly with pixel count, so the size is what should give.
+    ///
+    /// Returns 1 when nothing needs to shrink. Deliberately a single step
+    /// computed from a measurement rather than a ladder walked one rung at a
+    /// time - each pass re-encodes every frame in the loop.
+    static func shrink(toFit budget: Int = byteBudget, measured totalBytes: Int) -> Double {
+        guard totalBytes > budget, budget > 0 else { return 1 }
+        // Area scales with the square of the linear factor, and a little under,
+        // because a smaller JPEG keeps proportionally more of its header and
+        // its low frequencies.
+        let linear = (Double(budget) / Double(totalBytes)).squareRoot() * 0.95
+        return max(minimumShrink, min(1, linear))
+    }
 }

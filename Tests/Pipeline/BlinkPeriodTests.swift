@@ -83,18 +83,17 @@ final class BlinkPeriodTests: XCTestCase {
             XCTAssertLessThanOrEqual(plan.framesPerSecond, spec.framesPerSecond)
         }
 
-        // The trade, stated: a two-second clip keeps every frame it was
-        // authored with, and a ten-second one covers five times as long at
-        // twelve.
+        // A clip does not lose its frame rate for being long: ten seconds runs
+        // at the same rate two seconds does, and pays in resolution instead.
         XCTAssertEqual(FrameSetGenerator.plan(for: spec, clipSeconds: 2).framesPerSecond, 32)
-        XCTAssertEqual(FrameSetGenerator.plan(for: spec, clipSeconds: 10).framesPerSecond, 12)
+        XCTAssertEqual(FrameSetGenerator.plan(for: spec, clipSeconds: 10).framesPerSecond, 32)
     }
 
     /// Both ceilings are measured, and getting them wrong puts a black widget
     /// on a Home Screen with every report still saying ok, so they are pinned.
     func testTheCeilingsAreWhatWasMeasured() {
         XCTAssertEqual(FrameSetGenerator.provenLoopSeconds, 10)
-        XCTAssertEqual(FrameSetGenerator.provenLaneCount, 128)
+        XCTAssertEqual(FrameSetGenerator.provenLaneCount, 320)
     }
 
     /// A manifest from before longer masks existed has no period, and has to go

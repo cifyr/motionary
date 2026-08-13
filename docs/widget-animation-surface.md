@@ -427,8 +427,15 @@ photographs measured, because they were taken on a Simulator.
 So the runtime engine's shape is: **a loop as long as the clip, up to ten
 seconds**, costing `period x fps` pictures - the stack has to cover the whole
 cycle, because a phase nothing was drawn into is a second of black once per
-loop. Length is paid for in frame rate rather than in seconds: the lanes are
-budgeted, so a two-second clip keeps all 32fps and a ten-second one runs at 12.
+loop. **Length is paid for in resolution, not in frame rate and not in seconds.**
+A ten-second clip needs five times the frames a two-second one does and they all
+go in one archive, so something has to give; JPEG bytes go roughly with pixel
+count, and on a moving picture softness is far less visible than blocking, so
+`FramePayloadPlan.shrink(toFit:measured:)` takes the frames down in size - to a
+floor of half - before the quality ladder is touched at all. Measured on a Home
+Screen: Spidey Swing at ten seconds and 32fps, 320 frames, comes to 6.4MB and
+draws and animates, and the moving figure is not visibly softer than the
+120-frame build it replaced.
 
 **How to photograph this.** The extension's own report cannot answer "is there a
 picture", so a widget is judged by taking one. `scratchpad/lane-sweep.sh` in the

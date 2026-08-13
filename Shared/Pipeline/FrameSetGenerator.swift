@@ -78,13 +78,16 @@ struct FrameSetGenerator {
     /// fits, so seconds were never the ceiling and neither, within reach, is
     /// this.
     ///
-    /// What it still buys is quality and headroom. The budget is spent across
-    /// the lanes, so 128 leaves each frame about 64KB where 320 would leave
-    /// 25KB and soften every one of them; and each lane is a full-screen
-    /// picture the render server has to rasterise, which on a phone - the one
-    /// place none of the photographs were taken - costs memory the simulator
-    /// never had to find.
-    static let provenLaneCount = 128
+    /// So the ceiling is where the *pictures* stop being worth having rather
+    /// than where the widget stops drawing. The byte budget is shared across
+    /// the lanes and `FramePayloadPlan.shrink(toFit:measured:)` spends
+    /// resolution to keep them, down to half size; past 320 the frames are
+    /// small enough that the loop would be better served by fewer of them.
+    ///
+    /// 320 is also ten seconds at the 32fps the font-built path gets, which is
+    /// the rate this is measured against - a delivered design should not look
+    /// slower than a compiled one for being delivered.
+    static let provenLaneCount = 320
 
     /// `MOTIONARY_LANE_BUDGET` moves the ceiling for one build, so where it
     /// actually falls can be bisected without a recompile between points.
@@ -125,21 +128,26 @@ struct FrameSetGenerator {
     }
 
     /// Crops, tints, edge-corrects and encodes, shrinking a frame first when it
-    /// is over the renderer's pixel-area cap.
+    /// is over the renderer's pixel-area cap or when the set as a whole will
+    /// not fit the archive.
     ///
-    /// Over that cap the render is dropped rather than refused: the frame comes
-    /// out blank and the widget looks broken with nothing logged anywhere. On
-    /// the calibrated phone a crop cannot reach it - the widget frame is 1.75M
-    /// px against a cap around 2.1M - so this is what keeps that true on a
-    /// device whose frame is larger.
+    /// Over the pixel cap the render is dropped rather than refused: the frame
+    /// comes out blank and the widget looks broken with nothing logged
+    /// anywhere. On the calibrated phone a crop cannot reach it - the widget
+    /// frame is 1.75M px against a cap around 2.1M - so this is what keeps that
+    /// true on a device whose frame is larger.
+    ///
+    /// `shrink` is the other reason: it is what a long clip spends to keep its
+    /// frame rate. See `FramePayloadPlan.shrink(toFit:measured:)`.
     private func encode(
         frames: [CGImage],
         design: DesignDocument,
         crop: CGRect,
-        quality: Double
+        quality: Double,
+        shrink: Double = 1
     ) throws -> [Data] {
         let encoder = FrameEncoder(crop: crop, quality: quality, widgetRect: design.widgetRect)
-        let scale = FramePayloadPlan.scale(for: crop.size)
+        let scale = FramePayloadPlan.scale(for: crop.size) * shrink
         guard scale < 1 else { return try encoder.frameData(frames) }
 
         Self.logger.warning("""
@@ -212,12 +220,29 @@ struct FrameSetGenerator {
         onStage(.encoding(progress: 0))
         var quality = FramePayloadPlan.bestQuality
         var data = try encode(frames: frames, design: design, crop: crop, quality: quality)
-        while let lower = FramePayloadPlan.retry(
-            totalBytes: data.reduce(0) { $0 + $1.count },
-            at: quality
-        ) {
+        func measured() -> Int { data.reduce(0) { $0 + $1.count } }
+
+        // Size before compression. What will not fit is a long clip's frame
+        // count, and the whole point of keeping the count is that the picture
+        // moves - on a moving picture blocking is more visible than softness,
+        // and the widget scales the frames back up anyway.
+        let shrink = FramePayloadPlan.shrink(measured: measured())
+        if shrink < 1 {
+            Self.logger.warning("""
+            \(data.count) frames come to \(measured() / 1024)KB, over the archive limit; \
+            shrinking them to \(Int(shrink * 100))% rather than dropping frames
+            """)
+            data = try encode(
+                frames: frames, design: design, crop: crop, quality: quality, shrink: shrink
+            )
+        }
+        // Then compression, for whatever is still over: a set at the smallest
+        // size this will go to can still be too big for one archive.
+        while let lower = FramePayloadPlan.retry(totalBytes: measured(), at: quality) {
             quality = lower
-            data = try encode(frames: frames, design: design, crop: crop, quality: quality)
+            data = try encode(
+                frames: frames, design: design, crop: crop, quality: quality, shrink: shrink
+            )
             try Task.checkCancellation()
         }
         onStage(.encoding(progress: 1))

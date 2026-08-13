@@ -41,6 +41,38 @@ final class FramePayloadPlanTests: XCTestCase {
         )
     }
 
+    /// A set that fits is never shrunk: the frames are sized to the widget, and
+    /// softening a design that had room is a cost nobody asked for.
+    func testASetThatFitsIsNotShrunk() {
+        XCTAssertEqual(FramePayloadPlan.shrink(measured: 1_000_000), 1)
+        XCTAssertEqual(FramePayloadPlan.shrink(measured: FramePayloadPlan.byteBudget), 1)
+    }
+
+    /// Over budget, the frames give size rather than the loop giving frames.
+    /// The shrink has to actually get the set under, or it has bought nothing
+    /// and the widget is still black.
+    func testAnOversizedSetShrinksFarEnoughToFit() {
+        let budget = FramePayloadPlan.byteBudget
+        for over in [1.2, 2.0, 3.5] {
+            let measured = Int(Double(budget) * over)
+            let shrink = FramePayloadPlan.shrink(measured: measured)
+            XCTAssertLessThan(shrink, 1)
+            XCTAssertGreaterThanOrEqual(shrink, FramePayloadPlan.minimumShrink)
+            guard shrink > FramePayloadPlan.minimumShrink else { continue }
+            // Bytes go roughly with pixel count, which is the square of the
+            // linear factor.
+            let projected = Double(measured) * shrink * shrink
+            XCTAssertLessThanOrEqual(projected, Double(budget))
+        }
+    }
+
+    /// It stops rather than shrinking to nothing: past half size the quality
+    /// ladder takes over and, failing that, the set is written anyway.
+    func testItWillNotShrinkPastTheFloor() {
+        let hopeless = FramePayloadPlan.byteBudget * 50
+        XCTAssertEqual(FramePayloadPlan.shrink(measured: hopeless), FramePayloadPlan.minimumShrink)
+    }
+
     func testASetThatFitsIsNotReEncoded() {
         XCTAssertNil(FramePayloadPlan.retry(totalBytes: 1_000_000, at: 0.92))
         XCTAssertTrue(FramePayloadPlan.fits(totalBytes: FramePayloadPlan.byteBudget))
