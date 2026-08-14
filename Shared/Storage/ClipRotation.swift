@@ -48,6 +48,14 @@ enum ClipRotation {
         return options[(position + 1) % options.count]
     }
 
+    /// Whether this design has anything to rotate through.
+    ///
+    /// The setting itself belongs to the phone, so it is offered whatever design
+    /// is open; this only decides what the note under it says.
+    static func canRotate(_ manifest: BuildManifest) -> Bool {
+        next(after: nil, in: manifest) != nil
+    }
+
     /// Moves the design on, and says what it landed on so the caller can log or
     /// show it. Nil means nothing moved, which is the usual case.
     @discardableResult
