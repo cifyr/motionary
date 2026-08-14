@@ -25,6 +25,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.caden.Motionary
         INFOPLIST_FILE: App/Info.plist
         CODE_SIGN_ENTITLEMENTS: App/Motionary.entitlements
+        # Without this the Home Screen shows a blank placeholder and App Store
+        # Connect refuses the build outright.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # Lets the FONT_EMBED_PROBE build still link if a future SDK stops
         # exporting the two private `_wantsCustomFontsEmbeddedInArchive`
         # accessors. It does NOT make a found symbol weak - the reference stays
