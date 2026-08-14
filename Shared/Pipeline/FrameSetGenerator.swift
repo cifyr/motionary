@@ -666,18 +666,20 @@ struct FrameSetGenerator {
     /// sixty, and 25.1s of clip is held by a thirty-second one - so the
     /// remainder is drawn as nothing at all.
     ///
-    /// It goes at the *front*. The mask is solid for a whole second, so at the
-    /// wrap the solid run straddles the stack: at t=30 exactly, lanes {0} and
-    /// {697...719} are solid together. The stack is one ZStack drawn in lane
-    /// order, so the highest lane is on top for that entire second - and a
-    /// pause lane is an opaque backdrop patch. With the pause last it painted
-    /// out the first `fps` lanes of the first clip, every loop. Measured on
-    /// Spidey Swing, whose first clip is 1.25s of motion: all but the last
-    /// quarter-second of it was erased, which read as a flicker of a swing that
-    /// clip three then performed in full.
+    /// It goes at the *front*, so the still falls at the start of the cycle
+    /// rather than partway through whichever clip happened to end there.
     ///
-    /// With the pause first, the lane that wins the wrap is the last real
-    /// frame, which holds a second longer instead.
+    /// This used to be load-bearing rather than a preference. The stack's last
+    /// second is still solid from the previous pass during the first second
+    /// after a wrap, and with the pause last those opaque backdrop patches were
+    /// on top - painting out the opening `fps` lanes of the first clip, every
+    /// loop. Measured on Spidey Swing, whose first clip is 1.25s of motion: all
+    /// but the last quarter-second of it was erased, which read as a flicker of
+    /// a swing that clip three then performed in full.
+    ///
+    /// `FrameStackLayer.tailStart` gates that tail as a group now, so the wrap
+    /// no longer covers anything and this is free to be the plain choice it
+    /// looks like.
     static func paused<Frame>(_ frames: [Frame], lanes: Int, blank: Frame) -> [Frame] {
         let gap = lanes - frames.count
         guard gap > 0 else { return frames }
