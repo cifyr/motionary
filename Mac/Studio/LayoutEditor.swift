@@ -77,6 +77,14 @@ struct LayoutEditor: View {
     @State private var canvasViewport: CGSize = .zero
     /// The lines the current drag is locked to, drawn while it lasts.
     @State private var activeGuides: [SnapGuide] = []
+    /// The history sheet, and what it is showing. Read afresh each time it
+    /// opens rather than watched: the autosave writes versions from the window
+    /// above this one, and a list held open for an hour would be stale anyway.
+    @State var showingVersions = false
+    @State var versions: [DesignVersion] = []
+    /// What a restore had to leave behind, shown until the sheet is opened
+    /// again. Nil after a clean one.
+    @State var restoreNote: String?
 
     /// The one thing selected, when exactly one is. Most of the inspector only
     /// makes sense for a single item; alignment is what the rest is for.
@@ -1576,6 +1584,17 @@ struct LayoutEditor: View {
                 StudioTheme.eyebrow("Animation variants").foregroundStyle(StudioTheme.textTertiary)
                 Spacer()
                 Button("Add...") { importVariants() }.buttonStyle(.link)
+            }
+
+            // Above the list, because it is about the clip that was dropped in
+            // rather than about any setting below it. A clip longer than the
+            // widget can loop used to be cut with nothing said anywhere.
+            if let notice = FrameSetGenerator.lengthNotice(for: design) {
+                Text(notice.text)
+                    .font(.caption2)
+                    .foregroundStyle(StudioTheme.accentInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 2)
             }
 
             if design.variants.isEmpty {

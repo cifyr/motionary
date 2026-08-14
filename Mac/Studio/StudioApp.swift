@@ -449,11 +449,13 @@ struct StudioView: View {
                     // not be the thing that loses an afternoon's placement.
                     onCancel: { edited in
                         try? edited.store.save(edited.design)
+                        keepVersion(of: edited, reason: .closed)
                         prepared = nil
                         saved = StudioPipeline.saved()
                     },
                     onBuild: { edited in
                         try? edited.store.save(edited.design)
+                        keepVersion(of: edited, reason: .built)
                         prepared = nil
                         install(edited)
                     }
@@ -1250,6 +1252,13 @@ struct StudioView: View {
         }
     }
 
+    /// Marks the boundary the editor is being left at. Failures are logged by
+    /// `DesignVersions` itself - this is on the way out of a screen, so there
+    /// is nowhere left to show a message that would not be gone a frame later.
+    private func keepVersion(of edited: StudioPipeline.Prepared, reason: DesignVersion.Reason) {
+        _ = try? DesignVersions(store: edited.store).record(edited.design, reason: reason)
+    }
+
     private func install(_ edited: StudioPipeline.Prepared) {
         // Building is the step that genuinely needs the project folder, so a
         // missing one is asked for right here - the chooser button lives on
@@ -1361,6 +1370,9 @@ private struct EditorWindow: View {
             lastSaved = prepared.design
             undo.apply = { prepared.design = $0 }
             undo.current = { prepared.design }
+            // Before anything in this session can change it, so there is always
+            // a row that says "how it was when I sat down".
+            keep(prepared.design, .opened)
         }
         .onChange(of: prepared.design) { old, _ in
             undo.designChanged(from: old, undoManager: windowUndoManager)
@@ -1386,6 +1398,25 @@ private struct EditorWindow: View {
                 // looks exactly like one that is working.
                 savedNote = "could not save: \(error.localizedDescription)"
             }
+            // After the save, and only sometimes: `DesignVersions` spaces
+            // editing snapshots out, because the autosave fires every time a
+            // drag pauses and a history of that is not a history.
+            keep(prepared.design, .edited)
+        }
+    }
+
+    /// This design's history. Cheap to make - it is a path and two numbers -
+    /// so it is remade per call rather than held in state that would have to
+    /// be kept in step with `prepared`.
+    private var versions: DesignVersions { DesignVersions(store: prepared.store) }
+
+    private func keep(_ document: DesignDocument, _ reason: DesignVersion.Reason) {
+        do {
+            try versions.record(document, reason: reason)
+        } catch {
+            // Same place the autosave reports itself, for the same reason: a
+            // history that silently stopped being written is worse than none.
+            savedNote = "could not keep a version: \(error.localizedDescription)"
         }
     }
 }

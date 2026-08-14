@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 import os
 
 enum MediaImportError: Error, CustomStringConvertible {
+    case missing(url: URL)
     case unreadable(url: URL, underlying: Error?)
     case noVideoTrack(url: URL)
     case notAnimatable(url: URL, kind: String)
@@ -15,8 +16,13 @@ enum MediaImportError: Error, CustomStringConvertible {
 
     var description: String {
         switch self {
+        // Said plainly, because AVFoundation does not: a file that is not there
+        // comes back as "an unknown error occurred (-17913)", which reads like a
+        // damaged clip and sends you looking at the wrong thing.
+        case .missing(let url):
+            "media: there is no file at \(url.path); the clip has been moved or deleted"
         case .unreadable(let url, let underlying):
-            "media: could not read \(url.lastPathComponent)\(underlying.map { ": \($0)" } ?? "")"
+            "media: could not read \(url.lastPathComponent)\(underlying.map { ": \(Self.plainly($0))" } ?? "")"
         case .noVideoTrack(let url):
             "media: \(url.lastPathComponent) has no video track"
         case .notAnimatable(let url, let kind):
@@ -28,6 +34,19 @@ enum MediaImportError: Error, CustomStringConvertible {
         case .renderFailed(let index):
             "media: could not rasterise frame \(index)"
         }
+    }
+
+    /// The readable half of a Foundation error, with the domain and code kept.
+    ///
+    /// AVFoundation's own description is a paragraph of UserInfo with a
+    /// percent-encoded URL in it, and the one sentence worth reading - "This
+    /// media may be damaged" - sits in the middle of it.
+    static func plainly(_ error: Error) -> String {
+        let error = error as NSError
+        let sentences = [error.localizedDescription, error.localizedFailureReason]
+            .compactMap { $0 }
+            .joined(separator: " - ")
+        return "\(sentences) (\(error.domain) \(error.code))"
     }
 }
 
@@ -385,12 +404,32 @@ struct MediaFrameExtractor {
 
     // MARK: - Video
 
-    private func videoSummary() async throws -> MediaSummary {
-        let asset = AVURLAsset(url: url)
+    /// The clip's video track, or a refusal that names what is actually wrong.
+    ///
+    /// One place, because both callers needed it and only one of them had it:
+    /// `videoFrames` loaded its tracks outside any catch, so a damaged or
+    /// missing clip escaped as a raw `AVFoundationErrorDomain` dump with the
+    /// file's percent-encoded URL in it.
+    private func loadVideoTrack(of asset: AVURLAsset) async throws -> AVAssetTrack {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw MediaImportError.missing(url: url)
+        }
         do {
             guard let track = try await asset.loadTracks(withMediaType: .video).first else {
                 throw MediaImportError.noVideoTrack(url: url)
             }
+            return track
+        } catch let error as MediaImportError {
+            throw error
+        } catch {
+            throw MediaImportError.unreadable(url: url, underlying: error)
+        }
+    }
+
+    private func videoSummary() async throws -> MediaSummary {
+        let asset = AVURLAsset(url: url)
+        do {
+            let track = try await loadVideoTrack(of: asset)
             let (rate, range, size) = try await track.load(.nominalFrameRate, .timeRange, .naturalSize)
             let seconds = range.duration.seconds
             let fps = rate > 0 ? Double(rate) : 30
@@ -415,9 +454,7 @@ struct MediaFrameExtractor {
         progress: (@Sendable (Double) -> Void)?
     ) async throws -> [CGImage] {
         let asset = AVURLAsset(url: url)
-        guard try await asset.loadTracks(withMediaType: .video).first != nil else {
-            throw MediaImportError.noVideoTrack(url: url)
-        }
+        _ = try await loadVideoTrack(of: asset)
 
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
@@ -447,6 +484,9 @@ struct MediaFrameExtractor {
     // MARK: - GIF
 
     private func imageSource() throws -> CGImageSource {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw MediaImportError.missing(url: url)
+        }
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
             throw MediaImportError.unreadable(url: url, underlying: nil)
         }

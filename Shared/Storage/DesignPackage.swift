@@ -72,11 +72,33 @@ enum DesignPackage {
 
         var bytes: Int { frames + companions }
         var fits: Bool { bytes <= FramePayloadPlan.archiveLimit }
+
+        /// Where a clip sits against the two numbers, which are not the same
+        /// one. `byteBudget` is what a build aims at; `archiveLimit` is where
+        /// the widget stops being drawn. Everything between them ships without
+        /// complaint and is within a few per cent of a black Home Screen, which
+        /// is how a 20-second loop measured 8.9MB and said nothing.
+        enum Headroom: String, Sendable {
+            case comfortable
+            case tight
+            case over
+        }
+
+        var headroom: Headroom {
+            if bytes > FramePayloadPlan.archiveLimit { return .over }
+            return bytes > FramePayloadPlan.byteBudget ? .tight : .comfortable
+        }
+
         var summary: String {
-            String(
+            let note = switch headroom {
+            case .comfortable: ""
+            case .tight: "  CLOSE TO THE ARCHIVE LIMIT"
+            case .over: "  OVER THE ARCHIVE LIMIT"
+            }
+            return String(
                 format: "%@ %.2fMB (%.2f frames + %.2f artwork)%@",
                 clip, Double(bytes) / 1_048_576, Double(frames) / 1_048_576,
-                Double(companions) / 1_048_576, fits ? "" : "  OVER THE ARCHIVE LIMIT"
+                Double(companions) / 1_048_576, note
             )
         }
     }

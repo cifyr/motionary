@@ -94,6 +94,9 @@ targets:
       # purpose, so the step mapping is covered rather than only looked at.
       - path: Mac/Studio/StudioRunPlan.swift
       - path: Mac/Library/SkinLibrary.swift
+      # The way back after the window is closed. Snapshot policy and pruning
+      # are plain Foundation, and getting either wrong loses work silently.
+      - path: Mac/Library/DesignVersions.swift
       # Applying a set decides what a slot can show on the phone, so the pure
       # apply rules are covered with the rest of the tile logic.
       - path: Mac/Library/SkinSets.swift
@@ -171,6 +174,9 @@ targets:
       # Sprite placement travels with the frames the studio writes.
       - path: Shared/Model/FrameRect.swift
       - path: Shared/Model/WidgetFamilyCompatibility.swift
+      # One set of scheme tokens for both apps, so the studio's palette and the
+      # phone's cannot drift apart.
+      - path: Shared/UI/EmberPalette.swift
       # The editor places the same tiles the widget draws, so it shares the
       # tile view, the catalogue, the snapping, and the icon pipeline.
       - path: Shared/Icons/IconAsset.swift

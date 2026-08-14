@@ -31,6 +31,23 @@ until someone measures rather than looks.
   This is the constraint the whole project is shaped around — see
   [HOW-IT-WORKS.md](HOW-IT-WORKS.md#the-constraint-everything-follows-from).
 
+## The lane stack
+
+- **The stack's last second is still solid during the first second after a
+  wrap.** The blink mask is solid for a whole second and the lane offsets span
+  exactly one period, so both ends of the stack are lit at once at the wrap —
+  and the ZStack draws in lane order, so the tail wins. Left flat, an 80-lane
+  stack at 16fps held its final frame for fifteen steps and then jumped to lane
+  fifteen: a second of stillness every five, with the opening second of the clip
+  never drawn and 65 of 80 frames ever reaching the screen. The tail is gated as
+  a group for exactly this reason — see `FrameStackLayer.tailStart`. It has
+  produced two separate reported bugs, "the first clip replays" and "there is a
+  pause between loops", which are the same arithmetic seen from two designs.
+
+- **Both faults are invisible in a screenshot and nearly invisible in a fast
+  clip.** The photo design showed it plainly because a fifth of its loop was the
+  freeze; Spidey lost 31 frames of 480 and read as almost right.
+
 ## Colour and pixels
 
 - **A `CGContext` fill is colour-managed.** Filling 200 and reading back 210 is

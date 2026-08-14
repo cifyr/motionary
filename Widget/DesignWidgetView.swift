@@ -391,8 +391,7 @@ struct DesignWidgetView: View {
         \(status.succeeded ? "OK  " : "FAIL") \(entry.isPreview ? "GALLERY" : "PLACED ") \
         \(source?.origin ?? "none")/\(source?.scope ?? "-") \
         anim=\(source?.fontsUsable == true) \
-        \(Int((Self.lastRenderedSize.width * DeviceGeometry.scale).rounded()))x\
-        \(Int((Self.lastRenderedSize.height * DeviceGeometry.scale).rounded()))px \
+        \(WidgetStatus.sizeNote(Self.lastRenderedSize, scale: DeviceGeometry.scale)) \
         \(status.memoryFootprintMB)MB
         """)
         return true

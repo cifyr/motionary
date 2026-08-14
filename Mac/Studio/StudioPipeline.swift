@@ -455,10 +455,19 @@ struct StudioPipeline: Sendable {
             manifest.hasShuffledClipProgram
                 ? ", \(manifest.clipProgram?.count ?? 0) clips shuffled" : "",
             heaviest.map {
-                String(format: ", %.1fMB per archive%@", Double($0.bytes) / 1_048_576,
-                       $0.fits ? "" : " - OVER THE LIMIT, the widget will drop lanes to fit")
+                let note = switch $0.headroom {
+                case .comfortable: ""
+                case .tight: " - close to the limit, and a black widget is what going over looks like"
+                case .over: " - OVER THE LIMIT, the widget will drop lanes to fit"
+                }
+                return String(format: ", %.1fMB per archive%@", Double($0.bytes) / 1_048_576, note)
             } ?? ""
         ))
+        // Last, so it is the line left on screen: a clip that ends early is the
+        // thing people notice and the thing this used to say nothing about.
+        if let notice = FrameSetGenerator.lengthNotice(for: design) {
+            onProgress(notice.text)
+        }
         return destination
     }
 

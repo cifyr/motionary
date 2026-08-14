@@ -16,6 +16,7 @@ struct SlotSettingsView: View {
     @State private var variantID: UUID?
     /// Working copies, so the rows follow the field rather than the store -
     /// which is UserDefaults, and SwiftUI does not observe it.
+    @State private var rotates = false
     @State private var tapsOpenAPage = false
     @State private var choice = BackgroundTap.engines[0].id
     @State private var address = ""
@@ -35,7 +36,7 @@ struct SlotSettingsView: View {
                         .pickerStyle(.inline)
                         .labelsHidden()
                     } header: {
-                        Text("Animation")
+                        Text("Animation").emberLabel()
                     } footer: {
                         Text("""
                         The same design with a different clip in the animated \
@@ -43,6 +44,36 @@ struct SlotSettingsView: View {
                         icon steps through these too.
                         """)
                     }
+                }
+
+                // Outside the Animation section on purpose. That section only
+                // appears for a design that has clips to pick between, and this
+                // setting is the phone's rather than the design's - hiding it
+                // behind whichever design happened to be open is what made it
+                // look like it was never built.
+                Section {
+                    Toggle("Change the animation each time I open Motionary", isOn: Binding(
+                        get: { rotates },
+                        set: { on in
+                            rotates = on
+                            ClipRotation.isEnabled = on
+                        }
+                    ))
+                } header: {
+                    Text("Every time you open the app").emberLabel()
+                } footer: {
+                    Text(ClipRotation.canRotate(manifest)
+                         ? """
+                         Steps to the next clip in the same order the list \
+                         above walks, for every design on this phone rather \
+                         than this one alone.
+                         """
+                         : """
+                         Steps to the next clip, for every design on this phone. \
+                         This one has only a single animation built in, so \
+                         nothing here will change until a design with several \
+                         clips is installed.
+                         """)
                 }
 
                 Section {
@@ -94,12 +125,12 @@ struct SlotSettingsView: View {
                             if BackgroundTap.url(for: address) == nil {
                                 Text("That is not a web address, so nothing will answer the tap.")
                                     .font(.caption2)
-                                    .foregroundStyle(.orange)
+                                    .foregroundStyle(Color.emberAccent)
                             }
                         }
                     }
                 } header: {
-                    Text("The space between the icons")
+                    Text("The space between the icons").emberLabel()
                 } footer: {
                     Text(BackgroundTap.destinationChoice?.isApp == true
                          ? """
@@ -131,12 +162,16 @@ struct SlotSettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            // On the list itself: the modifier hides the list's own background,
+            // and outside the navigation stack there is no list to hide.
+            .emberSheet()
         }
         .preferredColorScheme(.dark)
         .onAppear {
             // Validated against this build, so a stale stored id shows as the
             // Standard row it will actually draw as.
             variantID = VariantChoice.resolved(in: manifest)?.id
+            rotates = ClipRotation.isEnabled
             tapsOpenAPage = BackgroundTap.isEnabled
             choice = BackgroundTap.choice
             address = BackgroundTap.customAddress

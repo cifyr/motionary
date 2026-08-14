@@ -54,25 +54,68 @@ struct FrameStackLayer: View {
         return ((lane % frameCount) + frameCount) % frameCount
     }
 
-    /// Which lane is actually visible `second` into the cycle.
+    /// Where the stack's last second begins.
+    ///
+    /// These lanes are gated as a group as well as individually, and that group
+    /// gate is the whole reason a loop plays without stopping.
     ///
     /// The mask is solid for a whole second, so `framesPerSecond` lanes are
-    /// unmasked at once and the frames are opaque - the highest lane wins,
-    /// because `stack` is one ZStack drawn in lane order and later is on top.
+    /// unmasked at once and the highest wins - `stack` is one ZStack in lane
+    /// order and later is on top. Lane `L` is solid when `floor(second - L/fps)`
+    /// opens a period, and the lane offsets span exactly one period, so during
+    /// the first second after a wrap the stack's last second is *still* solid
+    /// from the previous pass. Being last, it sits on top of the frames that
+    /// should be playing.
     ///
-    /// The part worth pinning is the wrap. Lane `L` is solid when
-    /// `floor(second - L/fps)` opens a period, and the lane offsets span
-    /// exactly one period, so at the wrap the run is split across both ends of
-    /// the stack: at t=30 with 720 lanes at 24fps, lanes {0} and {697...720-1}
-    /// are solid together and lane 719 covers lane 0. The last second of the
-    /// stack is therefore drawn over the first, which is why the pause has to
-    /// be at the front of it. See `FrameSetGenerator.paused`.
+    /// Left flat that is a pause between loops. An 80-lane stack at 16fps held
+    /// its final frame for fifteen steps and then jumped to lane fifteen: a
+    /// second of stillness every five, and the first second of the clip never
+    /// seen at all. Only 65 of its 80 frames ever reached the screen.
+    ///
+    /// The two-second engine has always split its stack in half for exactly
+    /// this reason. This is that split generalised: at a two-second period the
+    /// two are the same lanes and the same offset.
+    static func tailStart(lanes: Int, framesPerSecond: Int) -> Int {
+        max(1, max(1, lanes) - max(1, framesPerSecond))
+    }
+
+    /// The group gate's offset, in the terms `BlinkMask` takes it.
+    ///
+    /// `BlinkMask` draws `Text(reference - blinkOffset, style: .timer)`, so the
+    /// seconds it reads are `cycleSecond + blinkOffset`: a *positive* offset
+    /// makes the mask solid earlier in the period, not later. The tail wants
+    /// the period's last second, which is `-(period - 1)`.
+    ///
+    /// This is the one line that has to be derived rather than copied. At a two
+    /// second period `+1` and `-1` are the same second, so the sign was
+    /// invisible in the only construction that had ever used it - and carrying
+    /// the `+1` across to a five-second period gated the tail on second one
+    /// instead of second four. That put a one-second freeze at the *end* of
+    /// every loop: during the last second the tail is off and the low lanes
+    /// have all gone quiet, so lane 63 held until the wrap.
+    static func tailGateOffset(maskPeriod: TimeInterval) -> TimeInterval {
+        1 - maskPeriod
+    }
+
+    /// Which lane is actually visible `second` into the cycle.
+    ///
+    /// Models both gates - the per-lane one and the group one over `tailStart`
+    /// - and models the group one through `tailGateOffset` rather than through
+    /// what it is meant to do, because the sign of that offset is exactly the
+    /// thing that has been wrong.
     static func topLane(atCycleSecond second: Double, lanes: Int, framesPerSecond: Int) -> Int {
         let fps = Double(max(1, framesPerSecond))
-        let period = Double(max(1, lanes)) / fps
-        let solid = (0 ..< max(1, lanes)).filter {
-            let shown = (second - Double($0) / fps).rounded(.down)
-            return shown.truncatingRemainder(dividingBy: period) == 0
+        let lanes = max(1, lanes)
+        let period = Double(lanes) / fps
+        let tail = tailStart(lanes: lanes, framesPerSecond: framesPerSecond)
+        // Read exactly as the mask reads it: the gate is solid while the timer
+        // it drives shows a second that opens a period.
+        let gateSecond = (second + tailGateOffset(maskPeriod: period)).rounded(.down)
+        let tailDrawn = gateSecond.truncatingRemainder(dividingBy: period) == 0
+        let solid = (0 ..< lanes).filter { lane in
+            let shown = (second - Double(lane) / fps).rounded(.down)
+            guard shown.truncatingRemainder(dividingBy: period) == 0 else { return false }
+            return lane < tail || tailDrawn
         }
         return solid.max() ?? 0
     }
@@ -86,37 +129,33 @@ struct FrameStackLayer: View {
             let side = max(geometry.size.width, geometry.size.height)
             let reference = TimerFontSpec.cycleAlignedReference()
             let lanes = max(1, laneCount)
-            let half = max(1, lanes / 2)
+            // Aligned to the stride so the strided lanes keep the frame indices
+            // they would have had in one flat run.
+            let step = max(1, laneStride)
+            let tail = Self.tailStart(lanes: lanes, framesPerSecond: framesPerSecond) / step * step
 
             ZStack {
-                if maskPeriod > 2 {
-                    // One flat stack, drawn in phase order. Every mask is solid
-                    // for a whole second, so several lanes are unmasked at once
-                    // and the last one to have turned on is the one on top -
-                    // the same ordering the two-second engine relies on, over a
-                    // longer cycle.
-                    //
-                    // This was briefly one gated group per second, on the
-                    // strength of a lab run that showed the flat stack sticking
-                    // and going black at the wrap. That run used a mask font
-                    // which turned out to be solid on the wrong seconds, so it
-                    // measured the font rather than the construction: with a
-                    // correct mask the flat stack steps through 160 lanes over
-                    // ten seconds and wraps cleanly. The grouping cost a
-                    // full-screen offscreen buffer per second of period, which
-                    // is a great deal to ask of the process that draws this.
-                    stack(0 ..< lanes, side: side, reference: reference, size: geometry.size)
-                } else {
-                    stack(0 ..< half, side: side, reference: reference, size: geometry.size)
-                    // Split into two halves masked against each other: the blink
-                    // mask can only isolate one lane within a half, so the second
-                    // half is gated as a group.
-                    stack(half ..< lanes, side: side, reference: reference, size: geometry.size)
-                        .mask {
-                            BlinkMask(reference: reference, blinkOffset: 1)
-                                .frame(width: side, height: side)
-                        }
-                }
+                stack(0 ..< tail, side: side, reference: reference, size: geometry.size)
+                // The last second of the period, gated as a group as well as
+                // per lane. Without it these lanes are still solid from the
+                // previous pass during the first second after a wrap, and being
+                // last in the stack they cover the frames that should be
+                // playing - a pause between loops, and the opening second of
+                // the clip never drawn. See `tailStart`.
+                //
+                // One extra offscreen buffer, not one per second of period.
+                // Grouping every second was tried and rejected on that cost;
+                // this is the two-second engine's own split, generalised, and
+                // at a two-second period it is the identical construction.
+                stack(tail ..< lanes, side: side, reference: reference, size: geometry.size)
+                    .mask {
+                        BlinkMask(
+                            reference: reference,
+                            blinkOffset: Self.tailGateOffset(maskPeriod: maskPeriod),
+                            font: maskFont
+                        )
+                        .frame(width: side, height: side)
+                    }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }

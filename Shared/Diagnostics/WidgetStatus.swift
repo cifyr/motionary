@@ -10,6 +10,20 @@ import os
 /// group path. So it writes the whole picture here and the app shows it as
 /// copyable text — one screenshot or paste should be enough to diagnose it.
 struct WidgetStatus: Codable, Equatable, Sendable {
+    /// How a render's measured size reads in the log.
+    ///
+    /// The size is captured from `onAppear` inside the geometry reader, and the
+    /// report is written during body evaluation - one pass earlier. So the
+    /// first render of every freshly launched extension process had nothing to
+    /// print and printed `0x0px`, which reads exactly like a widget that drew
+    /// nothing. That is the one render worth reading after a delivery, and in a
+    /// project whose whole history is the report disagreeing with the picture,
+    /// "not measured" and "measured as nothing" have to be different words.
+    static func sizeNote(_ size: CGSize, scale: CGFloat) -> String {
+        guard size.width > 0, size.height > 0 else { return "size-not-measured-yet" }
+        return "\(Int((size.width * scale).rounded()))x\(Int((size.height * scale).rounded()))px"
+    }
+
     var recordedAt = Date()
     var outcome = "unknown"
 

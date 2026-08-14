@@ -2,16 +2,22 @@ import XCTest
 
 /// What the stack shows at the moment the loop wraps.
 ///
-/// This is the one place in the engine where two lanes are lit at once for a
-/// reason other than the usual overlap, and it cost a reported bug: the first
-/// clip of Spidey Swing came back as a flicker of a swing that a later clip
-/// then performed in full, which reads as a replay.
+/// This is the one place in the engine where lanes are lit for a reason other
+/// than the usual overlap, and it has cost two reported bugs. First the opening
+/// of Spidey Swing came back as a flicker that a later clip then performed in
+/// full, which reads as a replay. Then, once that was placed, a pause between
+/// loops - most visible on a five-second clip, where a second of stillness is a
+/// fifth of the whole thing.
+///
+/// Both are the same arithmetic. The mask is solid for a whole second and the
+/// lane offsets span exactly one period, so during the first second after a
+/// wrap the stack's last second is still solid from the previous pass, and
+/// being last in the ZStack it is on top of the frames that should be playing.
 final class LoopWrapTests: XCTestCase {
     private let lanes = 720
     private let fps = 24
 
-    /// In the body of the cycle the visible lane is just the phase: the run of
-    /// solid lanes ends there and nothing above it is lit.
+    /// In the body of the cycle the visible lane is just the phase.
     func testTheVisibleLaneIsThePhase() {
         for second in [1.0, 5.5, 17.25, 29.9] {
             let top = FrameStackLayer.topLane(atCycleSecond: second, lanes: lanes, framesPerSecond: fps)
@@ -19,44 +25,86 @@ final class LoopWrapTests: XCTestCase {
         }
     }
 
-    /// The wrap: the solid run is split across both ends of the stack, and the
-    /// end wins because the stack is drawn in lane order.
+    /// The whole point of the group gate: the stack steps through every lane
+    /// once per period, in order, including across the wrap.
     ///
-    /// So the last second of the stack is composited over the first second of
-    /// it, and whatever sits in those top lanes is what the loop opens with.
-    func testTheEndOfTheStackCoversTheStartOfIt() {
-        // The run at the top of the stack shrinks as the second passes - lane
-        // `L` is in it while `L > fps * (second - 1)` - so it is gone by the
-        // time the second is up rather than handing over abruptly.
-        for second in [30.0, 30.25, 30.5, 30.9] {
-            let top = FrameStackLayer.topLane(atCycleSecond: second, lanes: lanes, framesPerSecond: fps)
-            XCTAssertGreaterThanOrEqual(
-                top, lanes - fps,
-                "\(second)s into the cycle the top lane should still be in the last second of the stack"
+    /// Left flat this was 449 of 480 lanes for Spidey and 65 of 80 for the
+    /// photo design, with the final frame held for a full second at each wrap.
+    func testEveryLaneIsShownExactlyOnceAcrossThePeriod() {
+        for (lanes, fps) in [(80, 16), (160, 16), (480, 32), (720, 24)] {
+            let shown = (0 ..< lanes).map {
+                FrameStackLayer.topLane(
+                    atCycleSecond: Double($0) / Double(fps), lanes: lanes, framesPerSecond: fps
+                )
+            }
+            XCTAssertEqual(
+                shown, Array(0 ..< lanes),
+                "\(lanes) lanes at \(fps)fps should walk the stack once, in order"
             )
         }
-        // And it lets go exactly one second in, not before.
-        XCTAssertLessThan(
-            FrameStackLayer.topLane(atCycleSecond: 31.0, lanes: lanes, framesPerSecond: fps),
-            fps + 1
+    }
+
+    /// Said as the symptom rather than as the arithmetic, because the symptom
+    /// is what gets reported: nothing is ever on screen for two steps running.
+    func testTheLoopNeverStopsAtTheWrap() {
+        let fps = 16
+        let lanes = 80
+        var previous: Int?
+        for step in 0 ..< (lanes * 3) {
+            let top = FrameStackLayer.topLane(
+                atCycleSecond: Double(step) / Double(fps), lanes: lanes, framesPerSecond: fps
+            )
+            XCTAssertNotEqual(top, previous, "lane \(top) held for two steps at step \(step)")
+            previous = top
+        }
+    }
+
+    /// The last second of the stack is the part gated as a group, and at a
+    /// two-second period that is the half the original engine has always split.
+    func testTheGatedTailIsTheLastSecondOfThePeriod() {
+        XCTAssertEqual(FrameStackLayer.tailStart(lanes: 80, framesPerSecond: 16), 64)
+        XCTAssertEqual(FrameStackLayer.tailStart(lanes: 480, framesPerSecond: 32), 448)
+        XCTAssertEqual(
+            FrameStackLayer.tailStart(lanes: 64, framesPerSecond: 32), 32,
+            "at a two-second period the tail is the second half, which is the original split"
         )
     }
 
-    /// Which is why the pause goes first. Padding the stack at the end put an
-    /// opaque backdrop patch in the lanes that win the wrap, so it erased the
-    /// opening of the first clip once per loop.
-    func testThePauseIsAtTheFrontWhereItCannotCoverAClip() {
+    /// The sign of the group gate, pinned on its own.
+    ///
+    /// `BlinkMask` counts from `reference - blinkOffset`, so a positive offset
+    /// makes the mask solid *earlier*. At a two-second period +1 and -1 land on
+    /// the same second, which hid the sign in the only construction that had
+    /// ever used it; carrying the +1 to a five-second period gated the tail on
+    /// second one instead of second four and froze the last second of every
+    /// loop. Nothing above catches that on its own, because a test that models
+    /// what the gate is *meant* to do agrees with either sign.
+    func testTheGroupGateOpensOnThePeriodsLastSecond() {
+        XCTAssertEqual(FrameStackLayer.tailGateOffset(maskPeriod: 2), -1)
+        XCTAssertEqual(FrameStackLayer.tailGateOffset(maskPeriod: 5), -4)
+        XCTAssertEqual(FrameStackLayer.tailGateOffset(maskPeriod: 15), -14)
+
+        // What the mask actually reads, second by second through a period: the
+        // gate is solid when its timer shows a second that opens one.
+        for period in [2.0, 5.0, 15.0] {
+            let solid = stride(from: 0.0, to: period, by: 1).filter {
+                ($0 + FrameStackLayer.tailGateOffset(maskPeriod: period))
+                    .rounded(.down)
+                    .truncatingRemainder(dividingBy: period) == 0
+            }
+            XCTAssertEqual(solid, [period - 1], "a \(period)s period gates its tail on second \(period - 1)")
+        }
+    }
+
+    /// A stack short of the period is padded, and the padding goes first so the
+    /// pause falls at the start of the cycle rather than in the middle of the
+    /// last clip.
+    func testThePauseIsAtTheFront() {
         let clip = Array(1 ... 600)                        // real frames, all non-zero
         let stack = FrameSetGenerator.paused(clip, lanes: lanes, blank: 0)
         XCTAssertEqual(stack.count, lanes)
         XCTAssertEqual(Array(stack.prefix(120)), Array(repeating: 0, count: 120))
         XCTAssertEqual(Array(stack.suffix(600)), clip, "the clips keep their order and their length")
-
-        // The lanes the wrap draws on top carry clip, not pause.
-        for second in stride(from: 30.0, to: 31.0, by: 0.1) {
-            let top = FrameStackLayer.topLane(atCycleSecond: second, lanes: lanes, framesPerSecond: fps)
-            XCTAssertNotEqual(stack[top], 0, "lane \(top) is a pause lane covering the loop's opening")
-        }
     }
 
     /// A stack that already fills the period is handed back untouched - there
