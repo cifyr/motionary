@@ -70,17 +70,27 @@ final class ExternalAppRouter: ObservableObject {
             return
         }
 
+        // Into the pullable log as well as os_log. A scheme can only be proved
+        // on a phone that has the app - a simulator refuses every scheme whose
+        // app is not registered in its LaunchServices, which reads exactly like
+        // a scheme that does not exist and is how Clock, Calculator, Notes,
+        // Books, Music and Podcasts were all wrongly written off at once. The
+        // device's own log is out of reach, so this is the only way an answer
+        // gets back off the phone.
         for candidate in candidates {
             let opened = await UIApplication.shared.open(candidate, options: [:])
             if opened {
                 Self.logger.info("opened \(name, privacy: .public) via \(candidate.scheme ?? "?", privacy: .public)")
+                WidgetRenderLog.append("url  OPENED \(name) via \(candidate.absoluteString)")
                 return
             }
             Self.logger.debug("\(candidate.absoluteString, privacy: .public) did not open; trying next candidate")
+            WidgetRenderLog.append("url  refused \(name): \(candidate.absoluteString)")
         }
 
         lastFailure = "\(name) could not be opened. It may not be installed."
         Self.logger.error("all \(candidates.count) launch candidates failed for \(name, privacy: .public)")
+        WidgetRenderLog.append("url  NONE of \(candidates.count) routes opened \(name)")
     }
 
     /// A tile tapped inside the app, custom target included.

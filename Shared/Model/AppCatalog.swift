@@ -22,6 +22,21 @@ struct CatalogApp: Identifiable, Equatable, Sendable {
     /// refuse, so a second spelling costs nothing and is the difference
     /// between a tile that works and one that does nothing.
     var alternates: [String] = []
+    /// Whether one of these routes has been *seen* to open the app, as opposed
+    /// to being the spelling everybody publishes. The two are not the same
+    /// thing, and the difference is a tile that does nothing.
+    ///
+    /// Only a phone can settle this, and only for the apps it has installed.
+    /// A simulator refuses every scheme whose app is not registered in its
+    /// LaunchServices, which is indistinguishable from a scheme that does not
+    /// exist: a fresh simulator has neither Clock nor Calculator nor Notes nor
+    /// Books nor Music nor Podcasts registered, so all of them "refuse"
+    /// everything and prove nothing at all.
+    ///
+    /// False is the honest default. `ExternalAppRouter` writes each attempt
+    /// into the pullable report log, so firing `motionary://open?url=...` at a
+    /// real phone is what turns one of these true.
+    var isVerified: Bool = false
     let category: Category
 
     enum Category: String, CaseIterable, Identifiable, Sendable {
