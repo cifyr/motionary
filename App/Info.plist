@@ -50,12 +50,8 @@
 	</array>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Motionary reads your next event so a widget can show it. It is only read, never changed.</string>
-	<key>NSHealthShareUsageDescription</key>
-	<string>Motionary reads your step count for today so a widget can show it.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Motionary receives designs sent from Motionary Studio on your Mac.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Motionary uses your location to show the local weather in a widget.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Motionary saves the generated Home Screen wallpaper to your photo library so you can set it as your background.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

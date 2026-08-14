@@ -45,6 +45,20 @@ struct PlacedReadout: Codable, Equatable, Identifiable, Sendable {
 
         var id: String { rawValue }
 
+        /// The sources a design can actually be given, which is not all of them.
+        ///
+        /// `steps` and `weather` are gone from the list and kept in the enum.
+        /// HealthKit needs an entitlement this app does not carry and WeatherKit
+        /// needs one that also has to be enabled on the App ID, so both calls
+        /// failed at runtime and both readouts showed nothing at all - a placed
+        /// one was decoration that looked like a feature.
+        ///
+        /// Removing the cases instead would have been the tidier diff and the
+        /// worse idea: the raw values are stored in every document that placed
+        /// one, and a document that will not decode is dropped from the library
+        /// rather than reported.
+        static let offered: [Source] = [.time, .date, .countdown, .battery, .calendar]
+
         var title: String {
             switch self {
             case .time: "Time"

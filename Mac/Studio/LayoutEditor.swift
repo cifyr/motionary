@@ -1073,7 +1073,7 @@ struct LayoutEditor: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 2), spacing: 6) {
-                ForEach(PlacedReadout.Source.allCases) { source in
+                ForEach(PlacedReadout.Source.offered) { source in
                     Button(source.title) { addReadout(source) }
                         .buttonStyle(.studioCompact)
                 }
