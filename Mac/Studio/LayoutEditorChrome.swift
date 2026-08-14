@@ -33,6 +33,17 @@ extension LayoutEditor {
             }
             .frame(minWidth: 158, alignment: .leading)
 
+            Button {
+                openVersions()
+            } label: {
+                Label("Versions", systemImage: "clock.arrow.circlepath")
+                    .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(.studioCompact)
+            .help("Earlier states of this design, kept as you work")
+
+            Rectangle().fill(StudioTheme.divider).frame(width: 1, height: 16)
+
             // Aligning is a button, not a steady hand. Dimmed rather than
             // hidden with nothing selected, so the row never moves about.
             HStack(spacing: 3) {
@@ -88,6 +99,144 @@ extension LayoutEditor {
         )
         .overlay(alignment: .bottom) {
             Rectangle().fill(StudioTheme.toolbarEdge).frame(height: 1)
+        }
+        .sheet(isPresented: $showingVersions) { versionsSheet }
+    }
+
+    // MARK: - Versions
+
+    /// This design's history, when there is a store to keep it in. Nil only in
+    /// previews, which have no folder to write into.
+    var versionStore: DesignVersions? {
+        store.map { DesignVersions(store: $0) }
+    }
+
+    private func openVersions() {
+        // Read on opening rather than held: the window above this one writes
+        // versions as it autosaves, so a list kept in state goes stale.
+        versions = versionStore?.list(for: design.id) ?? []
+        restoreNote = nil
+        showingVersions = true
+    }
+
+    /// Fixed locale, like every other stamp the studio stores or shows, so two
+    /// machines describe the same moment the same way.
+    private static let versionStamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "d MMM HH:mm:ss"
+        return formatter
+    }()
+
+    var versionsSheet: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Versions of \(documentName)")
+                    .font(StudioTheme.title)
+                    .foregroundStyle(StudioTheme.textBright)
+                Text("""
+                Kept as you work and when you open, build or leave. Going back \
+                keeps where you are now as a version too, so it can be undone.
+                """)
+                .font(StudioTheme.small)
+                .foregroundStyle(StudioTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(16)
+
+            Divider()
+
+            if versions.isEmpty {
+                Text("Nothing yet. The first one lands as soon as you change something.")
+                    .font(StudioTheme.small)
+                    .foregroundStyle(StudioTheme.textDim)
+                    .frame(maxWidth: .infinity, minHeight: 120)
+            } else {
+                ScrollView {
+                    VStack(spacing: 1) {
+                        ForEach(versions) { version in
+                            versionRow(version)
+                        }
+                    }
+                    .padding(8)
+                }
+                .frame(height: 320)
+            }
+
+            Divider()
+
+            HStack(spacing: 10) {
+                if let restoreNote {
+                    Text(restoreNote)
+                        .font(StudioTheme.small)
+                        .foregroundStyle(StudioTheme.accentInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Button("Done") { showingVersions = false }
+                    .buttonStyle(.studioProminent)
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
+        }
+        .frame(width: 470)
+        .background(StudioTheme.panel)
+    }
+
+    private func versionRow(_ version: DesignVersion) -> some View {
+        let isCurrent = DesignVersions.sameContent(version.document, design)
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(version.reason.label)
+                    .font(StudioTheme.bodyStrong)
+                    .foregroundStyle(StudioTheme.text)
+                Text(Self.versionStamp.string(from: version.takenAt))
+                    .font(StudioTheme.monoSmall)
+                    .foregroundStyle(StudioTheme.textDim)
+            }
+
+            Spacer(minLength: 4)
+
+            Text(summary(of: version.document))
+                .font(StudioTheme.monoSmall)
+                .foregroundStyle(StudioTheme.textTertiary)
+
+            if isCurrent {
+                Text("on screen")
+                    .font(StudioTheme.monoSmall)
+                    .foregroundStyle(StudioTheme.accentInk)
+                    .frame(width: 74, alignment: .trailing)
+            } else {
+                Button("Go back to this") { restore(version) }
+                    .buttonStyle(.studioCompact)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 40)
+        .background(
+            StudioTheme.well,
+            in: RoundedRectangle(cornerRadius: StudioTheme.radius, style: .continuous)
+        )
+    }
+
+    /// Enough of a version to tell two of them apart at a glance, without
+    /// drawing the whole composition forty times.
+    private func summary(of document: DesignDocument) -> String {
+        var parts = ["\(document.tiles.count) tiles"]
+        if !document.assets.isEmpty { parts.append("\(document.assets.count) pictures") }
+        if !document.variants.isEmpty { parts.append("\(document.variants.count + 1) clips") }
+        return parts.joined(separator: " · ")
+    }
+
+    private func restore(_ version: DesignVersion) {
+        guard let versionStore else { return }
+        do {
+            let result = try versionStore.restore(version, over: design)
+            design = result.document
+            restoreNote = result.note
+            versions = versionStore.list(for: design.id)
+        } catch {
+            restoreNote = "Could not go back: \(error.localizedDescription)"
         }
     }
 

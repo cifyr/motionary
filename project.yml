@@ -94,6 +94,9 @@ targets:
       # purpose, so the step mapping is covered rather than only looked at.
       - path: Mac/Studio/StudioRunPlan.swift
       - path: Mac/Library/SkinLibrary.swift
+      # The way back after the window is closed. Snapshot policy and pruning
+      # are plain Foundation, and getting either wrong loses work silently.
+      - path: Mac/Library/DesignVersions.swift
       # Applying a set decides what a slot can show on the phone, so the pure
       # apply rules are covered with the rest of the tile logic.
       - path: Mac/Library/SkinSets.swift
