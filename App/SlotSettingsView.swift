@@ -44,7 +44,7 @@ struct SlotSettingsView: View {
                             }
                         ))
                     } header: {
-                        Text("Animation")
+                        Text("Animation").emberLabel()
                     } footer: {
                         Text("""
                         The same design with a different clip in the animated \
@@ -107,12 +107,12 @@ struct SlotSettingsView: View {
                             if BackgroundTap.url(for: address) == nil {
                                 Text("That is not a web address, so nothing will answer the tap.")
                                     .font(.caption2)
-                                    .foregroundStyle(.orange)
+                                    .foregroundStyle(Color.emberAccent)
                             }
                         }
                     }
                 } header: {
-                    Text("The space between the icons")
+                    Text("The space between the icons").emberLabel()
                 } footer: {
                     Text(BackgroundTap.destinationChoice?.isApp == true
                          ? """
@@ -144,6 +144,9 @@ struct SlotSettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            // On the list itself: the modifier hides the list's own background,
+            // and outside the navigation stack there is no list to hide.
+            .emberSheet()
         }
         .preferredColorScheme(.dark)
         .onAppear {

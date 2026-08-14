@@ -64,6 +64,7 @@ struct SlotEditorView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .emberSheet()
         }
         .preferredColorScheme(.dark)
         .onAppear(perform: load)
@@ -87,7 +88,7 @@ struct SlotEditorView: View {
             }
             .padding(.vertical, 4)
         } header: {
-            Text("Icon")
+            Text("Icon").emberLabel()
         } footer: {
             Text("""
             The apps this slot's icon pack was drawn for. Choosing one changes \
@@ -128,9 +129,9 @@ struct SlotEditorView: View {
                     }
                 }
                 .frame(width: 54, height: 54)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Color.white.opacity(0.06))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    Rectangle()
                         .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2.5)
                 }
 
@@ -209,7 +210,7 @@ struct SlotEditorView: View {
                     .foregroundStyle(.secondary)
             }
         } header: {
-            Text("Opens")
+            Text("Opens").emberLabel()
         } footer: {
             if !customLink, let app = catalogueApp {
                 Text(app.canLaunch

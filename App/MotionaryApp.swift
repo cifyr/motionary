@@ -80,6 +80,10 @@ struct MotionaryApp: App {
             HomeView()
                 .environmentObject(router)
                 .preferredColorScheme(.dark)
+                // Every toggle, picker tick and plain button in the app takes
+                // its colour from here, which is most of what makes the scheme
+                // present without anything having been restyled one at a time.
+                .tint(.emberAccent)
                 // A tile tapped on the widget opens the app with a launch URL,
                 // and the app forwards it to the destination.
                 .onOpenURL { url in

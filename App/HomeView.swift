@@ -64,7 +64,7 @@ struct HomeView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.emberDark.ignoresSafeArea()
 
             if let entry, let manifest {
                 // Identity is the scene, not the clip within it. Including the
@@ -559,11 +559,20 @@ private struct Toast: View {
             Spacer()
             Text(text)
                 .font(.footnote)
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.emberTitle)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                // Square, because the scheme has no radius between none and a
+                // full pill, and a hairline rather than a heavier edge.
+                .background(Color.emberDark.opacity(0.86))
+                .emberEdge()
+                .overlay(alignment: .leading) {
+                    // The one accent, on the edge of a message rather than
+                    // through it: enough to place the app in the scheme,
+                    // little enough to stay out of the picture behind it.
+                    Rectangle().fill(Color.emberAccent).frame(width: 2)
+                }
                 .padding(.horizontal, 28)
                 .padding(.bottom, 96)
         }
@@ -577,14 +586,22 @@ private struct EmptyDesignView: View {
         VStack(spacing: 14) {
             Image(systemName: "wand.and.stars")
                 .font(.system(size: 46))
-                .foregroundStyle(.white.opacity(0.85))
-            Text("Motionary")
-                .font(.largeTitle.bold())
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.emberAccent)
+            Text("iPhone / WidgetKit")
+                .emberLabel()
+            // Tight and heavy, which is the display end of the scheme's ladder
+            // as closely as the system face reaches.
+            Text("MOTIONARY")
+                .font(.system(size: 40, weight: .black))
+                .tracking(-0.8)
+                .foregroundStyle(Color.emberTitle)
+            Rectangle()
+                .fill(Color.emberLine)
+                .frame(width: 220, height: 1)
             Text("No design is built into this app yet. Drop a clip into Motionary Studio on the Mac and install again.")
                 .font(.callout)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(Color.emberSubtitle)
                 .padding(.horizontal, 40)
         }
     }
