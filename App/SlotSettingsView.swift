@@ -16,6 +16,7 @@ struct SlotSettingsView: View {
     @State private var variantID: UUID?
     /// Working copies, so the rows follow the field rather than the store -
     /// which is UserDefaults, and SwiftUI does not observe it.
+    @State private var rotates = false
     @State private var tapsOpenAPage = false
     @State private var choice = BackgroundTap.engines[0].id
     @State private var address = ""
@@ -34,6 +35,14 @@ struct SlotSettingsView: View {
                         }
                         .pickerStyle(.inline)
                         .labelsHidden()
+
+                        Toggle("Change it each time I open Motionary", isOn: Binding(
+                            get: { rotates },
+                            set: { on in
+                                rotates = on
+                                ClipRotation.isEnabled = on
+                            }
+                        ))
                     } header: {
                         Text("Animation")
                     } footer: {
@@ -41,6 +50,10 @@ struct SlotSettingsView: View {
                         The same design with a different clip in the animated \
                         area. While editing, swiping sideways anywhere but an \
                         icon steps through these too.
+
+                        Changing it on every open steps through the same list \
+                        in the same order, and applies to every design on this \
+                        phone rather than to this one alone.
                         """)
                     }
                 }
@@ -137,6 +150,7 @@ struct SlotSettingsView: View {
             // Validated against this build, so a stale stored id shows as the
             // Standard row it will actually draw as.
             variantID = VariantChoice.resolved(in: manifest)?.id
+            rotates = ClipRotation.isEnabled
             tapsOpenAPage = BackgroundTap.isEnabled
             choice = BackgroundTap.choice
             address = BackgroundTap.customAddress

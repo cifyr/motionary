@@ -119,7 +119,12 @@ struct HomeView: View {
         // A delivery that arrived over a cable or through Files is unpacked on
         // the way to the foreground, and nothing else here would notice it.
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { reload() }
+            // Before the reload, so the picture this draws is already the clip
+            // the widget was just told to draw rather than the previous one.
+            if phase == .active {
+                rotateClip()
+                reload()
+            }
         }
         .ignoresSafeArea()
         .statusBarHidden(entry != nil)
@@ -292,6 +297,18 @@ struct HomeView: View {
     /// with one background simply does nothing here rather than quietly
     /// changing something else - a swipe that means two things depending on
     /// what this design happens to carry is worse than one that means nothing.
+    /// Moves the design on to its next clip when opening the app is meant to,
+    /// which is off unless it was asked for. See `ClipRotation`.
+    ///
+    /// Deliberately silent: `switchBackground` names the clip it landed on
+    /// because a swipe is a question the phone just asked, and this is not -
+    /// a toast on every launch is noise about something already on screen.
+    private func rotateClip() {
+        guard let manifest, ClipRotation.advance(manifest) != nil else { return }
+        WidgetCenterBridge.reloadAll()
+        slotsEdition += 1
+    }
+
     private func switchBackground(by step: Int) {
         guard let manifest, !manifest.builtVariants.isEmpty else { return }
         // Alphabetical from the clip this scene leads with, so a swipe walks
