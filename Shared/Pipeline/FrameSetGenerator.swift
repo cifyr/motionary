@@ -636,14 +636,31 @@ struct FrameSetGenerator {
             guard let summary = try? await MediaFrameExtractor(
                 url: url, transform: design.mediaTransform
             ).summary(), summary.duration > 0 else { continue }
-            // Verbatim: the whole file, however much of it is motion. Trimming
-            // to where the content stops - or to where it stops moving - was
-            // measured and correct and still wrong, because a clip is a clip
-            // and cutting it is the thing that keeps being reported.
-            let duration = summary.duration
+            // A clip ends when it stops moving, which is not when its file ends.
+            // Everything that moves still plays, whole and at source speed -
+            // what comes off is the tail the camera kept rolling through, and a
+            // held pose is not a clip being cut.
+            //
+            // Measured here: spidey_alpha-2-2 is 8.0s holding 1.4s of motion,
+            // and spidey_alpha-3 is 8.0s holding 1.6s of swing and then 6.2s
+            // frozen on one pose. Sized by their files they took 15 of the
+            // loop's 30 seconds to show 3 seconds of animation, so the loop was
+            // mostly an empty backdrop and the swings read as flickers.
+            //
+            // Only for cut-out clips: the tail is found from the alpha bounds,
+            // and a flattened clip is opaque in every frame, so it would
+            // measure as never moving and trim to nothing.
+            var duration = summary.duration
+            if cutOut {
+                duration = await contentSeconds(
+                    design: design, source: url, crop: crop, whole: summary.duration
+                )
+            }
             if duration < summary.duration - 0.05 {
                 let name = url.lastPathComponent
-                Self.logger.info("\(name, privacy: .public) runs \(summary.duration)s but is empty after \(duration)s")
+                Self.logger.info("""
+                \(name, privacy: .public) runs \(summary.duration)s and stops moving at \(duration)s
+                """)
             }
             out.append(ProgramClip(id: id, source: url, duration: duration, wall: duration / speed))
         }
