@@ -134,7 +134,77 @@ struct FrameSetGenerator {
         Double(design.loopFrameCount) / Double(design.spec.framesPerSecond)
     }
 
+    /// How much of a clip the widget will actually play, and what is left over.
+    ///
+    /// Two ceilings stack here and neither used to say anything. The loop is
+    /// sized at import against `TimerFontSpec.maximumLoopFrames`, and then
+    /// `loopSecondsBudget` caps it again at build time - so a 45-second clip
+    /// was delivered as its first ten seconds, six different ways, with a
+    /// summary line that read exactly like a clip that fitted.
+    ///
+    /// Nil when the whole clip is built, which is the ordinary case.
+    struct LengthNotice: Equatable, Sendable {
+        /// The source's own length in seconds.
+        var sourceSeconds: TimeInterval
+        /// How much of it the built loop covers, at the speed it plays.
+        var builtSeconds: TimeInterval
+
+        var lostSeconds: TimeInterval { max(0, sourceSeconds - builtSeconds) }
+
+        /// One line to put in front of somebody before they wonder why their
+        /// clip ends early.
+        var text: String {
+            String(
+                format: """
+                This clip runs %.1fs. The widget loops the first %.1fs of it and \
+                starts again, so the last %.1fs is not built. Speed it up, or \
+                trim it to the part worth looping.
+                """,
+                sourceSeconds, builtSeconds, lostSeconds
+            )
+        }
+    }
+
+    static func lengthNotice(for design: DesignDocument) -> LengthNotice? {
+        guard design.sourceDuration > 0, design.playbackSpeed > 0 else { return nil }
+        let plan = plan(for: design.spec, clipSeconds: clipSeconds(for: design))
+        // The frames actually written, not the mask's period. A design whose
+        // own loop is shorter than the mask - a still, or a two-frame blink -
+        // fills the rest of the stack with nothing, and quoting the period
+        // there claimed two seconds of a clip that plays for a sixteenth of one.
+        let builtFrames = min(design.loopFrameCount, plan.frames)
+        let loopSeconds = Double(builtFrames) / Double(max(1, plan.framesPerSecond))
+        // In source seconds rather than loop seconds: a clip sped up to fit
+        // covers more of itself per second of loop, and what is being answered
+        // is "how much of my clip is in there".
+        let covered = min(design.sourceDuration, loopSeconds * design.playbackSpeed)
+        // A frame either way is rounding, not a cut worth mentioning.
+        guard design.sourceDuration - covered > 0.1 else { return nil }
+        return LengthNotice(sourceSeconds: design.sourceDuration, builtSeconds: covered)
+    }
+
     static func frameCount(for spec: TimerFontSpec) -> Int { spec.laneCount }
+
+    /// The most frames a source can yield at the speed it plays.
+    ///
+    /// The extractor refuses rather than short-changes - asking a clip for more
+    /// frames than it holds fails the whole build on "yielded 97 frames but the
+    /// loop needs 160". Variants have been sized against their own clip since
+    /// they arrived; the design's own clip never was, so speeding one up past
+    /// the point where the source runs out killed the build instead of
+    /// shortening the loop.
+    ///
+    /// Deliberately not `FontSetGenerator.variantLoopLength`, which also caps at
+    /// `maximumLoopFrames`: that ceiling belongs to a variant sharing a stack,
+    /// and applying it here would shorten every loop already built past it.
+    static func affordableLoopFrames(
+        duration: TimeInterval, spec: TimerFontSpec, playbackSpeed: Double
+    ) -> Int {
+        guard duration > 0 else { return .max }
+        return max(1, Int((
+            duration * Double(spec.framesPerSecond) / max(playbackSpeed, 0.01)
+        ).rounded(.down)))
+    }
 
     /// Whether this clip is worth shipping as sprites.
     ///
@@ -898,18 +968,33 @@ struct FrameSetGenerator {
             return manifest
         }
 
+        // Measured rather than taken from the document: `sourceDuration` is
+        // stamped at import and a clip replaced in place outlives it.
+        let primarySeconds = (try? await MediaFrameExtractor(
+            url: store.sourceVideoURL(for: design),
+            transform: design.mediaTransform
+        ).summary().duration) ?? design.sourceDuration
+        let affordable = Self.affordableLoopFrames(
+            duration: primarySeconds, spec: spec, playbackSpeed: design.playbackSpeed
+        )
+        if affordable < min(design.loopFrameCount, plan.frames) {
+            Self.logger.warning("""
+            the clip holds \(affordable) frames at \(design.playbackSpeed)x, \
+            short of the \(min(design.loopFrameCount, plan.frames)) the loop asked for; \
+            shortening the loop rather than failing
+            """)
+        }
         let primary = try await buildClip(
             design: design,
             spec: spec,
             crop: crop,
             source: store.sourceVideoURL(for: design),
             variant: nil,
-            // Never more than the design's own loop: a clip with six frames in
-            // it has six, and asking the extractor for more fails the build
-            // rather than producing a short loop. The lanes repeat around
-            // whatever arrives, which plays that loop as many times per cycle
-            // as it fits, at the speed it was authored at.
-            loopFrameCount: min(design.loopFrameCount, plan.frames),
+            // Never more than the design's own loop, the mask's period, or what
+            // the clip actually holds. The lanes repeat around whatever arrives,
+            // which plays that loop as many times per cycle as it fits, at the
+            // speed it was authored at.
+            loopFrameCount: min(design.loopFrameCount, plan.frames, affordable),
             onStage: onStage
         )
         // Not an error, the same way an ill-fitting loop is not one for the

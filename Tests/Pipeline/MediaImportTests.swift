@@ -901,3 +901,78 @@ final class ScaledTransformTests: XCTestCase {
         )
     }
 }
+
+/// AVFoundation answers a missing file with "an unknown error occurred
+/// (-17913)", which reads like a damaged clip and sends you looking at the
+/// wrong thing. A build that refuses has to say which of the two it is.
+final class BrokenSourceTests: XCTestCase {
+    private var directory: URL!
+
+    override func setUpWithError() throws {
+        directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("motionary-broken-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    private func extractor(for name: String) -> MediaFrameExtractor {
+        MediaFrameExtractor(
+            url: directory.appendingPathComponent(name),
+            screenSize: CGSize(width: 1206, height: 2622)
+        )
+    }
+
+    func testAClipThatIsNotThereSaysSo() async {
+        do {
+            _ = try await extractor(for: "gone.mov").summary()
+            XCTFail("a missing clip should refuse")
+        } catch let error as MediaImportError {
+            guard case .missing = error else {
+                return XCTFail("expected .missing, got \(error)")
+            }
+            XCTAssertTrue(error.description.contains("moved or deleted"))
+        } catch {
+            XCTFail("expected a MediaImportError, got \(error)")
+        }
+    }
+
+    func testADamagedClipIsNamedAsUnreadableRatherThanMissing() async throws {
+        let url = directory.appendingPathComponent("junk.mov")
+        try Data(repeating: 0x41, count: 4096).write(to: url)
+        do {
+            _ = try await extractor(for: "junk.mov").summary()
+            XCTFail("a damaged clip should refuse")
+        } catch let error as MediaImportError {
+            guard case .unreadable = error else {
+                return XCTFail("expected .unreadable, got \(error)")
+            }
+            XCTAssertTrue(error.description.contains("junk.mov"))
+            XCTAssertTrue(
+                error.description.contains("AVFoundationErrorDomain"),
+                "the domain and code stay, so it is still diagnosable"
+            )
+            XCTAssertFalse(
+                error.description.contains("UserInfo"),
+                "but not the whole UserInfo paragraph with a percent-encoded URL in it"
+            )
+        }
+    }
+
+    func testAMissingGIFTakesTheSamePath() async {
+        // The GIF decode is a different code path to video and had the same
+        // hole in it.
+        do {
+            _ = try await extractor(for: "gone.gif").summary()
+            XCTFail("a missing GIF should refuse")
+        } catch let error as MediaImportError {
+            guard case .missing = error else {
+                return XCTFail("expected .missing, got \(error)")
+            }
+        } catch {
+            XCTFail("expected a MediaImportError, got \(error)")
+        }
+    }
+}

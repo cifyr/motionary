@@ -1586,6 +1586,17 @@ struct LayoutEditor: View {
                 Button("Add...") { importVariants() }.buttonStyle(.link)
             }
 
+            // Above the list, because it is about the clip that was dropped in
+            // rather than about any setting below it. A clip longer than the
+            // widget can loop used to be cut with nothing said anywhere.
+            if let notice = FrameSetGenerator.lengthNotice(for: design) {
+                Text(notice.text)
+                    .font(.caption2)
+                    .foregroundStyle(StudioTheme.accentInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 2)
+            }
+
             if design.variants.isEmpty {
                 Text("Other clips for the same design - like five idle animations of one scene. The phone chooses which plays. Each adds about 29MB of fonts to the install.")
                     .font(.caption2)
