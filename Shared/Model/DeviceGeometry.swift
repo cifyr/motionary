@@ -1,6 +1,8 @@
 import CoreGraphics
 import Foundation
+import os
 #if os(iOS)
+import UIKit
 import WidgetKit
 #endif
 
@@ -150,16 +152,141 @@ struct DeviceModel: Identifiable, Hashable, Sendable {
 
     static let all: [DeviceModel] = [.iPhone17Pro]
     static let `default` = iPhone17Pro
+
+    /// A model for a screen nobody has measured, scaled from the one that was.
+    ///
+    /// **This is an approximation and it is allowed to exist for one reason:**
+    /// what it replaces is not an approximation but a certainty of being wrong.
+    /// Every phone that is not an iPhone 17 Pro was being handed a 1206x2622
+    /// composition for its own screen - a wallpaper of entirely the wrong size,
+    /// out by 36x90px on a 16e and 114x246px on a 17 Pro Max. Proportions that
+    /// are a few pixels out beat a picture that is the wrong shape.
+    ///
+    /// Deriving from Apple's published *point* sizes was tried before this and
+    /// put the origin 7.33pt out - about 22px right - on the one device that was
+    /// checked. See the note on `DeviceModel` above; that warning stands, and it
+    /// is why nothing here claims to be measured. This derivation is a different
+    /// one: every number is carried across as a fraction of the measured phone's
+    /// own screen, so the composition keeps its proportions and stays on screen.
+    ///
+    /// The parts most likely to be wrong are the icon grid and the corner
+    /// radius. iOS sizes icons in points per device class rather than as a
+    /// fraction of the screen, so on a phone with a different class this grid
+    /// will drift across the rows. `widgetNudge` is the escape hatch, per design.
+    static func derived(
+        id: String,
+        name: String,
+        scale: CGFloat,
+        screenPixelSize size: CGSize
+    ) -> DeviceModel {
+        let base = iPhone17Pro
+        let kx = size.width / base.screenPixelSize.width
+        let ky = size.height / base.screenPixelSize.height
+        func point(_ p: CGPoint) -> CGPoint { CGPoint(x: (p.x * kx).rounded(), y: (p.y * ky).rounded()) }
+        func span(_ s: CGSize) -> CGSize { CGSize(width: (s.width * kx).rounded(), height: (s.height * ky).rounded()) }
+
+        return DeviceModel(
+            id: id,
+            name: name,
+            scale: scale,
+            screenPixelSize: size,
+            widgetOrigin: point(base.widgetOrigin),
+            widgetPixelSize: span(base.widgetPixelSize),
+            widgetRenderedOrigin: point(base.widgetRenderedOrigin),
+            widgetRenderedPixelSize: span(base.widgetRenderedPixelSize),
+            // Corners scale with the narrow axis; scaling them by height would
+            // make a taller phone's widget read as a rounder rectangle.
+            widgetCornerRadius: (base.widgetCornerRadius * kx).rounded(),
+            iconSide: (base.iconSide * kx).rounded(),
+            iconGridOrigin: point(base.iconGridOrigin),
+            iconGridPitch: CGSize(
+                width: base.iconGridPitch.width * kx,
+                height: base.iconGridPitch.height * ky
+            )
+        )
+    }
+
+    /// The model for a screen of this size: the measured one when it matches,
+    /// and a derived one when it does not.
+    ///
+    /// Matching on the screen rather than on a device identifier on purpose.
+    /// There is no list of identifiers to keep current, a Display Zoom setting
+    /// changes the screen out from under one anyway, and what every number here
+    /// is actually a function of is the screen.
+    static func matching(screenPixelSize size: CGSize, scale: CGFloat) -> DeviceModel {
+        if let exact = all.first(where: { $0.screenPixelSize == size && $0.scale == scale }) {
+            return exact
+        }
+        let points = CGSize(width: size.width / scale, height: size.height / scale)
+        return derived(
+            id: "derived-\(Int(size.width))x\(Int(size.height))",
+            name: "\(Int(points.width)) x \(Int(points.height)) pt",
+            scale: scale,
+            screenPixelSize: size
+        )
+    }
+
+    /// Whether this model's numbers were measured against hardware or scaled
+    /// from a phone that was. The editor says which, because a design cut on a
+    /// derived one needs its position checked against the real Home Screen.
+    var isMeasured: Bool { Self.all.contains(self) }
 }
 
-/// Pixel geometry of the device this build is cut for.
+/// Pixel geometry of the phone this is running on.
 ///
-/// Still a set of globals because the iOS app and the extension are compiled
-/// for exactly one phone: the fonts are in the bundle, so the geometry is
-/// settled at build time too. The studio picks the model; this is what the
-/// build was given.
+/// Still a set of globals, and still settled once: a screen does not change
+/// size while an app is open, and the fonts a font-built design needs are in
+/// the bundle either way. What changed is where the numbers come from. They
+/// were the iPhone 17 Pro's, compiled in, on every phone that ran this - so a
+/// 16e composed its Home Screen at 1206x2622 and missed its own icon grid by
+/// 36x90px. On iOS the screen is now read at launch and the model matched to
+/// it; on the Mac there is no screen to read, so the studio keeps choosing.
+///
+/// A derived model is an approximation - see `DeviceModel.derived` - and the
+/// editor says so, because a design cut on one wants checking against the
+/// real Home Screen before it is trusted.
 enum DeviceGeometry {
+#if os(iOS)
+    private static let logger = Logger(subsystem: "com.caden.Motionary", category: "DeviceGeometry")
+
+    /// Resolved once from the screen, then read from anywhere.
+    ///
+    /// Not a lazy `static let` reading `UIScreen`, because that is main-actor
+    /// isolated and this is read from the render pipeline off the main thread.
+    /// So the reading is an explicit step the app and the extension each take
+    /// on the way up, and until it happens the measured model stands in - which
+    /// is exactly what every build did before this, so the worst case is the
+    /// behaviour that shipped rather than a new one.
+    nonisolated(unsafe) private static var resolved: DeviceModel?
+
+    static var model: DeviceModel { resolved ?? .default }
+
+    /// Reads the screen and settles the geometry. Safe to call more than once;
+    /// a screen does not change size while a process is alive.
+    @MainActor
+    static func resolveFromScreen() {
+        guard resolved == nil else { return }
+        let screen = UIScreen.main
+        let scale = screen.scale
+        let bounds = screen.bounds.size
+        let pixels = CGSize(
+            width: (bounds.width * scale).rounded(),
+            height: (bounds.height * scale).rounded()
+        )
+        let matched = DeviceModel.matching(screenPixelSize: pixels, scale: scale)
+        resolved = matched
+        if matched.isMeasured {
+            logger.info("geometry: \(matched.name, privacy: .public), measured")
+        } else {
+            logger.notice("""
+            no measured geometry for \(Int(pixels.width))x\(Int(pixels.height)) at \(scale, format: .fixed(precision: 1))x; \
+            scaling the iPhone 17 Pro's - positions are approximate
+            """)
+        }
+    }
+#else
     static let model = DeviceModel.default
+#endif
 
     static var scale: CGFloat { model.scale }
     static var screenPixelSize: CGSize { model.screenPixelSize }

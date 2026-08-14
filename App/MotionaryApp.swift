@@ -78,6 +78,10 @@ struct MotionaryApp: App {
     var body: some Scene {
         WindowGroup {
             HomeView()
+                // Before anything composes or measures. Until this runs the
+                // geometry is the compiled-in iPhone 17 Pro, which is what
+                // every build used on every phone before it existed.
+                .task { DeviceGeometry.resolveFromScreen() }
                 .environmentObject(router)
                 .preferredColorScheme(.dark)
                 // Every toggle, picker tick and plain button in the app takes

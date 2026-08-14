@@ -18,7 +18,9 @@ struct DesignWidgetView: View {
     let entry: DesignEntry
 
     var body: some View {
-        content
+        // The extension is its own process, so it reads the screen too.
+        let _ = DeviceGeometry.resolveFromScreen()
+        return content
             .background {
                 GeometryReader { geometry in
                     Color.clear.onAppear { Self.lastRenderedSize = geometry.size }
