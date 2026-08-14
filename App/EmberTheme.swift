@@ -12,18 +12,28 @@ import SwiftUI
 /// picture in it is the design's, not the scheme's - so the scheme lives in the
 /// chrome around the picture rather than over it.
 extension Color {
-    /// `--em-dark`. The ground everything sits on.
-    static let emberDark = Color(red: 0.047, green: 0.051, blue: 0.063)
+    init(emberHex hex: UInt32) {
+        self.init(
+            red: Double((hex >> 16) & 0xFF) / 255,
+            green: Double((hex >> 8) & 0xFF) / 255,
+            blue: Double(hex & 0xFF) / 255
+        )
+    }
+
+    /// `--em-dark`. The ground everything sits on. The app is dark throughout -
+    /// it is a window onto a Home Screen, and the scheme's light ground is the
+    /// studio's business.
+    static let emberDark = Color(emberHex: EmberPalette.dark)
     /// `--em-accent`. One accent, and it earns its place by being rare.
-    static let emberAccent = Color(red: 1.0, green: 0.239, blue: 0.0)
+    static let emberAccent = Color(emberHex: EmberPalette.accent)
 
     /// `--em-title` through `--em-line`: one ladder of white, by opacity.
     /// Anything that needs to be quieter than `emberDesc` is not worth drawing.
-    static let emberTitle = Color.white
-    static let emberSubtitle = Color.white.opacity(0.7)
-    static let emberBody = Color.white.opacity(0.5)
-    static let emberDesc = Color.white.opacity(0.3)
-    static let emberLine = Color.white.opacity(0.1)
+    static let emberTitle = Color.white.opacity(EmberPalette.onDarkTitle.alpha)
+    static let emberSubtitle = Color.white.opacity(EmberPalette.onDarkSubtitle.alpha)
+    static let emberBody = Color.white.opacity(EmberPalette.onDarkBody.alpha)
+    static let emberDesc = Color.white.opacity(EmberPalette.onDarkDesc.alpha)
+    static let emberLine = Color.white.opacity(EmberPalette.onDarkLine.alpha)
 }
 
 extension View {

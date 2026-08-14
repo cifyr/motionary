@@ -171,6 +171,9 @@ targets:
       # Sprite placement travels with the frames the studio writes.
       - path: Shared/Model/FrameRect.swift
       - path: Shared/Model/WidgetFamilyCompatibility.swift
+      # One set of scheme tokens for both apps, so the studio's palette and the
+      # phone's cannot drift apart.
+      - path: Shared/UI/EmberPalette.swift
       # The editor places the same tiles the widget draws, so it shares the
       # tile view, the catalogue, the snapping, and the icon pipeline.
       - path: Shared/Icons/IconAsset.swift
