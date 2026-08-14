@@ -79,20 +79,39 @@ struct FrameStackLayer: View {
         max(1, max(1, lanes) - max(1, framesPerSecond))
     }
 
+    /// The group gate's offset, in the terms `BlinkMask` takes it.
+    ///
+    /// `BlinkMask` draws `Text(reference - blinkOffset, style: .timer)`, so the
+    /// seconds it reads are `cycleSecond + blinkOffset`: a *positive* offset
+    /// makes the mask solid earlier in the period, not later. The tail wants
+    /// the period's last second, which is `-(period - 1)`.
+    ///
+    /// This is the one line that has to be derived rather than copied. At a two
+    /// second period `+1` and `-1` are the same second, so the sign was
+    /// invisible in the only construction that had ever used it - and carrying
+    /// the `+1` across to a five-second period gated the tail on second one
+    /// instead of second four. That put a one-second freeze at the *end* of
+    /// every loop: during the last second the tail is off and the low lanes
+    /// have all gone quiet, so lane 63 held until the wrap.
+    static func tailGateOffset(maskPeriod: TimeInterval) -> TimeInterval {
+        1 - maskPeriod
+    }
+
     /// Which lane is actually visible `second` into the cycle.
     ///
     /// Models both gates - the per-lane one and the group one over `tailStart`
-    /// - because getting the second of them wrong is a loop that stops, which
-    /// looks like a bad clip rather than like arithmetic.
+    /// - and models the group one through `tailGateOffset` rather than through
+    /// what it is meant to do, because the sign of that offset is exactly the
+    /// thing that has been wrong.
     static func topLane(atCycleSecond second: Double, lanes: Int, framesPerSecond: Int) -> Int {
         let fps = Double(max(1, framesPerSecond))
         let lanes = max(1, lanes)
         let period = Double(lanes) / fps
         let tail = tailStart(lanes: lanes, framesPerSecond: framesPerSecond)
-        // The tail draws only during the period's last second, which is when it
-        // is the run that should be on top rather than the one left over.
-        let tailDrawn = second.rounded(.down)
-            .truncatingRemainder(dividingBy: period) >= period - 1
+        // Read exactly as the mask reads it: the gate is solid while the timer
+        // it drives shows a second that opens a period.
+        let gateSecond = (second + tailGateOffset(maskPeriod: period)).rounded(.down)
+        let tailDrawn = gateSecond.truncatingRemainder(dividingBy: period) == 0
         let solid = (0 ..< lanes).filter { lane in
             let shown = (second - Double(lane) / fps).rounded(.down)
             guard shown.truncatingRemainder(dividingBy: period) == 0 else { return false }
@@ -132,7 +151,7 @@ struct FrameStackLayer: View {
                     .mask {
                         BlinkMask(
                             reference: reference,
-                            blinkOffset: maskPeriod - 1,
+                            blinkOffset: Self.tailGateOffset(maskPeriod: maskPeriod),
                             font: maskFont
                         )
                         .frame(width: side, height: side)

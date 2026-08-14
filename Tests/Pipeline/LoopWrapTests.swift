@@ -70,6 +70,32 @@ final class LoopWrapTests: XCTestCase {
         )
     }
 
+    /// The sign of the group gate, pinned on its own.
+    ///
+    /// `BlinkMask` counts from `reference - blinkOffset`, so a positive offset
+    /// makes the mask solid *earlier*. At a two-second period +1 and -1 land on
+    /// the same second, which hid the sign in the only construction that had
+    /// ever used it; carrying the +1 to a five-second period gated the tail on
+    /// second one instead of second four and froze the last second of every
+    /// loop. Nothing above catches that on its own, because a test that models
+    /// what the gate is *meant* to do agrees with either sign.
+    func testTheGroupGateOpensOnThePeriodsLastSecond() {
+        XCTAssertEqual(FrameStackLayer.tailGateOffset(maskPeriod: 2), -1)
+        XCTAssertEqual(FrameStackLayer.tailGateOffset(maskPeriod: 5), -4)
+        XCTAssertEqual(FrameStackLayer.tailGateOffset(maskPeriod: 15), -14)
+
+        // What the mask actually reads, second by second through a period: the
+        // gate is solid when its timer shows a second that opens one.
+        for period in [2.0, 5.0, 15.0] {
+            let solid = stride(from: 0.0, to: period, by: 1).filter {
+                ($0 + FrameStackLayer.tailGateOffset(maskPeriod: period))
+                    .rounded(.down)
+                    .truncatingRemainder(dividingBy: period) == 0
+            }
+            XCTAssertEqual(solid, [period - 1], "a \(period)s period gates its tail on second \(period - 1)")
+        }
+    }
+
     /// A stack short of the period is padded, and the padding goes first so the
     /// pause falls at the start of the cycle rather than in the middle of the
     /// last clip.
