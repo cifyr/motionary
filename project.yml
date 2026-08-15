@@ -7,7 +7,7 @@ settings:
   base:
     SWIFT_VERSION: 6.0
     CURRENT_PROJECT_VERSION: 1
-    MARKETING_VERSION: "0.1"
+    MARKETING_VERSION: "1.0"
     DEVELOPMENT_TEAM: ZRUFVD5GDT
     CODE_SIGN_STYLE: Automatic
     SWIFT_STRICT_CONCURRENCY: minimal
@@ -216,6 +216,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.caden.MotionaryStudio
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        # Mac/Assets.xcassets, picked up with the rest of Mac/. Without a name
+        # here the catalog compiles but nothing points at it, and the Dock shows
+        # the generic application face.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # Runs xcodebuild and devicectl against the project it lives in, which
         # a sandboxed app cannot do.
         ENABLE_APP_SANDBOX: NO
