@@ -53,21 +53,40 @@ cp "$DESIGN_DIR/widget-backdrop.jpg" Resources/prebuilt-backdrop.jpg
 cp "$DESIGN_DIR/wallpaper.png" Resources/prebuilt-wallpaper.png
 
 python3 - <<'PY'
-import os, re
+import os, re, sys
+
+# Whitespace-tolerant, and the same pattern BundleWriter uses. The two regexes
+# here used to demand `</key><array>` with nothing between them, which neither
+# plist has ever been formatted as - so this step silently rewrote nothing
+# while printing that it had listed N fonts, and a design bundled this way
+# would install with its lanes undeclared and draw nothing.
+PATTERN = r'(?s)<key>UIAppFonts</key>\s*<array>.*?</array>'
+
+
+def rewrite(path, names):
+    text = open(path).read()
+    entries = "".join(f"\n    <string>{n}</string>" for n in names)
+    new, count = re.subn(
+        PATTERN, f'<key>UIAppFonts</key>\n  <array>{entries}\n  </array>', text
+    )
+    if count != 1:
+        sys.exit(f"    {path}: expected one UIAppFonts array, matched {count}; "
+                 "it may have been reformatted - fonts NOT updated")
+    open(path, 'w').write(new)
+
+
 fonts = sorted([f for f in os.listdir('Resources') if f.startswith('MFont') and f.endswith('.ttf')],
                key=lambda n: int(re.search(r'L(\d+)-', n).group(1)))
-inline = "".join(f"<string>{f}</string>" for f in fonts)
-block = "".join(f"\n    <string>{f}</string>" for f in fonts)
-s = open('Widget/Info.plist').read()
-s = re.sub(r'<key>UIAppFonts</key><array>.*?</array>',
-           f'<key>UIAppFonts</key><array><string>Custom-Regular.otf</string>{inline}</array>', s, flags=re.S)
-open('Widget/Info.plist', 'w').write(s)
-s = open('App/Info.plist').read()
-s = re.sub(r'  <key>UIAppFonts</key>\n  <array>.*?</array>\n',
-           f'  <key>UIAppFonts</key>\n  <array>\n    <string>Custom-Regular.otf</string>{block}\n  </array>\n',
-           s, flags=re.S)
-open('App/Info.plist', 'w').write(s)
-print(f"    UIAppFonts now lists {len(fonts)} lane fonts")
+# The blink fonts drive which lane is visible and are not part of any design.
+blink = ['Custom-Regular.otf', 'Blnk10-Regular.otf', 'Blnk05-Regular.otf',
+         'Blnk15-Regular.otf', 'Blnk20-Regular.otf', 'Blnk30-Regular.otf']
+rewrite('Widget/Info.plist', blink + fonts)
+# The app gets none of the lane fonts. It never draws the lane stack - it plays
+# the rendered video - and it no longer carries the files at all, so naming
+# them would declare fonts the bundle does not hold and log a failure per font
+# at every launch.
+rewrite('App/Info.plist', blink)
+print(f"    the widget's UIAppFonts now lists {len(fonts)} lane fonts; the app's lists none")
 PY
 
 echo "==> Installing on the phone"
