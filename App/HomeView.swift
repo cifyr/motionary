@@ -355,7 +355,13 @@ struct HomeView: View {
     /// the whole reason tiles are baked into it. So the phone bakes the
     /// effective tiles onto the tile-free variant itself. Designs built before
     /// that variant shipped fall back to the pre-baked file.
+    ///
+    /// Both routes end at the screen's own size. A design is baked on the
+    /// canvas the studio was cut for, and on any other phone that picture is
+    /// the wrong shape - iOS would fit it to the screen itself, sliding the
+    /// baked tiles out from under the widget frame drawn over them.
     private func export(entry: PrebuiltDesign.Entry, manifest: BuildManifest) async throws {
+        let screen = DeviceGeometry.screenPixelSize
         let longest = Int(max(manifest.screenSize.width, manifest.screenSize.height))
         guard let plainURL = entry.plainWallpaperURL,
               let base = ImageLoader.load(at: plainURL, maxPixelSize: longest)
@@ -363,7 +369,17 @@ struct HomeView: View {
             guard let url = entry.wallpaperURL else {
                 throw ExportError.wallpaperMissing(path: "prebuilt wallpaper for \(entry.name)")
             }
-            try await WallpaperExporter.saveToPhotos(url: url)
+            // The file is already the right size on the phone it was cut for,
+            // and sending the bytes untouched keeps that case exact.
+            guard manifest.screenSize != screen,
+                  let baked = ImageLoader.load(at: url, maxPixelSize: Int(max(screen.width, screen.height)))
+            else {
+                try await WallpaperExporter.saveToPhotos(url: url)
+                return
+            }
+            try await WallpaperExporter.saveToPhotos(
+                image: WallpaperComposer.rescaled(baked, to: screen)
+            )
             return
         }
 
@@ -409,7 +425,11 @@ struct HomeView: View {
                 return url.flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(tile.size)) }
             }
         )
-        try await WallpaperExporter.saveToPhotos(image: composed)
+        // Composed on the authored canvas so the tiles land where the design
+        // put them, then moved onto this screen as one picture.
+        try await WallpaperExporter.saveToPhotos(
+            image: WallpaperComposer.rescaled(composed, to: screen)
+        )
     }
 }
 

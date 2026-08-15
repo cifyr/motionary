@@ -79,6 +79,52 @@ enum WallpaperComposer {
         logger.info("baked \(tiles.count) tiles and \(assets.count) assets into the wallpaper")
         return composed
     }
+
+    /// The composed wallpaper at the size the screen it is going onto actually
+    /// is.
+    ///
+    /// A design is authored on one canvas - whatever the studio was cut for -
+    /// and `DeviceModel.derived` puts it on another phone by scaling x with the
+    /// width and y with the height. Doing the same two things to the picture is
+    /// what keeps the baked tiles under the widget frame that gets drawn over
+    /// them.
+    ///
+    /// Deliberately not an aspect-preserving fit. A fit would letterbox or
+    /// crop, and either one slides the artwork out from under the icons it was
+    /// drawn for - which is the single thing this bake exists to prevent. Every
+    /// iPhone that can run this is within a percent of the same aspect ratio,
+    /// so the distortion the honest transform costs is not visible.
+    static func rescaled(_ image: CGImage, to size: CGSize) -> CGImage {
+        let width = Int(size.width.rounded())
+        let height = Int(size.height.rounded())
+        guard width > 0, height > 0 else {
+            logger.error("asked for a \(Int(size.width))x\(Int(size.height)) wallpaper; keeping \(image.width)x\(image.height)")
+            return image
+        }
+        guard width != image.width || height != image.height else { return image }
+
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else {
+            logger.error("no bitmap context for \(width)x\(height); the wallpaper ships at \(image.width)x\(image.height)")
+            return image
+        }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
+
+        guard let scaled = context.makeImage() else {
+            logger.error("rescaled wallpaper could not be read back; shipping it at \(image.width)x\(image.height)")
+            return image
+        }
+        logger.info("wallpaper rescaled from \(image.width)x\(image.height) to \(width)x\(height) for this screen")
+        return scaled
+    }
 }
 
 /// The tiles and assets alone, on nothing, positioned the way `CompositionView`

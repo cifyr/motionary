@@ -157,6 +157,62 @@ final class WallpaperCompositionTests: XCTestCase {
         )
     }
 
+    // MARK: - Onto a phone the design was not authored for
+
+    func testTheWallpaperComesOutTheSizeOfTheScreen() throws {
+        let authored = try Self.solid(red: 0, green: 0, blue: 1, size: CGSize(width: 1206, height: 2622))
+        let scaled = WallpaperComposer.rescaled(authored, to: CGSize(width: 1170, height: 2532))
+        XCTAssertEqual(scaled.width, 1170)
+        XCTAssertEqual(scaled.height, 2532)
+    }
+
+    func testAWallpaperAlreadyTheRightSizeIsNotRedrawn() throws {
+        let authored = try Self.solid(red: 0, green: 0, blue: 1, size: screen)
+        XCTAssertTrue(
+            WallpaperComposer.rescaled(authored, to: screen) === authored,
+            "a wallpaper that already fits was re-encoded for nothing"
+        )
+    }
+
+    /// A size that cannot be drawn is refused rather than half-applied - a zero
+    /// screen would otherwise take the wallpaper with it.
+    func testAnImpossibleSizeKeepsTheWallpaperIntact() throws {
+        let authored = try Self.solid(red: 0, green: 0, blue: 1, size: screen)
+        XCTAssertTrue(WallpaperComposer.rescaled(authored, to: .zero) === authored)
+    }
+
+    /// The one that matters. A tile baked at the widget frame's corner on the
+    /// authored canvas has to still be at that corner once the picture is on
+    /// another phone, because the widget will draw its live half exactly there
+    /// - at the frame `DeviceModel.derived` works out for that screen.
+    func testABakedTileStaysUnderTheWidgetFrameOnAnotherPhone() throws {
+        let authoredScreen = DeviceModel.iPhone17Pro.screenPixelSize
+        let authoredFrame = DeviceModel.iPhone17Pro.widgetRect
+        let base = try Self.solid(red: 0, green: 0, blue: 1, size: authoredScreen)
+
+        let composed = WallpaperComposer.compose(
+            frame: base,
+            tiles: [skinnedTile(at: CGPoint(x: authoredFrame.minX, y: authoredFrame.midY), size: 240)],
+            screenSize: authoredScreen,
+            artwork: { _ in try? Self.solid(red: 1, green: 0, blue: 0, size: CGSize(width: 64, height: 64)) }
+        )
+
+        let other = CGSize(width: 1170, height: 2532)
+        let derived = DeviceModel.matching(screenPixelSize: other, scale: 3)
+        let pixels = try Pixels(WallpaperComposer.rescaled(composed, to: other))
+
+        // Either side of the derived frame's edge: the wallpaper carries the
+        // half the widget cannot draw, and both halves have to meet at the seam.
+        XCTAssertTrue(
+            pixels.isRed(x: Int(derived.widgetRect.minX) - 40, y: Int(derived.widgetRect.midY)),
+            "the outside half is not under the widget frame this phone will use"
+        )
+        XCTAssertTrue(
+            pixels.isRed(x: Int(derived.widgetRect.minX) + 40, y: Int(derived.widgetRect.midY)),
+            "the inside half moved out from under the frame"
+        )
+    }
+
     // MARK: - Helpers
 
     private nonisolated static func solid(red: CGFloat, green: CGFloat, blue: CGFloat, size: CGSize) throws -> CGImage {
