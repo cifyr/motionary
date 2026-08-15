@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>teamID</key>
+	<string>ZRUFVD5GDT</string>
+	<!-- Xcode picks the distribution profiles once they exist in the portal.
+	     Naming them here instead would mean editing this file every time one is
+	     regenerated, and getting it wrong reads as a signing failure. -->
+	<key>signingStyle</key>
+	<string>automatic</string>
+	<!-- The widget's lane fonts are the bulk of the bundle and they are already
+	     compressed; letting the store thin nothing is honest about the download
+	     size rather than promising a smaller one it cannot deliver. -->
+	<key>stripSwiftSymbols</key>
+	<true/>
+	<key>uploadSymbols</key>
+	<true/>
+	<key>destination</key>
+	<string>export</string>
+</dict>
+</plist>
