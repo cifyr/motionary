@@ -36,11 +36,32 @@ install pipeline from the starter designs' own `Skins` folders. Shipping
 without them means re-authoring the three starters with generic artwork and
 re-baking their wallpapers, or shipping no starter designs at all.
 
+## Known, and not fixed
+
+**The widget's own artwork does not fill a larger phone's frame.** Found while
+taking the 6.9" store screenshots, which is exactly where it shows:
+`build/store-shots/1-home-screen.png` has the design's backdrop sitting at its
+authored size inside a wider widget frame, with the wood edge of the source
+picture visible down the right.
+
+This is the third part of the same problem as the runtime geometry and the
+wallpaper, and the only one still open. `CompositionView` lays content out in
+authored screen pixels and converts to points with `1/displayScale` alone, so a
+composition cut for a 1206px-wide screen draws 1206px wide on a 1320px one -
+while the viewport it is placed into now comes from the derived device
+geometry. The two are in different spaces.
+
+The fix is a scale factor of `device width / authored width` on the content but
+not on the viewport offset, which is a change to the most delicate rendering
+code here, shared by the widget, the app and the studio. It is a no-op on the
+iPhone 17 Pro, where the factor is 1, so it cannot be judged on the one device
+with measured numbers - which is the reason it has not been done blind.
+
 ## Small
 
 **The three starters are the only thing a new install has to look at.** That is
 a product question rather than a review one, but it is the same decision as the
-item above and should be made once.
+brand-icon item above and should be made once.
 
 ## What passed
 
