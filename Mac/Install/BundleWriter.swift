@@ -211,7 +211,12 @@ struct BundleWriter {
         // rewrite, and no fonts to declare in one either.
         guard let projectRoot else { throw BundleWriterError.projectNotFound(path: resources.path) }
         try rewriteAppFonts(at: projectRoot.appendingPathComponent("Widget/Info.plist"), fonts: allFonts)
-        try rewriteAppFonts(at: projectRoot.appendingPathComponent("App/Info.plist"), fonts: allFonts)
+        // The app gets none of them. It previews a design by playing the
+        // rendered video, never by drawing the lane stack, so the 45MB of lane
+        // fonts it used to carry were registered and never asked for. Declaring
+        // a font the bundle no longer holds is worse than declaring nothing -
+        // it logs a failure per font at every launch.
+        try rewriteAppFonts(at: projectRoot.appendingPathComponent("App/Info.plist"), fonts: [])
 
         return Result(fontCount: allFonts.count, totalBytes: totalBytes)
     }

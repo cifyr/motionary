@@ -20,6 +20,18 @@ targets:
       - Shared
       - path: Resources
         buildPhase: resources
+        # The app and the extension used to carry identical copies of all of
+        # this - 253MB of the 507MB archive was the same files twice.
+        #
+        # The baked icons and skins now ship in the extension alone and the app
+        # reads them back out of its own PlugIns folder, which is a
+        # subdirectory of itself rather than anything sandboxed away. The lane
+        # fonts it simply does not need: the in-app preview plays the rendered
+        # video, and nothing in App/ draws the lane stack or names a lane font.
+        excludes:
+          - "prebuilt-icon-*.png"
+          - "prebuilt-skin-*.png"
+          - "MFont*.ttf"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.caden.Motionary
@@ -56,6 +68,14 @@ targets:
       # bundled here too so the extension can be diagnosed on its own.
       - path: Resources
         buildPhase: resources
+        # The other half of the split described on the app target. The
+        # extension never plays a video and never reads the tile-free
+        # wallpaper: it draws frames, and falls back to `-wallpaper.png` only
+        # when a design shipped without a baked backdrop, so that one stays.
+        excludes:
+          - "prebuilt-*-preview.mp4"
+          - "prebuilt-*-preview-*.mp4"
+          - "prebuilt-*-wallpaper-plain.png"
       - Shared
     settings:
       base:
