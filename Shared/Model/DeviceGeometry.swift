@@ -227,8 +227,12 @@ struct DeviceModel: Identifiable, Hashable, Sendable {
     }
 
     /// Whether this model's numbers were measured against hardware or scaled
-    /// from a phone that was. The editor says which, because a design cut on a
-    /// derived one needs its position checked against the real Home Screen.
+    /// from a phone that was.
+    ///
+    /// Read at runtime, where it decides what the phone logs about its own
+    /// geometry. Not in the editor: `all` holds one entry, so the studio only
+    /// ever offers the measured phone and a derived model cannot appear in its
+    /// picker.
     var isMeasured: Bool { Self.all.contains(self) }
 }
 
@@ -242,9 +246,9 @@ struct DeviceModel: Identifiable, Hashable, Sendable {
 /// 36x90px. On iOS the screen is now read at launch and the model matched to
 /// it; on the Mac there is no screen to read, so the studio keeps choosing.
 ///
-/// A derived model is an approximation - see `DeviceModel.derived` - and the
-/// editor says so, because a design cut on one wants checking against the
-/// real Home Screen before it is trusted.
+/// A derived model is an approximation - see `DeviceModel.derived` - and says
+/// so in the log at launch, because a design shown on one wants checking
+/// against the real Home Screen before its placement is trusted.
 enum DeviceGeometry {
 #if os(iOS)
     private static let logger = Logger(subsystem: "com.caden.Motionary", category: "DeviceGeometry")
