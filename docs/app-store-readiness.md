@@ -66,13 +66,12 @@ brand-icon item above and should be made once.
   shows neither framework. The only location-adjacent thing left is the
   weak-linked Swift overlay EventKit brings in for the calendar readout, which
   is declared and used.
-- **The build is no longer cut for one phone.** Four parts, all done: the app
-  and the extension read the screen at launch and derive geometry for it; the
-  exported wallpaper is rescaled to that screen; the app's preview is laid out
-  through `DeviceGeometry.pointsPerAuthoredPixel`, so a design cut on one
+- **The build is no longer cut for one phone.** Three parts: the app and the
+  extension read the screen at launch and derive geometry for it; the exported
+  wallpaper is rescaled to that screen; and both renderers lay the composition
+  out through `DeviceGeometry.pointsPerAuthoredPixel`, so a design cut on one
   canvas fills the screen of another rather than drawing at its authored width
-  and leaving the rest black; and the widget takes its scale from the frame the
-  system actually hands the extension.
+  and leaving the rest black.
 
   The widget uses the screen ratio and has to. The wallpaper under it was
   exported at that ratio, and baking tiles into the wallpaper only works if a
