@@ -81,11 +81,23 @@ brand-icon item above and should be made once.
   family the design was cut for, and a `systemLarge` standing in for the
   portrait extra-large then shrank the whole composition by 2.8%.
 
-  Measured, app against widget, same static tile, absolute screen coordinates.
-  Both phones now render it at the same size - area ratio 0.9995 on the 17 Pro
-  and 0.9981 on the Pro Max, against 0.94 and 0.92 while the scale was wrong.
-  On the 6.9" simulator the app's screen also has no black column left at all,
-  where 114 of 1320 were pure black before.
+  Swept across every iPhone simulator size with `Tools/geometry-sweep.sh`.
+  **The composition reaches both edges on all five**, where a design cut for a
+  narrower canvas used to stop short and leave black:
+
+  | device | screen | drawn | widget handed over | dx | dy |
+  | --- | --- | --- | --- | --- | --- |
+  | iPhone 17e | 1170x2532 | 1170/1170 | 342x358pt | +10 | -60 |
+  | iPhone 17 | 1206x2622 | 1206/1206 | 349x365pt | +15 | 0 |
+  | iPhone Air | 1260x2736 | 1260/1260 | 366x382pt | +13 | +6 |
+  | iPhone 17 Pro | 1206x2622 | 1206/1206 | 349x365pt | +15 | 0 |
+  | iPhone 17 Pro Max | 1320x2868 | 1320/1320 | 378x394pt | +23 | -13 |
+
+  The offsets are the widget against the app, found by correlating a patch of
+  the app's render into the Home Screen shot - mean difference 0.3 to 0.4, so
+  the match is the same static tile rather than something that merely looks
+  similar. **They are not a layout fault, and they are not a clean measurement
+  either**: see the note under "Not checked".
 - **The app is 262MB**, down from 507MB. Half of it was the app and the
   extension carrying identical copies of the same artwork and fonts.
 - **First run works on a clean device.** No empty state, no permission wall, no
@@ -105,15 +117,28 @@ brand-icon item above and should be made once.
   geometry has been exercised on simulators only; the note on `DeviceModel`
   records that an earlier derivation was 22px out on real hardware, and only
   hardware settles it.
-- **Widget alignment cannot be finished on a simulator at all.** Designs are cut
-  for the portrait extra-large family, which is iOS 27 only; the simulators here
-  fall back to `systemLarge` (`family=2`, 349x365pt and 378x394pt). So the
-  widget is told it sits at the extra-large's origin while the system places a
-  systemLarge somewhere else, and the leftover offset is that difference rather
-  than a layout fault - +15,0 predicted and +14.9,0.0 measured on the 17 Pro,
-  +22,-13 predicted and +22.9,-13.0 on the Pro Max. The vertical coming out
-  dead on for the 17 Pro is the one corroboration available here that the
-  measured origin is right. Alignment on any other phone needs that phone.
+- **Widget alignment cannot be settled on a simulator at all.** Designs are cut
+  for the portrait extra-large family, which is iOS 27 only; every simulator
+  here falls back to `systemLarge` (`family=2` on all five). So the widget is
+  told it sits at the extra-large's origin while the system places a
+  systemLarge somewhere else, and the offsets in the table above are that
+  difference. The horizontal half is explained exactly by it - a systemLarge is
+  centred, so the predicted offset is `(screen - handedOver*3)/2` minus the
+  derived origin, which lands within 1.5px of every measurement:
+
+  | device | assumed x | systemLarge at | predicted | measured |
+  | --- | --- | --- | --- | --- |
+  | iPhone 17e | 62.1 | 72.0 | +9.9 | +10 |
+  | iPhone 17 / 17 Pro | 64.0 | 79.5 | +15.5 | +15 |
+  | iPhone Air | 66.9 | 81.0 | +14.1 | +13 |
+  | iPhone 17 Pro Max | 70.0 | 93.0 | +23.0 | +23 |
+
+  So these numbers say nothing about the error on a real iOS 27 phone, where
+  the family is the one the design was cut for. What they do say is that the
+  vertical origin is the weak part of the derivation: it lands dead on for the
+  17 Pro, which is the measured phone, and is 60px out on the 17e. That is the
+  same warning `DeviceModel` already carries, now with a second data point.
+  Alignment on any other phone needs that phone.
 - Anything requiring App Store Connect credentials, including the real upload
   validation that runs server-side.
 - VoiceOver, Dynamic Type and RTL layout.
