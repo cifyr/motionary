@@ -74,22 +74,19 @@ brand-icon item above and should be made once.
   and leaving the rest black; and the widget takes its scale from the frame the
   system actually hands the extension.
 
-  That last one is separate on purpose. A widget's size comes from Apple's
-  per-device point table and does not track the screen - 17 Pro to 17 Pro Max
-  is 9.5% more screen but only 8.3% more widget (349x365pt against 378x394pt,
-  read from the render log on each). Scaling the widget's content by the screen
-  ratio therefore over-scaled it inside the real frame and cropped it tighter
-  than the app showed the same design. Dividing by the handed-over width
-  instead makes the visible slice exactly `viewport.width` authored pixels on
-  every phone, because the width cancels.
+  The widget uses the screen ratio and has to. The wallpaper under it was
+  exported at that ratio, and baking tiles into the wallpaper only works if a
+  tile crossing the widget's edge reads whole - a widget drawn at any other
+  scale cannot continue the picture it sits on. Dividing by the handed-over
+  frame instead was tried and reverted: it assumes the placed widget is the
+  family the design was cut for, and a `systemLarge` standing in for the
+  portrait extra-large then shrank the whole composition by 2.8%.
 
-  Measured rather than eyeballed. On the 6.9" simulator the app's screen has no
-  black column left at all (114 of 1320 were pure black before), and the
-  widget's static Spotify tile lands within 0.3px of the same place in the
-  frame as it does on the 17 Pro, at the same apparent size - so both phones
-  show the same crop of the design. The iPhone 17 Pro itself is untouched by
-  any of it: the factors are exactly 1 and 1/3 there, and its app screen is
-  pixel-identical before and after (`compare -metric AE` reports 0).
+  Measured, app against widget, same static tile, absolute screen coordinates.
+  Both phones now render it at the same size - area ratio 0.9995 on the 17 Pro
+  and 0.9981 on the Pro Max, against 0.94 and 0.92 while the scale was wrong.
+  On the 6.9" simulator the app's screen also has no black column left at all,
+  where 114 of 1320 were pure black before.
 - **The app is 262MB**, down from 507MB. Half of it was the app and the
   extension carrying identical copies of the same artwork and fonts.
 - **First run works on a clean device.** No empty state, no permission wall, no
@@ -97,7 +94,7 @@ brand-icon item above and should be made once.
 - **The widget draws after the resource split.** `OK PLACED
   bundled/UIAppFonts anim=true` at 22-31MB against a 45MB ceiling, and the app
   draws skins that are no longer in its own bundle.
-- **669 unit tests and 2 UI tests pass.**
+- **663 unit tests and 2 UI tests pass.**
 - **Launching other apps needs no `LSApplicationQueriesSchemes`.** The router
   calls `UIApplication.open` directly and never `canOpenURL`.
 - **`UILaunchScreen` present, orientation locked to portrait, app group
@@ -109,6 +106,15 @@ brand-icon item above and should be made once.
   geometry has been exercised on simulators only; the note on `DeviceModel`
   records that an earlier derivation was 22px out on real hardware, and only
   hardware settles it.
+- **Widget alignment cannot be finished on a simulator at all.** Designs are cut
+  for the portrait extra-large family, which is iOS 27 only; the simulators here
+  fall back to `systemLarge` (`family=2`, 349x365pt and 378x394pt). So the
+  widget is told it sits at the extra-large's origin while the system places a
+  systemLarge somewhere else, and the leftover offset is that difference rather
+  than a layout fault - +15,0 predicted and +14.9,0.0 measured on the 17 Pro,
+  +22,-13 predicted and +22.9,-13.0 on the Pro Max. The vertical coming out
+  dead on for the 17 Pro is the one corroboration available here that the
+  measured origin is right. Alignment on any other phone needs that phone.
 - Anything requiring App Store Connect credentials, including the real upload
   validation that runs server-side.
 - VoiceOver, Dynamic Type and RTL layout.

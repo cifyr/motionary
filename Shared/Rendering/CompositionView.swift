@@ -57,32 +57,34 @@ struct CompositionView<Tile: View>: View {
             // position depend on the widget-size table being exactly right,
             // and a 1.6% width error drifts content by ~16px over a large
             // widget — visible as the scene jumping when the app opens.
-            // Everything here is in the pixels of the canvas the design was
-            // authored on, including `viewport` - and the scale comes from the
-            // frame the system actually handed over, which is the only
-            // measurement of it that cannot be wrong.
+            // Two factors, because the two inputs are in different spaces. The
+            // composition is in the pixels of the canvas it was authored on;
+            // the viewport is this phone's widget rect, in this phone's pixels.
             //
-            // Deriving it from `1/displayScale` instead assumed the authored
-            // canvas and the real screen were the same size. Deriving it from
-            // the screen ratio assumed the widget grows with the screen, and it
-            // does not: 17 Pro to 17 Pro Max is 9.5% more screen and 8.3% more
-            // widget, so the composition came out over-scaled inside the real
-            // frame and cropped tighter than the app's preview of it.
+            // The content factor is the screen ratio and has to be, because the
+            // wallpaper under this widget was exported at that ratio and the
+            // whole point of baking tiles into it is that a tile crossing the
+            // frame reads whole. A widget drawn at any other scale cannot
+            // continue the picture it sits on.
             //
-            // Exactly `1/displayScale` on the phone a design was cut for, where
-            // the handed-over frame is the authored rect by definition.
-            let scale = DeviceGeometry.widgetPointsPerAuthoredPixel(
-                handedOverWidth: geometry.size.width,
-                authoredViewportWidth: viewport.width,
-                displayScale: displayScale
+            // Deliberately not the handed-over frame's own ratio, which was
+            // tried: it assumes the placed widget is the family the design was
+            // cut for, and a systemLarge standing in for a portrait
+            // extra-large then shrinks the whole composition by 2.8%.
+            let devicePoints = 1 / max(displayScale, 1)
+            let scale = DeviceGeometry.pointsPerAuthoredPixel(
+                authoredWidth: manifest.screenSize.width, displayScale: displayScale
             )
             let screen = CGSize(
                 width: manifest.screenSize.width * scale,
                 height: manifest.screenSize.height * scale
             )
-            // Screen-space origin expressed in this view's coordinates.
-            let originX = -viewport.minX * scale
-            let originY = -viewport.minY * scale
+            // Screen-space origin expressed in this view's coordinates. The
+            // device factor, not the content one: the viewport is already in
+            // this phone's pixels, and taking the authored factor to it too is
+            // what put the source picture's own edge inside the frame.
+            let originX = -viewport.minX * devicePoints
+            let originY = -viewport.minY * devicePoints
 
             ZStack(alignment: .topLeading) {
                 Color.black
