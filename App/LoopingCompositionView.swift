@@ -37,8 +37,15 @@ struct LoopingCompositionView<Tile: View>: View {
 
     var body: some View {
         GeometryReader { geometry in
+            // `.device` means "line up with the real Home Screen", so the
+            // canvas the design was authored on has to be mapped onto this
+            // phone's screen first. Without it a design cut for a narrower
+            // phone drew at its authored width and left a black band down the
+            // side of the preview.
             let scale = scaleMode == .device
-                ? 1 / max(displayScale, 1)
+                ? DeviceGeometry.pointsPerAuthoredPixel(
+                    authoredWidth: screenSize.width, displayScale: displayScale
+                )
                 : geometry.size.width / viewport.width
             let screen = CGSize(width: screenSize.width * scale, height: screenSize.height * scale)
             // At device scale the viewport's top-left pins to the view's

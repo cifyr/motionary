@@ -57,14 +57,24 @@ struct CompositionView<Tile: View>: View {
             // position depend on the widget-size table being exactly right,
             // and a 1.6% width error drifts content by ~16px over a large
             // widget — visible as the scene jumping when the app opens.
-            let scale = 1 / max(displayScale, 1)
+            // Two factors, because the two inputs are in different spaces. The
+            // composition is in the pixels of the canvas it was authored on;
+            // the viewport is this phone's widget rect, in this phone's pixels.
+            // They were the same number for as long as every build was cut for
+            // one phone, and multiplying the viewport by the authored scale is
+            // what put the source picture's own edge inside the frame on a
+            // wider screen.
+            let devicePoints = 1 / max(displayScale, 1)
+            let scale = DeviceGeometry.pointsPerAuthoredPixel(
+                authoredWidth: manifest.screenSize.width, displayScale: displayScale
+            )
             let screen = CGSize(
                 width: manifest.screenSize.width * scale,
                 height: manifest.screenSize.height * scale
             )
             // Screen-space origin expressed in this view's coordinates.
-            let originX = -viewport.minX * scale
-            let originY = -viewport.minY * scale
+            let originX = -viewport.minX * devicePoints
+            let originY = -viewport.minY * devicePoints
 
             ZStack(alignment: .topLeading) {
                 Color.black

@@ -307,6 +307,31 @@ enum DeviceGeometry {
     /// the left of it - see `DeviceModel.iPhone17Pro`.
     static var renderedWidgetRect: CGRect { model.widgetRenderedRect }
 
+    /// Points per pixel of the canvas a design was authored on.
+    ///
+    /// A composition is laid out in the screen pixels of whatever phone it was
+    /// cut for, and shown on whatever phone is running. Converting with
+    /// `1/displayScale` alone treats those as the same number, so a design cut
+    /// at 1206px drew 1206px wide on a 1320px screen and left the rest black -
+    /// in the app as a band down the side, in the widget as the source
+    /// picture's own edge showing inside the frame.
+    ///
+    /// Driven by width and applied to both axes, so tiles stay square. Every
+    /// iPhone that can run this is within a percent of the same aspect ratio,
+    /// which is the same reasoning the exported wallpaper's rescale uses.
+    ///
+    /// Exactly `1/displayScale` when the design was authored for this screen,
+    /// so the phone with measured geometry is unaffected.
+    static func pointsPerAuthoredPixel(
+        authoredWidth: CGFloat,
+        deviceWidth: CGFloat = DeviceGeometry.screenPixelSize.width,
+        displayScale: CGFloat
+    ) -> CGFloat {
+        let points = 1 / max(displayScale, 1)
+        guard authoredWidth > 0, deviceWidth > 0 else { return points }
+        return points * (deviceWidth / authoredWidth)
+    }
+
     /// Widget rect with the design's manual correction applied and clamped to
     /// the screen, so a large nudge can never crop outside the composition.
     static func widgetRect(nudge: CGPoint) -> CGRect {

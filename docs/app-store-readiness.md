@@ -36,27 +36,6 @@ install pipeline from the starter designs' own `Skins` folders. Shipping
 without them means re-authoring the three starters with generic artwork and
 re-baking their wallpapers, or shipping no starter designs at all.
 
-## Known, and not fixed
-
-**The widget's own artwork does not fill a larger phone's frame.** Found while
-taking the 6.9" store screenshots, which is exactly where it shows:
-`build/store-shots/1-home-screen.png` has the design's backdrop sitting at its
-authored size inside a wider widget frame, with the wood edge of the source
-picture visible down the right.
-
-This is the third part of the same problem as the runtime geometry and the
-wallpaper, and the only one still open. `CompositionView` lays content out in
-authored screen pixels and converts to points with `1/displayScale` alone, so a
-composition cut for a 1206px-wide screen draws 1206px wide on a 1320px one -
-while the viewport it is placed into now comes from the derived device
-geometry. The two are in different spaces.
-
-The fix is a scale factor of `device width / authored width` on the content but
-not on the viewport offset, which is a change to the most delicate rendering
-code here, shared by the widget, the app and the studio. It is a no-op on the
-iPhone 17 Pro, where the factor is 1, so it cannot be judged on the one device
-with measured numbers - which is the reason it has not been done blind.
-
 ## Small
 
 **The three starters are the only thing a new install has to look at.** That is
@@ -87,11 +66,16 @@ brand-icon item above and should be made once.
   shows neither framework. The only location-adjacent thing left is the
   weak-linked Swift overlay EventKit brings in for the calendar readout, which
   is declared and used.
-- **The build is no longer cut for one phone.** The app and the extension read
-  the screen at launch and derive geometry for it, and the exported wallpaper is
-  rescaled to that screen by the same transform, so the baked tiles stay
-  registered with the widget frame drawn over them. The iPhone 17 Pro still
-  resolves to its measured numbers rather than becoming an approximation.
+- **The build is no longer cut for one phone.** Three parts, all done: the app
+  and the extension read the screen at launch and derive geometry for it; the
+  exported wallpaper is rescaled to that screen; and the composition itself is
+  laid out through `DeviceGeometry.pointsPerAuthoredPixel`, so a design cut on
+  one canvas fills the screen of another instead of drawing at its authored
+  width and leaving the rest black. Verified on a 6.9" simulator, where the
+  band down the side of the app and the source picture's edge inside the widget
+  frame both went away. The iPhone 17 Pro is untouched by all of it - the
+  factor is exactly 1 there, and the app's screen is pixel-identical before and
+  after (`compare -metric AE` reports 0).
 - **The app is 262MB**, down from 507MB. Half of it was the app and the
   extension carrying identical copies of the same artwork and fonts.
 - **First run works on a clean device.** No empty state, no permission wall, no
@@ -99,7 +83,7 @@ brand-icon item above and should be made once.
 - **The widget draws after the resource split.** `OK PLACED
   bundled/UIAppFonts anim=true` at 22-31MB against a 45MB ceiling, and the app
   draws skins that are no longer in its own bundle.
-- **659 unit tests and 2 UI tests pass.**
+- **664 unit tests and 2 UI tests pass.**
 - **Launching other apps needs no `LSApplicationQueriesSchemes`.** The router
   calls `UIApplication.open` directly and never `canOpenURL`.
 - **`UILaunchScreen` present, orientation locked to portrait, app group

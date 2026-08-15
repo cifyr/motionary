@@ -90,6 +90,67 @@ final class DerivedGeometryTests: XCTestCase {
         }
     }
 
+    // MARK: - Showing a design cut for another phone
+
+    /// The measured phone must come out at exactly one point per three pixels,
+    /// or every design that already looks right on it moves.
+    func testTheAuthoredScaleIsUntouchedOnThePhoneItWasCutFor() {
+        let scale = DeviceGeometry.pointsPerAuthoredPixel(
+            authoredWidth: 1206, deviceWidth: 1206, displayScale: 3
+        )
+        XCTAssertEqual(scale, 1.0 / 3.0, accuracy: 1e-12)
+    }
+
+    /// The band down the side of the preview: 1206 authored pixels have to
+    /// cover all 1320 of a wider screen, not 1206 of them.
+    func testAWiderScreenIsCoveredEdgeToEdge() {
+        let scale = DeviceGeometry.pointsPerAuthoredPixel(
+            authoredWidth: 1206, deviceWidth: 1320, displayScale: 3
+        )
+        XCTAssertEqual(1206 * scale, 1320 / 3, accuracy: 0.001, "the composition does not reach the edge")
+    }
+
+    func testANarrowerScreenIsNotOverrun() {
+        let scale = DeviceGeometry.pointsPerAuthoredPixel(
+            authoredWidth: 1206, deviceWidth: 1170, displayScale: 3
+        )
+        XCTAssertEqual(1206 * scale, 1170 / 3, accuracy: 0.001)
+    }
+
+    /// A manifest with no screen size recorded must not take the composition
+    /// to zero or infinity; it falls back to life size.
+    func testAnUnusableCanvasFallsBackToLifeSize() {
+        for width in [CGFloat(0), -1206] {
+            XCTAssertEqual(
+                DeviceGeometry.pointsPerAuthoredPixel(
+                    authoredWidth: width, deviceWidth: 1320, displayScale: 3
+                ),
+                1.0 / 3.0,
+                accuracy: 1e-12,
+                "an authored width of \(width) did not fall back"
+            )
+        }
+    }
+
+    /// The widget places content by the authored scale and its viewport by the
+    /// device one. Multiplying the viewport by the authored scale is what put
+    /// the picture's own edge inside the frame, so the two must stay distinct
+    /// wherever the design was not cut for this phone.
+    func testTheViewportAndTheContentDoNotShareAScaleOnAnotherPhone() {
+        let authored = DeviceGeometry.pointsPerAuthoredPixel(
+            authoredWidth: 1206, deviceWidth: 1320, displayScale: 3
+        )
+        XCTAssertNotEqual(authored, 1.0 / 3.0, accuracy: 1e-6)
+        XCTAssertEqual(
+            DeviceGeometry.pointsPerAuthoredPixel(
+                authoredWidth: 1206, deviceWidth: 1206, displayScale: 3
+            ),
+            1.0 / 3.0,
+            accuracy: 1e-12,
+            "they must still coincide on the phone the design was cut for"
+        )
+    }
+
     /// A phone smaller than the measured one is the case that would push the
     /// composition off the edge if anything were carried across unscaled.
     func testASmallerPhoneKeepsEverythingInside() {
