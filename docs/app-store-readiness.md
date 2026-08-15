@@ -66,16 +66,30 @@ brand-icon item above and should be made once.
   shows neither framework. The only location-adjacent thing left is the
   weak-linked Swift overlay EventKit brings in for the calendar readout, which
   is declared and used.
-- **The build is no longer cut for one phone.** Three parts, all done: the app
+- **The build is no longer cut for one phone.** Four parts, all done: the app
   and the extension read the screen at launch and derive geometry for it; the
-  exported wallpaper is rescaled to that screen; and the composition itself is
-  laid out through `DeviceGeometry.pointsPerAuthoredPixel`, so a design cut on
-  one canvas fills the screen of another instead of drawing at its authored
-  width and leaving the rest black. Verified on a 6.9" simulator, where the
-  band down the side of the app and the source picture's edge inside the widget
-  frame both went away. The iPhone 17 Pro is untouched by all of it - the
-  factor is exactly 1 there, and the app's screen is pixel-identical before and
-  after (`compare -metric AE` reports 0).
+  exported wallpaper is rescaled to that screen; the app's preview is laid out
+  through `DeviceGeometry.pointsPerAuthoredPixel`, so a design cut on one
+  canvas fills the screen of another rather than drawing at its authored width
+  and leaving the rest black; and the widget takes its scale from the frame the
+  system actually hands the extension.
+
+  That last one is separate on purpose. A widget's size comes from Apple's
+  per-device point table and does not track the screen - 17 Pro to 17 Pro Max
+  is 9.5% more screen but only 8.3% more widget (349x365pt against 378x394pt,
+  read from the render log on each). Scaling the widget's content by the screen
+  ratio therefore over-scaled it inside the real frame and cropped it tighter
+  than the app showed the same design. Dividing by the handed-over width
+  instead makes the visible slice exactly `viewport.width` authored pixels on
+  every phone, because the width cancels.
+
+  Measured rather than eyeballed. On the 6.9" simulator the app's screen has no
+  black column left at all (114 of 1320 were pure black before), and the
+  widget's static Spotify tile lands within 0.3px of the same place in the
+  frame as it does on the 17 Pro, at the same apparent size - so both phones
+  show the same crop of the design. The iPhone 17 Pro itself is untouched by
+  any of it: the factors are exactly 1 and 1/3 there, and its app screen is
+  pixel-identical before and after (`compare -metric AE` reports 0).
 - **The app is 262MB**, down from 507MB. Half of it was the app and the
   extension carrying identical copies of the same artwork and fonts.
 - **First run works on a clean device.** No empty state, no permission wall, no
@@ -83,7 +97,7 @@ brand-icon item above and should be made once.
 - **The widget draws after the resource split.** `OK PLACED
   bundled/UIAppFonts anim=true` at 22-31MB against a 45MB ceiling, and the app
   draws skins that are no longer in its own bundle.
-- **664 unit tests and 2 UI tests pass.**
+- **669 unit tests and 2 UI tests pass.**
 - **Launching other apps needs no `LSApplicationQueriesSchemes`.** The router
   calls `UIApplication.open` directly and never `canOpenURL`.
 - **`UILaunchScreen` present, orientation locked to portrait, app group

@@ -332,6 +332,58 @@ enum DeviceGeometry {
         return points * (deviceWidth / authoredWidth)
     }
 
+    /// The same thing for the widget, which cannot use the screen ratio.
+    ///
+    /// A widget's size comes from Apple's per-device point table, so it does
+    /// not grow with the screen - 17 Pro to 17 Pro Max is 9.5% more screen and
+    /// 8.3% more widget. Scaling by the screen ratio therefore over-scales the
+    /// composition inside the real frame and crops it tighter.
+    ///
+    /// The frame the system hands over is the one measurement of it that
+    /// cannot be wrong, so that is what this divides by. The consequence worth
+    /// stating: the visible slice of the design is `authoredViewportWidth`
+    /// authored pixels on every phone, because the width cancels - which is
+    /// what makes the crop the same everywhere.
+    static func widgetPointsPerAuthoredPixel(
+        handedOverWidth: CGFloat,
+        authoredViewportWidth: CGFloat,
+        displayScale: CGFloat
+    ) -> CGFloat {
+        guard handedOverWidth > 0, authoredViewportWidth > 0 else {
+            return 1 / max(displayScale, 1)
+        }
+        return handedOverWidth / authoredViewportWidth
+    }
+
+    /// The widget's rendered rect on the canvas a design was authored on, in
+    /// that canvas's pixels.
+    ///
+    /// Not this phone's rect. A widget's size comes from Apple's per-device
+    /// point table and does not track the screen: going from the 17 Pro to the
+    /// 17 Pro Max the screen grows 9.5% while the large widget grows 8.3%.
+    /// Scaling the composition by the screen ratio therefore over-scales it
+    /// inside the real frame and tightens the crop, which is what made the
+    /// widget disagree with the app's preview of the same design.
+    ///
+    /// So the widget lays out entirely in authored pixels and gets its scale
+    /// from the frame the system actually hands it. This is the constant half
+    /// of that: where the widget sat on the canvas the design was cut for.
+    static func authoredRenderedWidgetRect(authoredScreen: CGSize) -> CGRect {
+        let base = DeviceModel.default
+        guard authoredScreen.width > 0, authoredScreen.height > 0 else {
+            return base.widgetRenderedRect
+        }
+        let kx = authoredScreen.width / base.screenPixelSize.width
+        let ky = authoredScreen.height / base.screenPixelSize.height
+        let rect = base.widgetRenderedRect
+        return CGRect(
+            x: rect.minX * kx,
+            y: rect.minY * ky,
+            width: rect.width * kx,
+            height: rect.height * ky
+        )
+    }
+
     /// Widget rect with the design's manual correction applied and clamped to
     /// the screen, so a large nudge can never crop outside the composition.
     static func widgetRect(nudge: CGPoint) -> CGRect {

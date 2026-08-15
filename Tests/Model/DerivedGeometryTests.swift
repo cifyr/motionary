@@ -132,22 +132,81 @@ final class DerivedGeometryTests: XCTestCase {
         }
     }
 
-    /// The widget places content by the authored scale and its viewport by the
-    /// device one. Multiplying the viewport by the authored scale is what put
-    /// the picture's own edge inside the frame, so the two must stay distinct
-    /// wherever the design was not cut for this phone.
-    func testTheViewportAndTheContentDoNotShareAScaleOnAnotherPhone() {
-        let authored = DeviceGeometry.pointsPerAuthoredPixel(
-            authoredWidth: 1206, deviceWidth: 1320, displayScale: 3
+    // MARK: - The widget's own frame
+
+    /// The widget lays out against the canvas it was authored on, so this rect
+    /// must not move when the phone changes - only the frame the system hands
+    /// over does.
+    func testTheAuthoredWidgetRectIsTheCanvasNotThePhone() {
+        let rect = DeviceGeometry.authoredRenderedWidgetRect(
+            authoredScreen: DeviceModel.iPhone17Pro.screenPixelSize
         )
-        XCTAssertNotEqual(authored, 1.0 / 3.0, accuracy: 1e-6)
+        XCTAssertEqual(rect, DeviceModel.iPhone17Pro.widgetRenderedRect)
+    }
+
+    func testAnUnusableCanvasFallsBackToTheAuthoringDevices() {
         XCTAssertEqual(
-            DeviceGeometry.pointsPerAuthoredPixel(
-                authoredWidth: 1206, deviceWidth: 1206, displayScale: 3
+            DeviceGeometry.authoredRenderedWidgetRect(authoredScreen: .zero),
+            DeviceModel.default.widgetRenderedRect
+        )
+    }
+
+    /// The measurement this whole approach rests on: a widget's size comes
+    /// from Apple's per-device point table and does not track the screen. From
+    /// the 17 Pro to the 17 Pro Max the screen grows about 9.5% and the large
+    /// widget about 8.3%, so scaling the composition by the screen ratio
+    /// over-scales it inside the real frame.
+    func testTheWidgetDoesNotGrowWithTheScreen() {
+        let screenRatio = 1320.0 / 1206.0
+        // Both measured from the size the system hands the extension:
+        // 349x365pt on the 17 Pro, 378x394pt on the 17 Pro Max.
+        let widgetRatio = 378.0 / 349.0
+        XCTAssertGreaterThan(
+            screenRatio - widgetRatio, 0.005,
+            "if these agreed, scaling content by the screen ratio would be fine"
+        )
+    }
+
+    /// One point per three authored pixels on the phone a design was cut for,
+    /// where the frame handed over is the authored rect.
+    func testTheWidgetScaleIsLifeSizeOnTheAuthoringPhone() {
+        let authored = DeviceModel.iPhone17Pro.widgetRenderedRect.width
+        let scale = DeviceGeometry.widgetPointsPerAuthoredPixel(
+            handedOverWidth: authored / 3, authoredViewportWidth: authored, displayScale: 3
+        )
+        XCTAssertEqual(scale, 1.0 / 3.0, accuracy: 1e-12)
+    }
+
+    /// What the user sees as "the widget is cropped differently": the slice of
+    /// the design on show has to be the same authored region on every phone,
+    /// whatever size frame the system provides.
+    func testEveryPhoneSeesTheSameSliceOfTheDesign() {
+        let authored = DeviceGeometry.authoredRenderedWidgetRect(
+            authoredScreen: CGSize(width: 1206, height: 2622)
+        )
+        // Handed-over widths measured from the render log on each device.
+        for handedOver in [349.6667, 378.6667, 320.0] {
+            let scale = DeviceGeometry.widgetPointsPerAuthoredPixel(
+                handedOverWidth: handedOver,
+                authoredViewportWidth: authored.width,
+                displayScale: 3
+            )
+            XCTAssertEqual(
+                handedOver / scale, authored.width, accuracy: 0.001,
+                "a \(handedOver)pt frame shows a different slice of the design"
+            )
+        }
+    }
+
+    /// A frame of zero arrives during snapshotting; it must not divide the
+    /// composition to nothing.
+    func testAWidgetWithNoFrameYetFallsBackToLifeSize() {
+        XCTAssertEqual(
+            DeviceGeometry.widgetPointsPerAuthoredPixel(
+                handedOverWidth: 0, authoredViewportWidth: 1049, displayScale: 3
             ),
             1.0 / 3.0,
-            accuracy: 1e-12,
-            "they must still coincide on the phone the design was cut for"
+            accuracy: 1e-12
         )
     }
 

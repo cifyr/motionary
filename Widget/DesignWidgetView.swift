@@ -85,10 +85,17 @@ struct DesignWidgetView: View {
                 // SwiftUI over the frozen animation exactly like an authored
                 // one, so the widget draws both without a rebuild.
                 tiles: SlotChoices.effectiveTiles(manifest: source.manifest),
-                // The rendered rect, not the cut frame: only the viewport's
-                // origin positions content, and the system's origin is 2px left
-                // of the frame a design is cut to.
-                viewport: DeviceGeometry.renderedWidgetRect,
+                // The rendered rect, not the cut frame: the system's origin is
+                // 2px left of the frame a design is cut to.
+                //
+                // The authored canvas's rect rather than this phone's, because
+                // the composition is in authored pixels and the view takes its
+                // scale from the frame it is actually given - see
+                // `authoredRenderedWidgetRect`. On the phone a design was cut
+                // for these are the same rect.
+                viewport: DeviceGeometry.authoredRenderedWidgetRect(
+                    authoredScreen: source.manifest.screenSize
+                ),
                 wallpaper: source.backdrop,
                 wallpaperRect: source.manifest.backdropRect,
                 isAnimated: source.fontsUsable,
@@ -201,7 +208,9 @@ struct DesignWidgetView: View {
             outcomes: outcomes,
             // Same viewport as the real render, so the lab is not a second
             // renderer positioned differently from the one it stands in for.
-            viewport: DeviceGeometry.renderedWidgetRect
+            viewport: DeviceGeometry.authoredRenderedWidgetRect(
+                authoredScreen: manifest.screenSize
+            )
         )
     }
 
