@@ -36,6 +36,10 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.caden.Motionary
         INFOPLIST_FILE: App/Info.plist
+        # The composition is laid out for iPhone screens that were measured;
+        # the default "1,2" would also offer it to iPads, where it has never
+        # been looked at, and App Review looks there first.
+        TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_ENTITLEMENTS: App/Motionary.entitlements
         # Without this the Home Screen shows a blank placeholder and App Store
         # Connect refuses the build outright.
@@ -81,6 +85,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.caden.Motionary.widget
         INFOPLIST_FILE: Widget/Info.plist
+        TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_ENTITLEMENTS: Widget/MotionaryWidget.entitlements
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
@@ -146,6 +151,12 @@ targets:
       # drift maths here, and the two only disagree after minutes of playing -
       # which is exactly what nobody notices by watching.
       - path: App/LoopingCompositionView.swift
+      # What the first launch says, and whether it has been said. The flag and
+      # the step list are plain Foundation, and a welcome that shows on every
+      # launch - or never - is invisible from the simulator's one fresh install.
+      - path: App/Onboarding.swift
+      # The welcome draws with the scheme's colours, so the tokens come along.
+      - path: App/EmberTheme.swift
       - path: Resources
         buildPhase: resources
     settings:

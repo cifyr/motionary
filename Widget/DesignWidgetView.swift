@@ -139,7 +139,7 @@ struct DesignWidgetView: View {
             }
         } else {
             let _ = record(source: nil)
-            PlaceholderView(message: "Open Motionary and add a clip.")
+            PlaceholderView(message: "Open Motionary to choose a design.")
         }
     }
 
