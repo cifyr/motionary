@@ -333,6 +333,8 @@ private struct GuideRow: View {
 /// at from inside the app: how it treats data, and who to write to.
 struct AboutView: View {
     static let supportAddress = "caden@cadenwarren.com"
+    /// `site/`, on Vercel. The store listing points at the same two pages.
+    static let siteURL = URL(string: "https://motionary-app.vercel.app")!
 
     private var version: String {
         let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
@@ -396,6 +398,12 @@ struct AboutView: View {
             }
 
             Section {
+                Link(destination: Self.siteURL) {
+                    Label("Setup help online", systemImage: "questionmark.circle")
+                }
+                Link(destination: Self.siteURL.appendingPathComponent("privacy")) {
+                    Label("Privacy policy", systemImage: "hand.raised")
+                }
                 if let subject = "Motionary \(version)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
                    let url = URL(string: "mailto:\(Self.supportAddress)?subject=\(subject)") {
                     Link(destination: url) {

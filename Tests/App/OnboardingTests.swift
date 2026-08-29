@@ -85,4 +85,13 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(parts.last?.contains(".") ?? false, AboutView.supportAddress)
         XCTAssertNotNil(URL(string: "mailto:\(AboutView.supportAddress)"))
     }
+
+    /// The About screen and the store listing point at the same site, and the
+    /// listing is checked by hand - so the app's copy is checked here.
+    func testTheSiteIsTheOneTheListingNames() throws {
+        let listing = try ProjectRoot.text(at: "docs/app-store-listing.md")
+        XCTAssertTrue(listing.contains(AboutView.siteURL.absoluteString), "the listing names a different site")
+        XCTAssertTrue(listing.contains(AboutView.siteURL.appendingPathComponent("privacy").absoluteString))
+        XCTAssertEqual(AboutView.siteURL.scheme, "https")
+    }
 }

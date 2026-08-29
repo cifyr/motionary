@@ -68,17 +68,18 @@ First release.
 
 ## Support URL
 
-Needs a page that exists. Until there is one, the in-app About screen carries
-a mailto link to the support address in `App/Onboarding.swift`
-(`AboutView.supportAddress`). App Store Connect will not accept a mailto: URL
-here, so a web page - even a one-line one - is required.
+https://motionary-app.vercel.app
 
 ## Privacy policy URL
 
-Needs a hosted copy of the policy below. App Store Connect requires a URL for
-every app, whether or not it collects anything.
+https://motionary-app.vercel.app/privacy
 
-## Privacy policy (to host)
+Both pages are `site/`, deployed to the `motionary` project on Vercel:
+`cd site && vercel deploy --prod`. The About screen in the app links to the
+same two pages (`AboutView.siteURL`), so the listing, the site and the app say
+one thing.
+
+## Privacy policy (the text at the URL above)
 
 Motionary privacy policy
 
@@ -152,7 +153,6 @@ These are on the portal side and cannot be produced from this repository.
 - **App Store distribution profiles** for `com.caden.Motionary` and
   `com.caden.Motionary.widget`. `Tools/archive.sh` stops at the export until
   they exist.
-- **A privacy policy URL and a support URL**, hosted anywhere.
 - **The recreated brand icons** in the starter designs. This is a legal
   question, not a technical one, and it is the item most likely to draw a
   rejection.

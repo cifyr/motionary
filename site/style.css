@@ -1,0 +1,19 @@
+:root { --bg:#0C0D10; --raised:#14151A; --accent:#FF3D00; --title:#fff; --sub:rgba(255,255,255,.7); --body:rgba(255,255,255,.5); --desc:rgba(255,255,255,.3); --line:rgba(255,255,255,.1); }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--sub); font:17px/1.55 -apple-system,BlinkMacSystemFont,"Helvetica Neue",Helvetica,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
+main { max-width:640px; margin:0 auto; padding:56px 28px 96px; }
+.label { font-size:12px; font-weight:500; letter-spacing:.02em; text-transform:uppercase; color:var(--desc); margin:0 0 10px; }
+h1 { font-size:44px; font-weight:900; letter-spacing:-.02em; line-height:1.05; color:var(--title); margin:0 0 18px; }
+h2 { font-size:22px; font-weight:800; letter-spacing:-.01em; color:var(--title); margin:44px 0 10px; }
+.rule { width:120px; height:1px; background:var(--line); margin:22px 0; }
+p, li { color:var(--sub); }
+ol, ul { padding-left:22px; }
+li { margin:8px 0; }
+li strong { color:var(--title); font-weight:600; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+nav { display:flex; gap:22px; margin-bottom:40px; font-size:14px; }
+nav a { color:var(--desc); }
+nav a[aria-current] { color:var(--title); }
+.note { background:var(--raised); border-left:2px solid var(--accent); padding:14px 18px; margin:24px 0; color:var(--sub); font-size:15px; }
+footer { margin-top:64px; padding-top:20px; border-top:1px solid var(--line); font-size:13px; color:var(--desc); }
