@@ -5,7 +5,7 @@
 	<key>method</key>
 	<string>app-store-connect</string>
 	<key>teamID</key>
-	<string>ZRUFVD5GDT</string>
+	<string>LP92N2QT42</string>
 	<!-- Xcode picks the distribution profiles once they exist in the portal.
 	     Naming them here instead would mean editing this file every time one is
 	     regenerated, and getting it wrong reads as a signing failure. -->

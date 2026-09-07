@@ -15,7 +15,7 @@ SHOTS="${2:-8}"
 STACK="${3:-32,4,240}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SIM="${MOTIONARY_SIM:-FD52D4B0-40BD-423A-8FDB-B1D41C369CA4}"
-BUNDLE_ID="com.caden.Motionary"
+BUNDLE_ID="com.sachin.Motionary"
 cd "$ROOT"
 
 echo "==> Building"

@@ -5,7 +5,7 @@
 # Archiving and exporting fail for entirely different reasons, so they are
 # reported separately: the archive is this machine's business and either works
 # or has a real build error in it, while the export needs App Store
-# distribution profiles for com.caden.Motionary and com.caden.Motionary.widget,
+# distribution profiles for com.sachin.Motionary and com.sachin.Motionary.widget,
 # which only exist once someone has made them in the developer portal. An
 # export that fails on a missing profile is not a broken build.
 #
@@ -22,7 +22,7 @@ mkdir -p "$OUT"
 echo "==> Archiving (Release, generic iOS device)"
 xcodebuild -project Motionary.xcodeproj -scheme Motionary \
     -configuration Release -destination 'generic/platform=iOS' \
-    -archivePath "$ARCHIVE" archive
+    -archivePath "$ARCHIVE" -allowProvisioningUpdates archive
 
 echo
 echo "==> What is in it"
@@ -52,14 +52,17 @@ fi
 
 echo
 echo "==> Exporting"
-if xcodebuild -exportArchive -archivePath "$ARCHIVE" \
-    -exportOptionsPlist "$ROOT/Tools/ExportOptions.plist" \
+# Xcode packages the .ipa by shelling out to rsync by name. A Homebrew rsync
+# (3.4.1) earlier on PATH rejects the flags Xcode passes and the export dies as
+# "Copy failed", which says nothing about the cause - so Apple's own goes first.
+if PATH="/usr/bin:/bin:$PATH" xcodebuild -exportArchive -archivePath "$ARCHIVE" \
+    -exportOptionsPlist "$ROOT/Tools/ExportOptions.plist" -allowProvisioningUpdates \
     -exportPath "$OUT" 2>&1 | tee "$OUT/export.log" | tail -5; then
     echo "==> $OUT/Motionary.ipa"
 else
     echo
     echo "The archive is fine; the export is not. If the log above says" >&2
-    echo "\"No profiles for 'com.caden.Motionary'\", the App Store distribution" >&2
+    echo "\"No profiles for 'com.sachin.Motionary'\", the App Store distribution" >&2
     echo "profiles have not been created in the developer portal yet - that is" >&2
     echo "a portal prerequisite, not a build fault." >&2
     exit 1

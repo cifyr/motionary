@@ -11,7 +11,7 @@ set -euo pipefail
 
 OUT="${1:-/tmp/motionary-reports}"
 DEVICE="${MOTIONARY_DEVICE:-00008150-00042CA60C9A401C}"
-BUNDLE_ID="com.caden.Motionary"
+BUNDLE_ID="com.sachin.Motionary"
 REPORTS="widget-renders.log widget-status.json mask-lab.txt font-lab.txt"
 
 mkdir -p "$OUT"

@@ -15,7 +15,7 @@
 			<string>Owner</string>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>com.caden.motionary.design-package</string>
+				<string>com.sachin.motionary.design-package</string>
 			</array>
 		</dict>
 	</array>
@@ -33,7 +33,7 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.caden.Motionary.launch</string>
+			<string>com.sachin.Motionary.launch</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>motionary</string>
@@ -57,14 +57,15 @@
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Motionary reads the video you pick so it can turn it into an animated widget.</string>
 	<key>UIAppFonts</key>
-  <array>
-    <string>Custom-Regular.otf</string>
-    <string>Blnk10-Regular.otf</string>
-    <string>Blnk05-Regular.otf</string>
-    <string>Blnk15-Regular.otf</string>
-    <string>Blnk20-Regular.otf</string>
-    <string>Blnk30-Regular.otf</string>
-  </array>
+	<array>
+		<string>Custom-Regular.otf</string>
+		<string>Custom-Regular.otf</string>
+		<string>Blnk05-Regular.otf</string>
+		<string>Blnk10-Regular.otf</string>
+		<string>Blnk15-Regular.otf</string>
+		<string>Blnk20-Regular.otf</string>
+		<string>Blnk30-Regular.otf</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
@@ -90,7 +91,7 @@
 			<key>UTTypeDescription</key>
 			<string>Motionary Design</string>
 			<key>UTTypeIdentifier</key>
-			<string>com.caden.motionary.design-package</string>
+			<string>com.sachin.motionary.design-package</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>

@@ -11,7 +11,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${MOTIONARY_SWEEP_OUT:-$ROOT/build/geometry-sweep}"
-BUNDLE_ID="com.caden.Motionary"
+BUNDLE_ID="com.sachin.Motionary"
 cd "$ROOT"
 mkdir -p "$OUT"
 

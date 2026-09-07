@@ -14,7 +14,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-$ROOT/build/store-shots}"
 SIM="${MOTIONARY_SHOT_SIM:-iPhone 17 Pro Max}"
-BUNDLE_ID="com.caden.Motionary"
+BUNDLE_ID="com.sachin.Motionary"
 cd "$ROOT"
 mkdir -p "$OUT"
 

@@ -15,7 +15,7 @@ OUT="${2:-/tmp/lab.png}"
 ROUTES="${3:-0}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SIM="${MOTIONARY_SIM:-FD52D4B0-40BD-423A-8FDB-B1D41C369CA4}"
-BUNDLE_ID="com.caden.Motionary"
+BUNDLE_ID="com.sachin.Motionary"
 cd "$ROOT"
 
 case "$MODE" in

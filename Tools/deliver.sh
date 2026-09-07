@@ -13,7 +13,7 @@ set -euo pipefail
 
 DESIGN="${1:-}"
 DEVICE="${MOTIONARY_DEVICE:-00008150-00042CA60C9A401C}"
-BUNDLE_ID="com.caden.Motionary"
+BUNDLE_ID="com.sachin.Motionary"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGE="${MOTIONARY_PACKAGE:-/tmp/motionary-delivery.motionary}"
 cd "$ROOT"

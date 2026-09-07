@@ -14,7 +14,7 @@ SOURCE="${1:?usage: bundle-design.sh <gif-or-video> [device-udid]}"
 DEVICE="${2:-E5721023-4387-5595-92CF-E091E43B4A28}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SIM_NAME="iPhone 17 Pro"
-BUNDLE_ID="com.caden.Motionary"
+BUNDLE_ID="com.sachin.Motionary"
 
 [ -f "$SOURCE" ] || { echo "no such file: $SOURCE" >&2; exit 1; }
 cd "$ROOT"
