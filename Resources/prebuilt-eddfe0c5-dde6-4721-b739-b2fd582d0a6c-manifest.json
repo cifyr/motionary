@@ -1,0 +1,1088 @@
+{
+  "animationCrop" : [
+    [
+      126,
+      381
+    ],
+    [
+      972,
+      1200
+    ]
+  ],
+  "backdropRect" : [
+    [
+      42,
+      246
+    ],
+    [
+      1122,
+      1680
+    ]
+  ],
+  "buildGeneration" : 1,
+  "builtAt" : 809485779.321002,
+  "designID" : "EDDFE0C5-DDE6-4721-B739-B2FD582D0A6C",
+  "fontFamilyBase" : "MFonteddfe0c5L",
+  "framesPerSecond" : 16,
+  "laneCount" : 32,
+  "loopFrameCount" : 80,
+  "primaryClipName" : "source",
+  "screenSize" : [
+    1206,
+    2622
+  ],
+  "tiles" : [
+    {
+      "alternates" : [
+        {
+          "appID" : "messages",
+          "skin" : "sheet-photoset2-messages.png"
+        },
+        {
+          "appID" : "mail",
+          "skin" : "sheet-photoset2-mail.png"
+        },
+        {
+          "appID" : "phone",
+          "skin" : "sheet-photoset2-phone.png"
+        },
+        {
+          "appID" : "facetime",
+          "skin" : "sheet-photoset2-facetime.png"
+        },
+        {
+          "appID" : "photos",
+          "skin" : "sheet-photoset2-photos.png"
+        },
+        {
+          "appID" : "safari",
+          "skin" : "sheet-photoset2-safari.png"
+        },
+        {
+          "appID" : "maps",
+          "skin" : "sheet-photoset2-maps.png"
+        },
+        {
+          "appID" : "weather",
+          "skin" : "sheet-photoset2-weather.png"
+        },
+        {
+          "appID" : "clock",
+          "skin" : "sheet-photoset2-clock.png"
+        },
+        {
+          "appID" : "calendar",
+          "skin" : "sheet-photoset2-calendar.png"
+        },
+        {
+          "appID" : "notes",
+          "skin" : "sheet-photoset2-notes.png"
+        },
+        {
+          "appID" : "reminders",
+          "skin" : "sheet-photoset2-reminders.png"
+        },
+        {
+          "appID" : "calculator",
+          "skin" : "sheet-photoset2-calculator.png"
+        },
+        {
+          "appID" : "settings",
+          "skin" : "sheet-photoset2-settings.png"
+        },
+        {
+          "appID" : "appstore",
+          "skin" : "sheet-photoset2-app-store.png"
+        },
+        {
+          "appID" : "applemusic",
+          "skin" : "sheet-photoset2-apple-music.png"
+        },
+        {
+          "appID" : "wallet",
+          "skin" : "sheet-photoset2-wallet.png"
+        },
+        {
+          "appID" : "youtube",
+          "skin" : "sheet-photoset2-youtube.png"
+        },
+        {
+          "appID" : "whatsapp",
+          "skin" : "sheet-photoset2-whatsapp.png"
+        },
+        {
+          "appID" : "instagram",
+          "skin" : "sheet-photoset2-instagram.png"
+        },
+        {
+          "appID" : "facebook",
+          "skin" : "sheet-photoset2-facebook.png"
+        },
+        {
+          "appID" : "tiktok",
+          "skin" : "sheet-photoset2-tiktok.png"
+        },
+        {
+          "appID" : "snapchat",
+          "skin" : "sheet-photoset2-snapchat.png"
+        },
+        {
+          "appID" : "spotify",
+          "skin" : "sheet-photoset2-spotify.png"
+        },
+        {
+          "appID" : "gmail",
+          "skin" : "sheet-photoset2-gmail.png"
+        },
+        {
+          "appID" : "outlook",
+          "skin" : "sheet-photoset2-outlook.png"
+        },
+        {
+          "appID" : "gmaps",
+          "skin" : "sheet-photoset2-google-maps.png"
+        },
+        {
+          "appID" : "chrome",
+          "skin" : "sheet-photoset2-chrome.png"
+        },
+        {
+          "appID" : "netflix",
+          "skin" : "sheet-photoset2-netflix.png"
+        },
+        {
+          "appID" : "amazon",
+          "skin" : "sheet-photoset2-amazon.png"
+        },
+        {
+          "appID" : "uber",
+          "skin" : "sheet-photoset2-uber.png"
+        },
+        {
+          "appID" : "messenger",
+          "skin" : "sheet-photoset2-messenger.png"
+        },
+        {
+          "appID" : "chatgpt",
+          "skin" : "sheet-photoset2-chatgpt.png"
+        },
+        {
+          "appID" : "x",
+          "skin" : "sheet-photoset2-x.png"
+        },
+        {
+          "appID" : "reddit",
+          "skin" : "sheet-photoset2-reddit.png"
+        },
+        {
+          "appID" : "telegram",
+          "skin" : "sheet-photoset2-telegram.png"
+        },
+        {
+          "appID" : "discord",
+          "skin" : "sheet-photoset2-discord.png"
+        },
+        {
+          "appID" : "teams",
+          "skin" : "sheet-photoset2-microsoft-teams.png"
+        },
+        {
+          "appID" : "zoom",
+          "skin" : "sheet-photoset2-zoom.png"
+        },
+        {
+          "appID" : "clashroyale",
+          "skin" : "sheet-photoset2-clash-royale.png"
+        },
+        {
+          "appID" : "roblox",
+          "skin" : "sheet-photoset2-roblox.png"
+        },
+        {
+          "appID" : "games",
+          "skin" : "sheet-photoset2-games.png"
+        },
+        {
+          "appID" : "banking",
+          "skin" : "sheet-photoset2-banking.png"
+        },
+        {
+          "appID" : "shopping",
+          "skin" : "sheet-photoset2-shopping.png"
+        },
+        {
+          "appID" : "school",
+          "skin" : "sheet-photoset2-school.png"
+        },
+        {
+          "appID" : "work",
+          "skin" : "sheet-photoset2-work.png"
+        },
+        {
+          "appID" : "fitness",
+          "skin" : "sheet-photoset2-fitness.png"
+        },
+        {
+          "appID" : "food",
+          "skin" : "sheet-photoset2-food.png"
+        }
+      ],
+      "appID" : "camera",
+      "center" : [
+        215.6693531989877,
+        1686.3306468010123
+      ],
+      "cornerRadius" : 0.22,
+      "id" : "C89E3B2A-14DA-4025-9832-751E170ED833",
+      "opacity" : 1,
+      "rotation" : 9.807997881355938,
+      "showsLabel" : false,
+      "size" : 373.2171581769437,
+      "skin" : "sheet-photoset2-camera.png"
+    },
+    {
+      "alternates" : [
+        {
+          "appID" : "messages",
+          "skin" : "sheet-photoset2-messages.png"
+        },
+        {
+          "appID" : "mail",
+          "skin" : "sheet-photoset2-mail.png"
+        },
+        {
+          "appID" : "phone",
+          "skin" : "sheet-photoset2-phone.png"
+        },
+        {
+          "appID" : "facetime",
+          "skin" : "sheet-photoset2-facetime.png"
+        },
+        {
+          "appID" : "camera",
+          "skin" : "sheet-photoset2-camera.png"
+        },
+        {
+          "appID" : "photos",
+          "skin" : "sheet-photoset2-photos.png"
+        },
+        {
+          "appID" : "safari",
+          "skin" : "sheet-photoset2-safari.png"
+        },
+        {
+          "appID" : "maps",
+          "skin" : "sheet-photoset2-maps.png"
+        },
+        {
+          "appID" : "weather",
+          "skin" : "sheet-photoset2-weather.png"
+        },
+        {
+          "appID" : "clock",
+          "skin" : "sheet-photoset2-clock.png"
+        },
+        {
+          "appID" : "calendar",
+          "skin" : "sheet-photoset2-calendar.png"
+        },
+        {
+          "appID" : "notes",
+          "skin" : "sheet-photoset2-notes.png"
+        },
+        {
+          "appID" : "reminders",
+          "skin" : "sheet-photoset2-reminders.png"
+        },
+        {
+          "appID" : "calculator",
+          "skin" : "sheet-photoset2-calculator.png"
+        },
+        {
+          "appID" : "settings",
+          "skin" : "sheet-photoset2-settings.png"
+        },
+        {
+          "appID" : "appstore",
+          "skin" : "sheet-photoset2-app-store.png"
+        },
+        {
+          "appID" : "applemusic",
+          "skin" : "sheet-photoset2-apple-music.png"
+        },
+        {
+          "appID" : "wallet",
+          "skin" : "sheet-photoset2-wallet.png"
+        },
+        {
+          "appID" : "youtube",
+          "skin" : "sheet-photoset2-youtube.png"
+        },
+        {
+          "appID" : "whatsapp",
+          "skin" : "sheet-photoset2-whatsapp.png"
+        },
+        {
+          "appID" : "instagram",
+          "skin" : "sheet-photoset2-instagram.png"
+        },
+        {
+          "appID" : "facebook",
+          "skin" : "sheet-photoset2-facebook.png"
+        },
+        {
+          "appID" : "tiktok",
+          "skin" : "sheet-photoset2-tiktok.png"
+        },
+        {
+          "appID" : "snapchat",
+          "skin" : "sheet-photoset2-snapchat.png"
+        },
+        {
+          "appID" : "gmail",
+          "skin" : "sheet-photoset2-gmail.png"
+        },
+        {
+          "appID" : "outlook",
+          "skin" : "sheet-photoset2-outlook.png"
+        },
+        {
+          "appID" : "gmaps",
+          "skin" : "sheet-photoset2-google-maps.png"
+        },
+        {
+          "appID" : "chrome",
+          "skin" : "sheet-photoset2-chrome.png"
+        },
+        {
+          "appID" : "netflix",
+          "skin" : "sheet-photoset2-netflix.png"
+        },
+        {
+          "appID" : "amazon",
+          "skin" : "sheet-photoset2-amazon.png"
+        },
+        {
+          "appID" : "uber",
+          "skin" : "sheet-photoset2-uber.png"
+        },
+        {
+          "appID" : "messenger",
+          "skin" : "sheet-photoset2-messenger.png"
+        },
+        {
+          "appID" : "chatgpt",
+          "skin" : "sheet-photoset2-chatgpt.png"
+        },
+        {
+          "appID" : "x",
+          "skin" : "sheet-photoset2-x.png"
+        },
+        {
+          "appID" : "reddit",
+          "skin" : "sheet-photoset2-reddit.png"
+        },
+        {
+          "appID" : "telegram",
+          "skin" : "sheet-photoset2-telegram.png"
+        },
+        {
+          "appID" : "discord",
+          "skin" : "sheet-photoset2-discord.png"
+        },
+        {
+          "appID" : "teams",
+          "skin" : "sheet-photoset2-microsoft-teams.png"
+        },
+        {
+          "appID" : "zoom",
+          "skin" : "sheet-photoset2-zoom.png"
+        },
+        {
+          "appID" : "clashroyale",
+          "skin" : "sheet-photoset2-clash-royale.png"
+        },
+        {
+          "appID" : "roblox",
+          "skin" : "sheet-photoset2-roblox.png"
+        },
+        {
+          "appID" : "games",
+          "skin" : "sheet-photoset2-games.png"
+        },
+        {
+          "appID" : "banking",
+          "skin" : "sheet-photoset2-banking.png"
+        },
+        {
+          "appID" : "shopping",
+          "skin" : "sheet-photoset2-shopping.png"
+        },
+        {
+          "appID" : "school",
+          "skin" : "sheet-photoset2-school.png"
+        },
+        {
+          "appID" : "work",
+          "skin" : "sheet-photoset2-work.png"
+        },
+        {
+          "appID" : "fitness",
+          "skin" : "sheet-photoset2-fitness.png"
+        },
+        {
+          "appID" : "food",
+          "skin" : "sheet-photoset2-food.png"
+        }
+      ],
+      "appID" : "spotify",
+      "center" : [
+        986.8646673387098,
+        463.4886592741936
+      ],
+      "cornerRadius" : 0.22,
+      "id" : "0EB719F4-1099-447E-9FBD-0E96AC2C508F",
+      "opacity" : 1,
+      "rotation" : -4.266419491525426,
+      "showsLabel" : false,
+      "size" : 400,
+      "skin" : "sheet-photoset2-spotify.png"
+    },
+    {
+      "alternates" : [
+        {
+          "appID" : "mail",
+          "skin" : "sheet-photoset2-mail.png"
+        },
+        {
+          "appID" : "phone",
+          "skin" : "sheet-photoset2-phone.png"
+        },
+        {
+          "appID" : "facetime",
+          "skin" : "sheet-photoset2-facetime.png"
+        },
+        {
+          "appID" : "camera",
+          "skin" : "sheet-photoset2-camera.png"
+        },
+        {
+          "appID" : "photos",
+          "skin" : "sheet-photoset2-photos.png"
+        },
+        {
+          "appID" : "safari",
+          "skin" : "sheet-photoset2-safari.png"
+        },
+        {
+          "appID" : "maps",
+          "skin" : "sheet-photoset2-maps.png"
+        },
+        {
+          "appID" : "weather",
+          "skin" : "sheet-photoset2-weather.png"
+        },
+        {
+          "appID" : "clock",
+          "skin" : "sheet-photoset2-clock.png"
+        },
+        {
+          "appID" : "calendar",
+          "skin" : "sheet-photoset2-calendar.png"
+        },
+        {
+          "appID" : "notes",
+          "skin" : "sheet-photoset2-notes.png"
+        },
+        {
+          "appID" : "reminders",
+          "skin" : "sheet-photoset2-reminders.png"
+        },
+        {
+          "appID" : "calculator",
+          "skin" : "sheet-photoset2-calculator.png"
+        },
+        {
+          "appID" : "settings",
+          "skin" : "sheet-photoset2-settings.png"
+        },
+        {
+          "appID" : "appstore",
+          "skin" : "sheet-photoset2-app-store.png"
+        },
+        {
+          "appID" : "applemusic",
+          "skin" : "sheet-photoset2-apple-music.png"
+        },
+        {
+          "appID" : "wallet",
+          "skin" : "sheet-photoset2-wallet.png"
+        },
+        {
+          "appID" : "youtube",
+          "skin" : "sheet-photoset2-youtube.png"
+        },
+        {
+          "appID" : "whatsapp",
+          "skin" : "sheet-photoset2-whatsapp.png"
+        },
+        {
+          "appID" : "instagram",
+          "skin" : "sheet-photoset2-instagram.png"
+        },
+        {
+          "appID" : "facebook",
+          "skin" : "sheet-photoset2-facebook.png"
+        },
+        {
+          "appID" : "tiktok",
+          "skin" : "sheet-photoset2-tiktok.png"
+        },
+        {
+          "appID" : "snapchat",
+          "skin" : "sheet-photoset2-snapchat.png"
+        },
+        {
+          "appID" : "spotify",
+          "skin" : "sheet-photoset2-spotify.png"
+        },
+        {
+          "appID" : "gmail",
+          "skin" : "sheet-photoset2-gmail.png"
+        },
+        {
+          "appID" : "outlook",
+          "skin" : "sheet-photoset2-outlook.png"
+        },
+        {
+          "appID" : "gmaps",
+          "skin" : "sheet-photoset2-google-maps.png"
+        },
+        {
+          "appID" : "chrome",
+          "skin" : "sheet-photoset2-chrome.png"
+        },
+        {
+          "appID" : "netflix",
+          "skin" : "sheet-photoset2-netflix.png"
+        },
+        {
+          "appID" : "amazon",
+          "skin" : "sheet-photoset2-amazon.png"
+        },
+        {
+          "appID" : "uber",
+          "skin" : "sheet-photoset2-uber.png"
+        },
+        {
+          "appID" : "messenger",
+          "skin" : "sheet-photoset2-messenger.png"
+        },
+        {
+          "appID" : "chatgpt",
+          "skin" : "sheet-photoset2-chatgpt.png"
+        },
+        {
+          "appID" : "x",
+          "skin" : "sheet-photoset2-x.png"
+        },
+        {
+          "appID" : "reddit",
+          "skin" : "sheet-photoset2-reddit.png"
+        },
+        {
+          "appID" : "telegram",
+          "skin" : "sheet-photoset2-telegram.png"
+        },
+        {
+          "appID" : "discord",
+          "skin" : "sheet-photoset2-discord.png"
+        },
+        {
+          "appID" : "teams",
+          "skin" : "sheet-photoset2-microsoft-teams.png"
+        },
+        {
+          "appID" : "zoom",
+          "skin" : "sheet-photoset2-zoom.png"
+        },
+        {
+          "appID" : "clashroyale",
+          "skin" : "sheet-photoset2-clash-royale.png"
+        },
+        {
+          "appID" : "roblox",
+          "skin" : "sheet-photoset2-roblox.png"
+        },
+        {
+          "appID" : "games",
+          "skin" : "sheet-photoset2-games.png"
+        },
+        {
+          "appID" : "banking",
+          "skin" : "sheet-photoset2-banking.png"
+        },
+        {
+          "appID" : "shopping",
+          "skin" : "sheet-photoset2-shopping.png"
+        },
+        {
+          "appID" : "school",
+          "skin" : "sheet-photoset2-school.png"
+        },
+        {
+          "appID" : "work",
+          "skin" : "sheet-photoset2-work.png"
+        },
+        {
+          "appID" : "fitness",
+          "skin" : "sheet-photoset2-fitness.png"
+        },
+        {
+          "appID" : "food",
+          "skin" : "sheet-photoset2-food.png"
+        }
+      ],
+      "appID" : "messages",
+      "center" : [
+        468.75,
+        1816.8253528225805
+      ],
+      "cornerRadius" : 0.22,
+      "id" : "83429CED-F79B-4E21-95F7-B74C312C6DAE",
+      "opacity" : 1,
+      "rotation" : -3.426244703389827,
+      "showsLabel" : false,
+      "size" : 400,
+      "skin" : "sheet-photoset2-messages.png"
+    },
+    {
+      "alternates" : [
+        {
+          "appID" : "messages",
+          "skin" : "sheet-photoset2-messages.png"
+        },
+        {
+          "appID" : "mail",
+          "skin" : "sheet-photoset2-mail.png"
+        },
+        {
+          "appID" : "phone",
+          "skin" : "sheet-photoset2-phone.png"
+        },
+        {
+          "appID" : "facetime",
+          "skin" : "sheet-photoset2-facetime.png"
+        },
+        {
+          "appID" : "camera",
+          "skin" : "sheet-photoset2-camera.png"
+        },
+        {
+          "appID" : "photos",
+          "skin" : "sheet-photoset2-photos.png"
+        },
+        {
+          "appID" : "maps",
+          "skin" : "sheet-photoset2-maps.png"
+        },
+        {
+          "appID" : "weather",
+          "skin" : "sheet-photoset2-weather.png"
+        },
+        {
+          "appID" : "clock",
+          "skin" : "sheet-photoset2-clock.png"
+        },
+        {
+          "appID" : "calendar",
+          "skin" : "sheet-photoset2-calendar.png"
+        },
+        {
+          "appID" : "notes",
+          "skin" : "sheet-photoset2-notes.png"
+        },
+        {
+          "appID" : "reminders",
+          "skin" : "sheet-photoset2-reminders.png"
+        },
+        {
+          "appID" : "calculator",
+          "skin" : "sheet-photoset2-calculator.png"
+        },
+        {
+          "appID" : "settings",
+          "skin" : "sheet-photoset2-settings.png"
+        },
+        {
+          "appID" : "appstore",
+          "skin" : "sheet-photoset2-app-store.png"
+        },
+        {
+          "appID" : "applemusic",
+          "skin" : "sheet-photoset2-apple-music.png"
+        },
+        {
+          "appID" : "wallet",
+          "skin" : "sheet-photoset2-wallet.png"
+        },
+        {
+          "appID" : "youtube",
+          "skin" : "sheet-photoset2-youtube.png"
+        },
+        {
+          "appID" : "whatsapp",
+          "skin" : "sheet-photoset2-whatsapp.png"
+        },
+        {
+          "appID" : "instagram",
+          "skin" : "sheet-photoset2-instagram.png"
+        },
+        {
+          "appID" : "facebook",
+          "skin" : "sheet-photoset2-facebook.png"
+        },
+        {
+          "appID" : "tiktok",
+          "skin" : "sheet-photoset2-tiktok.png"
+        },
+        {
+          "appID" : "snapchat",
+          "skin" : "sheet-photoset2-snapchat.png"
+        },
+        {
+          "appID" : "spotify",
+          "skin" : "sheet-photoset2-spotify.png"
+        },
+        {
+          "appID" : "gmail",
+          "skin" : "sheet-photoset2-gmail.png"
+        },
+        {
+          "appID" : "outlook",
+          "skin" : "sheet-photoset2-outlook.png"
+        },
+        {
+          "appID" : "gmaps",
+          "skin" : "sheet-photoset2-google-maps.png"
+        },
+        {
+          "appID" : "chrome",
+          "skin" : "sheet-photoset2-chrome.png"
+        },
+        {
+          "appID" : "netflix",
+          "skin" : "sheet-photoset2-netflix.png"
+        },
+        {
+          "appID" : "amazon",
+          "skin" : "sheet-photoset2-amazon.png"
+        },
+        {
+          "appID" : "uber",
+          "skin" : "sheet-photoset2-uber.png"
+        },
+        {
+          "appID" : "messenger",
+          "skin" : "sheet-photoset2-messenger.png"
+        },
+        {
+          "appID" : "chatgpt",
+          "skin" : "sheet-photoset2-chatgpt.png"
+        },
+        {
+          "appID" : "x",
+          "skin" : "sheet-photoset2-x.png"
+        },
+        {
+          "appID" : "reddit",
+          "skin" : "sheet-photoset2-reddit.png"
+        },
+        {
+          "appID" : "telegram",
+          "skin" : "sheet-photoset2-telegram.png"
+        },
+        {
+          "appID" : "discord",
+          "skin" : "sheet-photoset2-discord.png"
+        },
+        {
+          "appID" : "teams",
+          "skin" : "sheet-photoset2-microsoft-teams.png"
+        },
+        {
+          "appID" : "zoom",
+          "skin" : "sheet-photoset2-zoom.png"
+        },
+        {
+          "appID" : "clashroyale",
+          "skin" : "sheet-photoset2-clash-royale.png"
+        },
+        {
+          "appID" : "roblox",
+          "skin" : "sheet-photoset2-roblox.png"
+        },
+        {
+          "appID" : "games",
+          "skin" : "sheet-photoset2-games.png"
+        },
+        {
+          "appID" : "banking",
+          "skin" : "sheet-photoset2-banking.png"
+        },
+        {
+          "appID" : "shopping",
+          "skin" : "sheet-photoset2-shopping.png"
+        },
+        {
+          "appID" : "school",
+          "skin" : "sheet-photoset2-school.png"
+        },
+        {
+          "appID" : "work",
+          "skin" : "sheet-photoset2-work.png"
+        },
+        {
+          "appID" : "fitness",
+          "skin" : "sheet-photoset2-fitness.png"
+        },
+        {
+          "appID" : "food",
+          "skin" : "sheet-photoset2-food.png"
+        }
+      ],
+      "appID" : "safari",
+      "center" : [
+        1002.0475134161278,
+        1732.0044550978118
+      ],
+      "cornerRadius" : 0.22,
+      "id" : "149DECF1-9755-465E-84D5-7659D1CD07D6",
+      "opacity" : 1,
+      "rotation" : 3.6407574152542423,
+      "showsLabel" : false,
+      "size" : 384.2786528150134,
+      "skin" : "sheet-photoset2-safari.png"
+    },
+    {
+      "alternates" : [
+        {
+          "appID" : "messages",
+          "skin" : "sheet-photoset2-messages.png"
+        },
+        {
+          "appID" : "mail",
+          "skin" : "sheet-photoset2-mail.png"
+        },
+        {
+          "appID" : "facetime",
+          "skin" : "sheet-photoset2-facetime.png"
+        },
+        {
+          "appID" : "camera",
+          "skin" : "sheet-photoset2-camera.png"
+        },
+        {
+          "appID" : "photos",
+          "skin" : "sheet-photoset2-photos.png"
+        },
+        {
+          "appID" : "safari",
+          "skin" : "sheet-photoset2-safari.png"
+        },
+        {
+          "appID" : "maps",
+          "skin" : "sheet-photoset2-maps.png"
+        },
+        {
+          "appID" : "weather",
+          "skin" : "sheet-photoset2-weather.png"
+        },
+        {
+          "appID" : "clock",
+          "skin" : "sheet-photoset2-clock.png"
+        },
+        {
+          "appID" : "calendar",
+          "skin" : "sheet-photoset2-calendar.png"
+        },
+        {
+          "appID" : "notes",
+          "skin" : "sheet-photoset2-notes.png"
+        },
+        {
+          "appID" : "reminders",
+          "skin" : "sheet-photoset2-reminders.png"
+        },
+        {
+          "appID" : "calculator",
+          "skin" : "sheet-photoset2-calculator.png"
+        },
+        {
+          "appID" : "settings",
+          "skin" : "sheet-photoset2-settings.png"
+        },
+        {
+          "appID" : "appstore",
+          "skin" : "sheet-photoset2-app-store.png"
+        },
+        {
+          "appID" : "applemusic",
+          "skin" : "sheet-photoset2-apple-music.png"
+        },
+        {
+          "appID" : "wallet",
+          "skin" : "sheet-photoset2-wallet.png"
+        },
+        {
+          "appID" : "youtube",
+          "skin" : "sheet-photoset2-youtube.png"
+        },
+        {
+          "appID" : "whatsapp",
+          "skin" : "sheet-photoset2-whatsapp.png"
+        },
+        {
+          "appID" : "instagram",
+          "skin" : "sheet-photoset2-instagram.png"
+        },
+        {
+          "appID" : "facebook",
+          "skin" : "sheet-photoset2-facebook.png"
+        },
+        {
+          "appID" : "tiktok",
+          "skin" : "sheet-photoset2-tiktok.png"
+        },
+        {
+          "appID" : "snapchat",
+          "skin" : "sheet-photoset2-snapchat.png"
+        },
+        {
+          "appID" : "spotify",
+          "skin" : "sheet-photoset2-spotify.png"
+        },
+        {
+          "appID" : "gmail",
+          "skin" : "sheet-photoset2-gmail.png"
+        },
+        {
+          "appID" : "outlook",
+          "skin" : "sheet-photoset2-outlook.png"
+        },
+        {
+          "appID" : "gmaps",
+          "skin" : "sheet-photoset2-google-maps.png"
+        },
+        {
+          "appID" : "chrome",
+          "skin" : "sheet-photoset2-chrome.png"
+        },
+        {
+          "appID" : "netflix",
+          "skin" : "sheet-photoset2-netflix.png"
+        },
+        {
+          "appID" : "amazon",
+          "skin" : "sheet-photoset2-amazon.png"
+        },
+        {
+          "appID" : "uber",
+          "skin" : "sheet-photoset2-uber.png"
+        },
+        {
+          "appID" : "messenger",
+          "skin" : "sheet-photoset2-messenger.png"
+        },
+        {
+          "appID" : "chatgpt",
+          "skin" : "sheet-photoset2-chatgpt.png"
+        },
+        {
+          "appID" : "x",
+          "skin" : "sheet-photoset2-x.png"
+        },
+        {
+          "appID" : "reddit",
+          "skin" : "sheet-photoset2-reddit.png"
+        },
+        {
+          "appID" : "telegram",
+          "skin" : "sheet-photoset2-telegram.png"
+        },
+        {
+          "appID" : "discord",
+          "skin" : "sheet-photoset2-discord.png"
+        },
+        {
+          "appID" : "teams",
+          "skin" : "sheet-photoset2-microsoft-teams.png"
+        },
+        {
+          "appID" : "zoom",
+          "skin" : "sheet-photoset2-zoom.png"
+        },
+        {
+          "appID" : "clashroyale",
+          "skin" : "sheet-photoset2-clash-royale.png"
+        },
+        {
+          "appID" : "roblox",
+          "skin" : "sheet-photoset2-roblox.png"
+        },
+        {
+          "appID" : "games",
+          "skin" : "sheet-photoset2-games.png"
+        },
+        {
+          "appID" : "banking",
+          "skin" : "sheet-photoset2-banking.png"
+        },
+        {
+          "appID" : "shopping",
+          "skin" : "sheet-photoset2-shopping.png"
+        },
+        {
+          "appID" : "school",
+          "skin" : "sheet-photoset2-school.png"
+        },
+        {
+          "appID" : "work",
+          "skin" : "sheet-photoset2-work.png"
+        },
+        {
+          "appID" : "fitness",
+          "skin" : "sheet-photoset2-fitness.png"
+        },
+        {
+          "appID" : "food",
+          "skin" : "sheet-photoset2-food.png"
+        }
+      ],
+      "appID" : "phone",
+      "center" : [
+        737.25,
+        502.4832564085565
+      ],
+      "cornerRadius" : 0.22,
+      "id" : "E9F941B6-C1D2-4F35-B2FB-6D0564A01628",
+      "opacity" : 1,
+      "rotation" : 10.280720338983052,
+      "showsLabel" : false,
+      "size" : 400,
+      "skin" : "sheet-photoset2-phone.png"
+    }
+  ],
+  "totalFontBytes" : 32171928,
+  "wallpaperName" : "wallpaper.png",
+  "widgetRect" : [
+    [
+      66,
+      270
+    ],
+    [
+      1074,
+      1632
+    ]
+  ]
+}
