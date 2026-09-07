@@ -13,6 +13,17 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Registering identifiers needs an authenticated account. Set ASC_KEY_ID and
+# ASC_ISSUER_ID to use an App Store Connect API key instead of whichever Apple
+# ID happens to be signed into Xcode - the store rejects builds made with a beta
+# Xcode, so the toolchain cannot be chosen by where an account is logged in.
+AUTH=()
+if [ -n "${ASC_KEY_ID:-}" ]; then
+    AUTH=(-authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          -authenticationKeyID "$ASC_KEY_ID"
+          -authenticationKeyIssuerID "${ASC_ISSUER_ID:?ASC_ISSUER_ID must be set with ASC_KEY_ID}")
+fi
 OUT="${1:-$ROOT/build/release}"
 ARCHIVE="$OUT/Motionary.xcarchive"
 cd "$ROOT"
@@ -22,7 +33,7 @@ mkdir -p "$OUT"
 echo "==> Archiving (Release, generic iOS device)"
 xcodebuild -project Motionary.xcodeproj -scheme Motionary \
     -configuration Release -destination 'generic/platform=iOS' \
-    -archivePath "$ARCHIVE" -allowProvisioningUpdates archive
+    -archivePath "$ARCHIVE" -allowProvisioningUpdates "${AUTH[@]}" archive
 
 echo
 echo "==> What is in it"
@@ -57,7 +68,7 @@ echo "==> Exporting"
 # "Copy failed", which says nothing about the cause - so Apple's own goes first.
 if PATH="/usr/bin:/bin:$PATH" xcodebuild -exportArchive -archivePath "$ARCHIVE" \
     -exportOptionsPlist "$ROOT/Tools/ExportOptions.plist" -allowProvisioningUpdates \
-    -exportPath "$OUT" 2>&1 | tee "$OUT/export.log" | tail -5; then
+    -exportPath "$OUT" "${AUTH[@]}" 2>&1 | tee "$OUT/export.log" | tail -5; then
     echo "==> $OUT/Motionary.ipa"
 else
     echo
