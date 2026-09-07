@@ -8,7 +8,7 @@ What is still needed that is not text is at the bottom.
 
 ## Name (30)
 
-Motionary
+Motionary App
 
 ## Subtitle (30)
 
@@ -48,8 +48,9 @@ is showing. Nothing runs in the background and nothing polls.
 
 WHAT IT NEEDS
 - Photos, add-only, to save the wallpaper for you to set.
-- Local network access only if you send a design from Motionary Studio on a
-  Mac. The designs built into the app are ready to use as they are.
+- Local network, only if you use the optional companion Mac tool to send a
+  design. The designs built into the app are ready to use as they are, and
+  nothing about the app needs it.
 
 Motionary has no account, no analytics and no advertising. Nothing about you
 or your phone is collected or sent anywhere.
@@ -60,7 +61,7 @@ launcher on iOS works.
 
 ## Keywords (100)
 
-widget,animated,wallpaper,home screen,live,theme,icons,customize,aesthetic,launcher
+wallpaper,live,theme,icons,customize,aesthetic,launcher,motion,video,loop,gif,personalize,dynamic
 
 ## What's new (4000)
 
