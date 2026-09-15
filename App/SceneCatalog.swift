@@ -33,13 +33,16 @@ enum SceneCatalog {
     ///
     /// Named `Entry` rather than `Scene` because SwiftUI already has a `Scene`
     /// and this type is read inside views.
-    struct Entry: Codable, Identifiable, Equatable, Sendable {
+    struct Entry: Codable, Identifiable, Hashable, Sendable {
         let id: String
         let name: String
         let bytes: Int
         let published: String
         let package: URL
         let preview: URL
+        /// The Home Screen as it will look, moving. Optional so a scene
+        /// published before previews existed still lists with its still.
+        let motion: URL?
         /// Free today for everything. A scene the app does not recognise is
         /// listed and refused rather than hidden, so an older install says
         /// something honest instead of pretending the scene does not exist.
@@ -78,6 +81,34 @@ enum SceneCatalog {
             logger.error("catalogue decode failed: \(String(describing: error), privacy: .public)")
             throw SceneCatalogError.decodeFailed(underlying: error)
         }
+    }
+
+    /// A scene's moving preview on disk, fetched the first time it is asked for.
+    ///
+    /// `LoopingVideoView` plays local files only, and a gallery that fetched
+    /// every card again whenever it scrolled back into view would spend the
+    /// data twice. Named after the remote file, whose path carries the time it
+    /// was published, so a republished preview is a new name rather than a
+    /// cache hit on the old one.
+    static func cachedMotion(for entry: Entry) async throws -> URL? {
+        guard let remote = entry.motion else { return nil }
+        let folder = try FileManager.default
+            .url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            .appendingPathComponent("ScenePreviews", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        let local = folder.appendingPathComponent(remote.lastPathComponent)
+        if FileManager.default.fileExists(atPath: local.path) { return local }
+
+        let (temporary, response) = try await URLSession.shared.download(from: remote)
+        if let http = response as? HTTPURLResponse, !(200 ..< 300).contains(http.statusCode) {
+            logger.error("preview fetch failed with \(http.statusCode, privacy: .public) for \(remote.absoluteString, privacy: .public)")
+            throw SceneCatalogError.badResponse(status: http.statusCode)
+        }
+        try? FileManager.default.removeItem(at: local)
+        try FileManager.default.moveItem(at: temporary, to: local)
+        logger.info("cached preview for \(entry.name, privacy: .public)")
+        return local
     }
 
     /// Downloads a package to a temporary file and reports progress as it goes.

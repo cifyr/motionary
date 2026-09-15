@@ -56,6 +56,14 @@ EOF
 
 echo "==> Publishing $DESIGN_NAME ($DESIGN_ID)"
 
+# Checked before the package build, which takes a while, rather than after it.
+for tool in ffmpeg ffprobe; do
+    if ! command -v "$tool" >/dev/null; then
+        echo "failed: $tool is needed for the gallery preview; brew install ffmpeg" >&2
+        exit 1
+    fi
+done
+
 STUDIO=build/mac/Build/Products/Debug/MotionaryStudio.app/Contents/MacOS/MotionaryStudio
 if [ ! -x "$STUDIO" ]; then
     echo "==> Building the studio"
@@ -63,6 +71,12 @@ if [ ! -x "$STUDIO" ]; then
         -derivedDataPath build/mac build >/dev/null
 fi
 
+# Every file this publishes gets the time in its path. The CDN caches a blob URL
+# for thirty days, so overwriting a scene in place would keep handing out the
+# old package, still and preview to anyone who fetched them before; a new path
+# is a URL nothing has cached. The catalogue is the one fixed URL, and it is
+# served with a sixty second max-age for exactly that reason.
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 PACKAGE="$WORK/$DESIGN_ID.motionary"
@@ -78,12 +92,62 @@ PREVIEW="$WORK/$DESIGN_ID.jpg"
 sips -s format jpeg -s formatOptions 70 -Z 900 \
     "$STORE/$DESIGN_ID/wallpaper.png" --out "$PREVIEW" >/dev/null
 
+# The gallery's moving preview. The design's own preview.mp4 is only the clip
+# layer - no tiles - so on its own it shows a sprite on a gradient rather than
+# the Home Screen. This rebuilds the stack the widget draws: the wallpaper, the
+# clip showing through inside the widget's rect, and the tiles back on top of
+# it, found as wherever wallpaper.png differs from wallpaper-plain.png.
+MOTION="$WORK/$DESIGN_ID.mp4"
+DESIGN_DIR="$STORE/$DESIGN_ID"
+read -r SW SH WX WY WW WH < <(/usr/bin/python3 - "$DESIGN_DIR/manifest.json" <<'PY2'
+import json, sys
+m = json.load(open(sys.argv[1]))
+sw, sh = m["screenSize"]
+(x, y), (w, h) = m["widgetRect"]
+print(sw, sh, x, y, w, h)
+PY2
+)
+read -r FRAMES RATE < <(ffprobe -v error -select_streams v:0 -count_frames \
+    -show_entries stream=nb_read_frames,r_frame_rate -of csv=p=0 "$DESIGN_DIR/preview.mp4" \
+    | awk -F, '{print $2, $1}')
+echo "==> Rendering the gallery preview ($FRAMES frames at $RATE fps, widget ${WW}x${WH} at ${WX},${WY})"
+# The stills loop at the clip's own rate and the output is resampled to it and
+# cut at its frame count. Left at ffmpeg's 25fps, the merge emitted a frame at
+# every still's tick as well as the clip's, so a trim by time added a frame
+# (a 5 frame 0.31s loop became 6 frames, 0.37s) and a trim by count ended
+# early (15s became 8.6s). No B-frames, so a loop a few frames long starts
+# on its first frame.
+# lut ramps the tile mask over a difference of 6 to 22 so the tiles' soft
+# shadows fade into the clip instead of leaving a hard-edged halo.
+ffmpeg -v error -y \
+    -i "$DESIGN_DIR/preview.mp4" \
+    -framerate "$RATE" -loop 1 -i "$DESIGN_DIR/wallpaper.png" \
+    -framerate "$RATE" -loop 1 -i "$DESIGN_DIR/wallpaper-plain.png" \
+    -filter_complex "
+        [1:v]scale=${SW}:${SH},format=gbrp,split=2[wall][wallm];
+        [2:v]scale=${SW}:${SH},format=gbrp[plain];
+        [wallm][plain]blend=all_mode=difference,format=gray,lut=y='clip((val-6)*16\,0\,255)'[tiles];
+        color=white:s=${SW}x${SH}:r=${RATE},format=gray,drawbox=x=${WX}:y=${WY}:w=${WW}:h=${WH}:color=black:t=fill[outside];
+        [tiles][outside]blend=all_mode=lighten,format=gbrp[mask];
+        [0:v]scale=${SW}:${SH},format=gbrp[clip];
+        [clip][wall][mask]maskedmerge,fps=${RATE},scale=600:-2:flags=lanczos,format=yuv420p[out]" \
+    -map "[out]" -frames:v "$FRAMES" -an -c:v libx264 -preset slow -crf 26 -bf 0 \
+    -movflags +faststart "$MOTION"
+GOT="$(ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of csv=p=0 "$MOTION")"
+if [ "$GOT" != "$FRAMES" ]; then
+    echo "failed: gallery preview has $GOT frames, the clip has $FRAMES; not publishing a loop that stutters" >&2
+    exit 1
+fi
+echo "    $(du -h "$MOTION" | cut -f1), $GOT frames"
+
 echo "==> Uploading"
-vercel blob put "$PACKAGE" --rw-token "$TOKEN" --access public --allow-overwrite true \
-    --pathname "scenes/$DESIGN_ID.motionary" \
+vercel blob put "$PACKAGE" --rw-token "$TOKEN" --access public \
+    --pathname "scenes/$DESIGN_ID-$STAMP.motionary" \
     --content-type application/octet-stream >/dev/null
-vercel blob put "$PREVIEW" --rw-token "$TOKEN" --access public --allow-overwrite true \
-    --pathname "previews/$DESIGN_ID.jpg" >/dev/null
+vercel blob put "$PREVIEW" --rw-token "$TOKEN" --access public \
+    --pathname "previews/$DESIGN_ID-$STAMP.jpg" >/dev/null
+vercel blob put "$MOTION" --rw-token "$TOKEN" --access public \
+    --pathname "motion/$DESIGN_ID-$STAMP.mp4" --content-type video/mp4 >/dev/null
 
 # The catalogue is rewritten whole each time, so the copy read here has to be
 # the current one. The CDN keeps serving the previous upload for up to a minute,
@@ -105,9 +169,9 @@ case "$STATUS" in
         ;;
 esac
 
-/usr/bin/python3 - "$CATALOG" "$DESIGN_ID" "$DESIGN_NAME" "$BYTES" "$BASE_URL" <<'PY'
+/usr/bin/python3 - "$CATALOG" "$DESIGN_ID" "$DESIGN_NAME" "$BYTES" "$BASE_URL" "$STAMP" <<'PY'
 import json, sys, datetime
-path, did, name, size, base = sys.argv[1:6]
+path, did, name, size, base, stamp = sys.argv[1:7]
 cat = json.load(open(path))
 cat.setdefault("version", 1)
 scenes = [s for s in cat.get("scenes", []) if s.get("id") != did]
@@ -116,8 +180,9 @@ scenes.append({
     "name": name,
     "bytes": int(size),
     "published": datetime.date.today().isoformat(),
-    "package": f"{base}/scenes/{did}.motionary",
-    "preview": f"{base}/previews/{did}.jpg",
+    "package": f"{base}/scenes/{did}-{stamp}.motionary",
+    "preview": f"{base}/previews/{did}-{stamp}.jpg",
+    "motion": f"{base}/motion/{did}-{stamp}.mp4",
     # Every scene carries this so a gate can be added later without shipping a
     # new app: anything the app does not recognise is shown as unavailable.
     "access": "free",
@@ -134,8 +199,26 @@ vercel blob put "$CATALOG" --rw-token "$TOKEN" --access public --allow-overwrite
     --pathname "catalog.json" --content-type application/json \
     --cache-control-max-age 60 >/dev/null
 
+# A write to the store is not readable straight away: a catalogue read seconds
+# after this upload came back without it. Waiting until it is means a second
+# publish run immediately after this one reads a catalogue that includes this
+# scene, instead of rewriting from the copy before it and dropping it.
+echo "==> Waiting for the catalogue to show this publish"
+for attempt in $(seq 1 30); do
+    if curl -fsS "$BASE_URL/catalog.json?fresh=$(date +%s)-$attempt" 2>/dev/null | grep -q "$DESIGN_ID-$STAMP"; then
+        echo "    visible after about $(( (attempt - 1) * 3 ))s"
+        break
+    fi
+    if [ "$attempt" -eq 30 ]; then
+        echo "failed: catalogue still does not list $DESIGN_ID-$STAMP after 90s; check it before publishing again" >&2
+        exit 1
+    fi
+    sleep 3
+done
+
 echo
 echo "==> Published"
 echo "    catalogue  $BASE_URL/catalog.json"
-echo "    package    $BASE_URL/scenes/$DESIGN_ID.motionary"
-echo "    preview    $BASE_URL/previews/$DESIGN_ID.jpg"
+echo "    package    $BASE_URL/scenes/$DESIGN_ID-$STAMP.motionary"
+echo "    preview    $BASE_URL/previews/$DESIGN_ID-$STAMP.jpg"
+echo "    motion     $BASE_URL/motion/$DESIGN_ID-$STAMP.mp4"

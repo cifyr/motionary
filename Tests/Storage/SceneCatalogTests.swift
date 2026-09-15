@@ -17,6 +17,7 @@ final class SceneCatalogTests: XCTestCase {
           "published": "2026-09-15",
           "package": "https://example.public.blob.vercel-storage.com/scenes/58737EDB.motionary",
           "preview": "https://example.public.blob.vercel-storage.com/previews/58737EDB.jpg",
+          "motion": "https://example.public.blob.vercel-storage.com/motion/58737EDB.mp4",
           "access": "free"
         }
       ]
@@ -39,6 +40,7 @@ final class SceneCatalogTests: XCTestCase {
         XCTAssertEqual(scene.published, "2026-09-15")
         XCTAssertEqual(scene.package.lastPathComponent, "58737EDB.motionary")
         XCTAssertEqual(scene.preview.lastPathComponent, "58737EDB.jpg")
+        XCTAssertEqual(scene.motion?.lastPathComponent, "58737EDB.mp4")
         XCTAssertTrue(scene.isFree)
     }
 
@@ -56,6 +58,21 @@ final class SceneCatalogTests: XCTestCase {
     func testAMissingFieldIsAnError() {
         let truncated = published.replacingOccurrences(of: "\"bytes\": 41234567,", with: "")
         XCTAssertThrowsError(try decode(truncated))
+    }
+
+    /// A scene published before moving previews existed has to keep listing,
+    /// with its still, rather than making the whole catalogue unreadable.
+    func testASceneWithoutAMotionPreviewStillLists() throws {
+        let still = published.replacingOccurrences(
+            of: "\"motion\": \"https://example.public.blob.vercel-storage.com/motion/58737EDB.mp4\",",
+            with: ""
+        )
+        // The key, quoted: the package filename ends in ".motionary" and would
+        // match a bare "motion".
+        XCTAssertFalse(still.contains("\"motion\""), "fixture edit did not remove the motion field")
+        let scene = try XCTUnwrap(decode(still).scenes.first)
+        XCTAssertNil(scene.motion)
+        XCTAssertEqual(scene.name, "Video Games")
     }
 
     func testAnEmptyCatalogueIsValid() throws {

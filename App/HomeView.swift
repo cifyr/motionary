@@ -145,6 +145,11 @@ struct HomeView: View {
         .statusBarHidden(entry != nil)
         .persistentSystemOverlays(.hidden)
         .sheet(isPresented: $choosingSlots, onDismiss: {
+            // A scene downloaded from inside the sheet selects itself, but
+            // nothing here observes the store, so without this the old design
+            // stays on screen after the sheet closes.
+            selection = ActiveDesign.identifier
+            reload()
             if welcomeRequested {
                 welcomeRequested = false
                 isEditing = false
