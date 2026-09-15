@@ -67,6 +67,24 @@ enum HeadlessBuild {
         return URL(fileURLWithPath: arguments[arguments.index(after: flag)])
     }
 
+    /// Parks the main thread in AppKit's run loop until the job calls `exit`.
+    ///
+    /// Not `dispatchMain()`. `WallpaperComposer` rasterises through
+    /// `ImageRenderer`, which hops to the main actor and then waits in
+    /// `_MovableLockSyncMain` for main-thread work that only a running
+    /// `NSApplication` services. Under `dispatchMain()` that wait never ends:
+    /// no crash, no log, the process sits at 0% CPU on "Composing the
+    /// wallpaper". Starting `NSApplication` without running it was tried first
+    /// and hangs identically.
+    static func runMainLoop() -> Never {
+        let app = NSApplication.shared
+        // Prohibited, so a headless job never puts a name in the menu bar or
+        // takes focus from whatever is in front.
+        app.setActivationPolicy(.prohibited)
+        app.run()
+        exit(0)
+    }
+
     /// `--device <udid>` runs the whole job rather than stopping at the build.
     static func device(in arguments: [String]) -> String? {
         guard let flag = arguments.firstIndex(of: "--device"),
@@ -217,7 +235,7 @@ enum HeadlessBuild {
             }
             exit(0)
         }
-        dispatchMain()
+        runMainLoop()
     }
 
     /// `--send [phone name]` builds the newest design as pictures and sends it
@@ -264,7 +282,7 @@ enum HeadlessBuild {
                 exit(1)
             }
         }
-        dispatchMain()
+        runMainLoop()
     }
 
     static func run(source: URL) -> Never {
@@ -313,7 +331,7 @@ enum HeadlessBuild {
         // Parked servicing the main queue rather than blocked on a semaphore:
         // baking the tiles into the wallpaper needs the main actor, and a
         // blocked main thread would never let it run.
-        dispatchMain()
+        runMainLoop()
     }
 
     /// Regenerates every starred design, then bundles them all.
@@ -349,7 +367,7 @@ enum HeadlessBuild {
             }
             installStarred(deviceID: deviceID)
         }
-        dispatchMain()
+        runMainLoop()
     }
 }
 
