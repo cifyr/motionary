@@ -109,6 +109,11 @@ Either way the edit-mode swipe and the options sheet picker stay as they are.
   actually cost the most time: that a beta macOS stamps `BuildMachineOSBuild`
   and Apple rejects the upload for it, the move to Xcode Cloud that solved it,
   and the Guideline 2.1 and 4.2 exchanges.
+- `Tools/store-frames.py` composites two of its source shots itself, but
+  `store-editing.png` and `gallery.png` come from `StoreShotTests` and
+  `ScenesGalleryTests` and have to be copied into `build/store-frames/source`
+  by hand. They are not committed. The 1.2 frames need both re-run anyway,
+  since the library page is what changes.
 
 ## Publishing a scene, the loop that works
 
@@ -147,3 +152,9 @@ would have to accompany it, and then refuses every call.
   blob URL for 30 days.
 - Tests:
   `xcodebuild -scheme Motionary -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:MotionaryTests test`
+- **The App Store Connect API is the source of truth**, not the web UI, which
+  has shown screenshots attached to a version the API reported as having none.
+  `Tools/asc.py` signs the calls and `Tools/upload-screenshots.py` replaces one
+  version's frames. Both read `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_APP_ID`
+  from the environment, and the `.p8` lives in
+  `~/.appstoreconnect/private_keys/`. None of those values are in this repo.
