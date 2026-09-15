@@ -34,7 +34,7 @@ enum DesignStoreError: Error, CustomStringConvertible {
 ///                       /Fonts/<family><lane>-Regular.ttf
 /// ```
 struct DesignStore {
-    static let appGroupIdentifier = "group.com.caden.Motionary"
+    static let appGroupIdentifier = "group.com.sachin.motionary.shared"
 
     private static let logger = Logger(subsystem: "com.caden.Motionary", category: "DesignStore")
 

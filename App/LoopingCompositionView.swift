@@ -1,3 +1,4 @@
+import os
 import AVFoundation
 import SwiftUI
 import UIKit
@@ -37,8 +38,15 @@ struct LoopingCompositionView<Tile: View>: View {
 
     var body: some View {
         GeometryReader { geometry in
+            // `.device` means "line up with the real Home Screen", so the
+            // canvas the design was authored on has to be mapped onto this
+            // phone's screen first. Without it a design cut for a narrower
+            // phone drew at its authored width and left a black band down the
+            // side of the preview.
             let scale = scaleMode == .device
-                ? 1 / max(displayScale, 1)
+                ? DeviceGeometry.pointsPerAuthoredPixel(
+                    authoredWidth: screenSize.width, displayScale: displayScale
+                )
                 : geometry.size.width / viewport.width
             let screen = CGSize(width: screenSize.width * scale, height: screenSize.height * scale)
             // At device scale the viewport's top-left pins to the view's
@@ -122,6 +130,8 @@ struct LoopingVideoView: UIViewRepresentable {
     final class PlayerView: UIView {
         override class var layerClass: AnyClass { AVPlayerLayer.self }
 
+        private static let logger = Logger(subsystem: "com.caden.Motionary", category: "LoopingVideo")
+
         /// How long a looped clip is stretched to before it repeats.
         ///
         /// Every wrap costs a few milliseconds of real time, so a short loop
@@ -167,13 +177,19 @@ struct LoopingVideoView: UIViewRepresentable {
             generation += 1
             let token = generation
 
+            Self.logger.info("loading \(url.lastPathComponent, privacy: .public)")
             Task { [weak self] in
-                guard let repeated = try? await Self.repeated(url: url, atLeast: Self.minimumSpan) else {
+                let repeated: (composition: AVComposition, loop: TimeInterval)
+                do {
+                    repeated = try await Self.repeated(url: url, atLeast: Self.minimumSpan)
+                } catch {
                     // Falling back rather than showing nothing: a clip that
                     // cannot be composed still plays, it just wraps more often.
+                    Self.logger.error("could not repeat \(url.lastPathComponent, privacy: .public), playing it as is: \(String(describing: error), privacy: .public)")
                     await MainActor.run { self?.start(item: AVPlayerItem(url: url), loop: 0, token: token) }
                     return
                 }
+                Self.logger.info("repeated \(url.lastPathComponent, privacy: .public): loop \(repeated.loop, privacy: .public)s, composition \(CMTimeGetSeconds(repeated.composition.duration), privacy: .public)s")
                 await MainActor.run {
                     self?.start(item: AVPlayerItem(asset: repeated.composition), loop: repeated.loop, token: token)
                 }
@@ -245,6 +261,7 @@ struct LoopingVideoView: UIViewRepresentable {
 
         /// Puts the prepared player on screen and retires the one it replaces.
         private func show(player: AVQueuePlayer, looper: AVPlayerLooper, loop: TimeInterval) {
+            Self.logger.info("showing \(self.currentURL?.lastPathComponent ?? "?", privacy: .public), looper status \(looper.status.rawValue, privacy: .public)")
             let outgoing = queuePlayer
             let outgoingLooper = self.looper
             if let driftObserver, let outgoing {
@@ -258,8 +275,12 @@ struct LoopingVideoView: UIViewRepresentable {
             self.looper = looper
             loopDuration = loop
 
-            outgoing?.pause()
-            outgoingLooper?.disableLooping()
+            // Never the player going on screen: retiring it here is what froze
+            // a clip that reached this a second time for the same player.
+            if outgoing !== player {
+                outgoing?.pause()
+                outgoingLooper?.disableLooping()
+            }
 
             if phase != nil { watchForDrift(player: player) }
         }
@@ -317,8 +338,25 @@ struct LoopingVideoView: UIViewRepresentable {
             }
             readinessObservation?.invalidate()
             readinessObservation = player.observe(\.currentItem?.status, options: [.initial, .new]) { player, _ in
+                if player.currentItem?.status == .failed {
+                    // Otherwise indistinguishable from a clip that is still
+                    // loading: the layer stays empty and whatever is behind it
+                    // shows through, with nothing said about why.
+                    Self.logger.error("player item failed: \(String(describing: player.currentItem?.error), privacy: .public)")
+                    return
+                }
                 guard player.currentItem?.status == .readyToPlay else { return }
-                Task { @MainActor in start() }
+                // Once only. AVPlayerLooper swaps in a fresh copy of the item at
+                // every wrap, each copy reports ready again, and running start
+                // a second time paused the player it had just started: the
+                // clip froze at the end of its first pass, 4s in for a short
+                // loop, and stayed frozen.
+                Task { @MainActor [weak self] in
+                    guard let self, self.readinessObservation != nil else { return }
+                    self.readinessObservation?.invalidate()
+                    self.readinessObservation = nil
+                    start()
+                }
             }
         }
 

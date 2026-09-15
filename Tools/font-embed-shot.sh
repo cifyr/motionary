@@ -27,8 +27,8 @@ OUT="${2:-/tmp/font-embed-$MODE}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SIM="${MOTIONARY_SIM:-8A2CFA72-B93E-4DAA-B146-2173636F94B8}"
-BUNDLE_ID="com.caden.Motionary"
-WIDGET_ID="com.caden.Motionary.widget"
+BUNDLE_ID="com.sachin.Motionary"
+WIDGET_ID="com.sachin.Motionary.widget"
 DERIVED="${MOTIONARY_DERIVED:-build/simF}"
 # Which lab route supplies the font. `groupProcess` is the production failure:
 # an app group file registered with process scope, which encodes as a URL and is
@@ -54,7 +54,7 @@ xcrun simctl terminate "$SIM" "$BUNDLE_ID" 2>/dev/null || true
 xcrun simctl install "$SIM" "$DERIVED/Build/Products/Debug-iphonesimulator/Motionary.app"
 
 GROUP=$(xcrun simctl get_app_container "$SIM" "$BUNDLE_ID" groups 2>/dev/null \
-    | awk -F'\t' '/group.com.caden.Motionary/ {print $2}' | tail -1)
+    | awk -F'\t' '/group.com.sachin.motionary.shared/ {print $2}' | tail -1)
 [ -n "$GROUP" ] || { echo "the app group container is not there" >&2; exit 1; }
 
 # The widget extension's own PluginKit container, found by identity because

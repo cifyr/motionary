@@ -10,6 +10,8 @@ struct SlotSettingsView: View {
     let manifest: BuildManifest
     /// Called after every write so the home view re-reads the choices.
     let onChange: () -> Void
+    /// Asks the home view to show the welcome once this sheet is gone.
+    let onReplayWelcome: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     /// nil is the primary clip, mirroring `VariantChoice`.
@@ -153,6 +155,28 @@ struct SlotSettingsView: View {
                     }
                 } footer: {
                     Text("Clears every icon, app and link chosen on this phone.")
+                }
+
+                Section {
+                    NavigationLink("More scenes") { ScenesView() }
+                } header: {
+                    Text("Scenes").emberLabel()
+                } footer: {
+                    Text("Designs published since this version of the app was released. A design is data rather than code, so it arrives without an update.")
+                }
+
+                Section {
+                    NavigationLink("How to set it up") { SetupGuideView() }
+                    Button("Show the welcome again") {
+                        Onboarding.resetWelcome()
+                        onReplayWelcome()
+                        dismiss()
+                    }
+                    NavigationLink("About Motionary") { AboutView() }
+                } header: {
+                    Text("Help").emberLabel()
+                } footer: {
+                    Text("Setting the wallpaper and placing the widget, step by step, and where to write if something will not line up.")
                 }
             }
             .navigationTitle("Design options")

@@ -111,3 +111,46 @@ final class ReadoutTests: XCTestCase {
         XCTAssertNil(values.text(for: .countdown))
     }
 }
+
+/// Steps and weather were removed because neither could work: HealthKit needs
+/// an entitlement this app does not carry, and WeatherKit needs one that also
+/// has to be enabled on the App ID. Both silently showed nothing.
+final class RetiredReadoutTests: XCTestCase {
+    func testTheDeadSourcesAreNoLongerOffered() {
+        XCTAssertFalse(PlacedReadout.Source.offered.contains(.steps))
+        XCTAssertFalse(PlacedReadout.Source.offered.contains(.weather))
+    }
+
+    func testEverythingElseIsStillOffered() {
+        XCTAssertEqual(
+            PlacedReadout.Source.offered,
+            [.time, .date, .countdown, .battery, .calendar]
+        )
+    }
+
+    /// The cases stay in the enum on purpose. Removing them would orphan every
+    /// document that placed one, and the store drops a design it cannot decode
+    /// rather than reporting it - so they would vanish from the library.
+    ///
+    /// Round-tripped rather than hand-written: `PlacedReadout` decodes without
+    /// defaults, so a fixture typed by hand tests the fixture.
+    func testADesignThatPlacedARetiredReadoutStillDecodes() throws {
+        for source: PlacedReadout.Source in [.steps, .weather] {
+            let stored = PlacedReadout(source: source, center: CGPoint(x: 10, y: 10))
+            let data = try JSONEncoder().encode(stored)
+            let read = try JSONDecoder().decode(PlacedReadout.self, from: data)
+            XCTAssertEqual(read.source, source, "a placed \(source.rawValue) must still open")
+        }
+    }
+
+    /// And nothing asks for a permission it no longer uses.
+    func testNoHealthOrLocationPermissionIsDeclared() throws {
+        let plist = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("App/Info.plist")
+        let text = try String(contentsOf: plist, encoding: .utf8)
+        XCTAssertFalse(text.contains("NSHealthShareUsageDescription"))
+        XCTAssertFalse(text.contains("NSLocationWhenInUseUsageDescription"))
+        XCTAssertTrue(text.contains("NSCalendarsUsageDescription"), "the calendar readout is still here")
+    }
+}

@@ -36,7 +36,7 @@ struct ConnectedDevice: Identifiable, Equatable, Sendable {
 struct DeviceInstaller {
     let projectRoot: URL
 
-    private static let bundleID = "com.caden.Motionary"
+    private static let bundleID = "com.sachin.Motionary"
 
     @discardableResult
     private func run(

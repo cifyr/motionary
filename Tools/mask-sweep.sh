@@ -13,7 +13,7 @@ set -euo pipefail
 
 POINTS="${1:-32,4,240 32,32,360 32,32,540 32,32,720 64,64,540}"
 DEVICE="${MOTIONARY_DEVICE:-00008150-00042CA60C9A401C}"
-BUNDLE_ID="com.caden.Motionary"
+BUNDLE_ID="com.sachin.Motionary"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${MOTIONARY_SWEEP_OUT:-/tmp/motionary-sweep}"
 cd "$ROOT"

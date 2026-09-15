@@ -1,0 +1,80 @@
+#!/bin/bash
+# Archives the app for the App Store and, if the portal has the profiles for
+# it, exports the .ipa ready to upload.
+#
+# Archiving and exporting fail for entirely different reasons, so they are
+# reported separately: the archive is this machine's business and either works
+# or has a real build error in it, while the export needs App Store
+# distribution profiles for com.sachin.Motionary and com.sachin.Motionary.widget,
+# which only exist once someone has made them in the developer portal. An
+# export that fails on a missing profile is not a broken build.
+#
+#   Tools/archive.sh [output-directory]
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Registering identifiers needs an authenticated account. Set ASC_KEY_ID and
+# ASC_ISSUER_ID to use an App Store Connect API key instead of whichever Apple
+# ID happens to be signed into Xcode - the store rejects builds made with a beta
+# Xcode, so the toolchain cannot be chosen by where an account is logged in.
+AUTH=()
+if [ -n "${ASC_KEY_ID:-}" ]; then
+    AUTH=(-authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          -authenticationKeyID "$ASC_KEY_ID"
+          -authenticationKeyIssuerID "${ASC_ISSUER_ID:?ASC_ISSUER_ID must be set with ASC_KEY_ID}")
+fi
+OUT="${1:-$ROOT/build/release}"
+ARCHIVE="$OUT/Motionary.xcarchive"
+cd "$ROOT"
+
+mkdir -p "$OUT"
+
+echo "==> Archiving (Release, generic iOS device)"
+xcodebuild -project Motionary.xcodeproj -scheme Motionary \
+    -configuration Release -destination 'generic/platform=iOS' \
+    -archivePath "$ARCHIVE" -allowProvisioningUpdates "${AUTH[@]}" archive
+
+echo
+echo "==> What is in it"
+APP="$ARCHIVE/Products/Applications/Motionary.app"
+du -sh "$APP"
+/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist" \
+    | sed 's/^/    version /'
+/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist" \
+    | sed 's/^/    build   /'
+
+# The icon and the privacy manifest are both things App Store Connect rejects
+# for silently, and both are easy to lose to a project regeneration - so the
+# archive says whether they actually made it in rather than being taken on
+# trust.
+for required in "Assets.car" "PrivacyInfo.xcprivacy" "AppIcon60x60@2x.png"; do
+    if [ -e "$APP/$required" ]; then
+        echo "    ok      $required"
+    else
+        echo "    MISSING $required" >&2
+    fi
+done
+if [ -e "$APP/PlugIns/MotionaryWidgetExtension.appex/PrivacyInfo.xcprivacy" ]; then
+    echo "    ok      widget PrivacyInfo.xcprivacy"
+else
+    echo "    MISSING widget PrivacyInfo.xcprivacy" >&2
+fi
+
+echo
+echo "==> Exporting"
+# Xcode packages the .ipa by shelling out to rsync by name. A Homebrew rsync
+# (3.4.1) earlier on PATH rejects the flags Xcode passes and the export dies as
+# "Copy failed", which says nothing about the cause - so Apple's own goes first.
+if PATH="/usr/bin:/bin:$PATH" xcodebuild -exportArchive -archivePath "$ARCHIVE" \
+    -exportOptionsPlist "$ROOT/Tools/ExportOptions.plist" -allowProvisioningUpdates \
+    -exportPath "$OUT" "${AUTH[@]}" 2>&1 | tee "$OUT/export.log" | tail -5; then
+    echo "==> $OUT/Motionary.ipa"
+else
+    echo
+    echo "The archive is fine; the export is not. If the log above says" >&2
+    echo "\"No profiles for 'com.sachin.Motionary'\", the App Store distribution" >&2
+    echo "profiles have not been created in the developer portal yet - that is" >&2
+    echo "a portal prerequisite, not a build fault." >&2
+    exit 1
+fi

@@ -26,6 +26,20 @@ struct HomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var editingTile: PlacedTile?
     @Environment(\.displayScale) private var displayScale
+    /// Once, on the first launch, and again only when asked for from the
+    /// options sheet. Read at init so the first frame is the welcome rather
+    /// than the design with the welcome sliding over it.
+    @State private var showingWelcome = Onboarding.needsWelcome()
+    /// Set by the options sheet; acted on once that sheet has gone, because
+    /// presenting a cover while a sheet is still dismissing drops the cover.
+    @State private var welcomeRequested = false
+    /// A denied Photos permission is the one save failure the person can fix,
+    /// and only from Settings - so it gets a way there rather than a toast.
+    @State private var photosDenied = false
+    /// Counted rather than flagged, so every swipe and every save ticks the
+    /// haptic and not just the first.
+    @State private var swipes = 0
+    @State private var saves = 0
 
     /// Whatever there is to say right now, from either source.
     private var message: String? { note ?? router.lastFailure }
@@ -75,7 +89,7 @@ struct HomeView: View {
                 composition(entry: entry, manifest: manifest)
                     .id(entry.id)
             } else {
-                EmptyDesignView()
+                EmptyDesignView { showingWelcome = true }
             }
 
             if entries.count > 1, !isEditing { PageDots(count: entries.count, index: index) }
@@ -88,9 +102,10 @@ struct HomeView: View {
                 )
             } else {
                 SaveButton(saving: saving) { save() }
-                // Anything to change at all: a slot, or a clip variant.
-                if let manifest,
-                   !manifest.placedTiles.isEmpty || !manifest.builtVariants.isEmpty {
+                // Whenever there is a design at all: the sheet behind it holds
+                // the phone's own settings and the help, which a design with
+                // nothing to change still has to be able to reach.
+                if manifest != nil {
                     SlotsButton { isEditing = true }
                 }
             }
@@ -129,11 +144,39 @@ struct HomeView: View {
         .ignoresSafeArea()
         .statusBarHidden(entry != nil)
         .persistentSystemOverlays(.hidden)
-        .sheet(isPresented: $choosingSlots) {
+        .sheet(isPresented: $choosingSlots, onDismiss: {
+            // A scene downloaded from inside the sheet selects itself, but
+            // nothing here observes the store, so without this the old design
+            // stays on screen after the sheet closes.
+            selection = ActiveDesign.identifier
+            reload()
+            if welcomeRequested {
+                welcomeRequested = false
+                isEditing = false
+                showingWelcome = true
+            }
+        }) {
             if let manifest {
-                SlotSettingsView(manifest: manifest) { slotsEdition += 1 }
+                SlotSettingsView(
+                    manifest: manifest,
+                    onChange: { slotsEdition += 1 },
+                    onReplayWelcome: { welcomeRequested = true }
+                )
             }
         }
+        .fullScreenCover(isPresented: $showingWelcome) {
+            WelcomeView { showingWelcome = false }
+        }
+        .alert("Motionary can't save to Photos", isPresented: $photosDenied) {
+            if let settings = URL(string: UIApplication.openSettingsURLString) {
+                Link("Open Settings", destination: settings)
+            }
+            Button("Not now", role: .cancel) {}
+        } message: {
+            Text("Allow Motionary to add photos in Settings, then save the wallpaper again.")
+        }
+        .sensoryFeedback(.selection, trigger: swipes)
+        .sensoryFeedback(.success, trigger: saves)
         .sheet(item: $editingTile) { tile in
             if let manifest {
                 SlotEditorView(manifest: manifest, tile: tile) { slotsEdition += 1 }
@@ -175,6 +218,7 @@ struct HomeView: View {
         ActiveDesign.identifier = next.id
         WidgetCenterBridge.reloadAll()
         note = next.name
+        swipes += 1
     }
 
     private func composition(entry: PrebuiltDesign.Entry, manifest: BuildManifest) -> some View {
@@ -321,6 +365,7 @@ struct HomeView: View {
         WidgetCenterBridge.reloadAll()
         slotsEdition += 1
         note = next.name
+        swipes += 1
     }
 
     private func save() {
@@ -334,15 +379,21 @@ struct HomeView: View {
                 try await export(entry: entry, manifest: manifest)
                 await MainActor.run {
                     saving = false
+                    saves += 1
                     note = "Saved to Photos. Set it as your wallpaper, then place the widget over it."
                 }
             } catch {
                 await MainActor.run {
                     saving = false
                     // The reason, not "something went wrong": the usual cause
-                    // is a denied Photos permission, which is fixable only if
-                    // it is named.
-                    note = String(describing: error)
+                    // is a denied Photos permission, which is fixable only
+                    // from Settings - so that one gets a way there, and the
+                    // rest are named.
+                    if case ExportError.photosDenied = error {
+                        photosDenied = true
+                    } else {
+                        note = String(describing: error)
+                    }
                 }
             }
         }
@@ -355,7 +406,13 @@ struct HomeView: View {
     /// the whole reason tiles are baked into it. So the phone bakes the
     /// effective tiles onto the tile-free variant itself. Designs built before
     /// that variant shipped fall back to the pre-baked file.
+    ///
+    /// Both routes end at the screen's own size. A design is baked on the
+    /// canvas the studio was cut for, and on any other phone that picture is
+    /// the wrong shape - iOS would fit it to the screen itself, sliding the
+    /// baked tiles out from under the widget frame drawn over them.
     private func export(entry: PrebuiltDesign.Entry, manifest: BuildManifest) async throws {
+        let screen = DeviceGeometry.screenPixelSize
         let longest = Int(max(manifest.screenSize.width, manifest.screenSize.height))
         guard let plainURL = entry.plainWallpaperURL,
               let base = ImageLoader.load(at: plainURL, maxPixelSize: longest)
@@ -363,7 +420,17 @@ struct HomeView: View {
             guard let url = entry.wallpaperURL else {
                 throw ExportError.wallpaperMissing(path: "prebuilt wallpaper for \(entry.name)")
             }
-            try await WallpaperExporter.saveToPhotos(url: url)
+            // The file is already the right size on the phone it was cut for,
+            // and sending the bytes untouched keeps that case exact.
+            guard manifest.screenSize != screen,
+                  let baked = ImageLoader.load(at: url, maxPixelSize: Int(max(screen.width, screen.height)))
+            else {
+                try await WallpaperExporter.saveToPhotos(url: url)
+                return
+            }
+            try await WallpaperExporter.saveToPhotos(
+                image: WallpaperComposer.rescaled(baked, to: screen)
+            )
             return
         }
 
@@ -409,7 +476,11 @@ struct HomeView: View {
                 return url.flatMap { ImageLoader.load(at: $0, maxPixelSize: Int(tile.size)) }
             }
         )
-        try await WallpaperExporter.saveToPhotos(image: composed)
+        // Composed on the authored canvas so the tiles land where the design
+        // put them, then moved onto this screen as one picture.
+        try await WallpaperExporter.saveToPhotos(
+            image: WallpaperComposer.rescaled(composed, to: screen)
+        )
     }
 }
 
@@ -582,6 +653,8 @@ private struct Toast: View {
 }
 
 private struct EmptyDesignView: View {
+    let onHelp: () -> Void
+
     var body: some View {
         VStack(spacing: 14) {
             Image(systemName: "wand.and.stars")
@@ -598,11 +671,15 @@ private struct EmptyDesignView: View {
             Rectangle()
                 .fill(Color.emberLine)
                 .frame(width: 220, height: 1)
-            Text("No design is built into this app yet. Drop a clip into Motionary Studio on the Mac and install again.")
+            Text("There is no design on this phone yet. Send one from Motionary Studio on your Mac, or open a .motionary file.")
                 .font(.callout)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Color.emberSubtitle)
                 .padding(.horizontal, 40)
+            Button("How Motionary works", action: onHelp)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(Color.emberAccent)
+                .padding(.top, 8)
         }
     }
 }

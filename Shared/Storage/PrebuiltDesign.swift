@@ -261,7 +261,39 @@ enum PrebuiltDesign {
     static func resource(named name: String, extension ext: String) -> URL? {
         Bundle.main.url(forResource: name, withExtension: ext)
             ?? Bundle(for: BundleMarker.self).url(forResource: name, withExtension: ext)
+            ?? sharedWithExtension(named: name, extension: ext)
     }
+
+    /// The widget extension's copy, for artwork that only ships once.
+    ///
+    /// The two targets used to carry identical copies of every baked icon and
+    /// skin - 192MB of the 507MB archive was the same files twice. They now
+    /// ship in the extension alone, because that is the reader that cannot go
+    /// looking: the widget is the memory-constrained side and has no way to
+    /// reach outside its own bundle safely, while the app is reading a
+    /// subdirectory of itself. `PlugIns` is inside `Motionary.app`, so no
+    /// sandbox boundary is crossed by this at all.
+    ///
+    /// Nil in the extension - `Bundle.main` was already the right answer there,
+    /// and there is no `PlugIns` inside an appex to descend into.
+    private static func sharedWithExtension(named name: String, extension ext: String) -> URL? {
+        pluginBundles
+            .lazy
+            .compactMap { $0.url(forResource: name, withExtension: ext) }
+            .first
+    }
+
+    /// Resolved once. This is on the miss path of a lookup that runs per tile,
+    /// and enumerating a directory each time would make a missing icon cost
+    /// more than a present one.
+    private static let pluginBundles: [Bundle] = {
+        guard let plugins = Bundle.main.builtInPlugInsURL,
+              let contents = try? FileManager.default.contentsOfDirectory(
+                  at: plugins, includingPropertiesForKeys: nil
+              )
+        else { return [] }
+        return contents.filter { $0.pathExtension == "appex" }.compactMap { Bundle(url: $0) }
+    }()
 
     /// A backdrop under whichever extension it was bundled with. The build
     /// writes PNG or JPEG depending on which came out smaller, so the name on
