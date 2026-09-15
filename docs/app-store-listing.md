@@ -65,7 +65,9 @@ wallpaper,live,theme,icons,customize,aesthetic,launcher,motion,video,loop,gif,pe
 
 ## What's new (4000)
 
-First release.
+Scenes can now be downloaded from inside the app. Open Design options, then
+More scenes, to see designs published since the version you installed. A design
+is data rather than code, so new ones arrive without an App Store update.
 
 ## Support URL
 

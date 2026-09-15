@@ -158,6 +158,14 @@ struct SlotSettingsView: View {
                 }
 
                 Section {
+                    NavigationLink("More scenes") { ScenesView() }
+                } header: {
+                    Text("Scenes").emberLabel()
+                } footer: {
+                    Text("Designs published since this version of the app was released. A design is data rather than code, so it arrives without an update.")
+                }
+
+                Section {
                     NavigationLink("How to set it up") { SetupGuideView() }
                     Button("Show the welcome again") {
                         Onboarding.resetWelcome()

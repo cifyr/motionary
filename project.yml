@@ -110,6 +110,10 @@ targets:
     sources:
       - Tests
       - Shared
+      # The catalogue decides whether a published design is offered or refused,
+      # and an install that mis-parses it either hides every scene or offers one
+      # it cannot use. Plain Foundation, so it is covered here.
+      - path: App/SceneCatalog.swift
       # The studio's bundling step decides whether a design reaches the widget
       # at all, and it is plain Foundation, so it is covered here rather than
       # needing a second test target.
